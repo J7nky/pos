@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useMemo, Fragment } from 'react';
-import { 
-  X, 
-  Download, 
-  Printer, 
-  Calendar, 
-  FileText, 
-  DollarSign, 
-  TrendingUp, 
+import { useState, useEffect, useMemo, Fragment } from 'react';
+import {
+  X,
+  Download,
+  Printer,
+  Calendar,
+  FileText,
+  DollarSign,
+  TrendingUp,
   TrendingDown,
   CreditCard,
   Users,
@@ -16,15 +16,17 @@ import {
   Info
 } from 'lucide-react';
 import { AccountStatement, AccountStatementService } from '../services/accountStatementService';
-import { Customer, Supplier, Transaction, InventoryItem, Product, BillLineItem } from '../types';
+import { Customer, Supplier, Transaction, BillLineItem } from '../types';
 import { useI18n } from '../i18n';
-import { getTranslatedString } from '../utils/multilingual';
+import { getTranslatedString, type SupportedLanguage } from '../utils/multilingual';
 import Toast from './common/Toast';
 import { PrintPreview } from './common/PrintPreview';
 import { setupPrintWithPageSelection } from '../utils/printUtils';
 import { paginateTransactions, getTotalPages } from '../utils/printPagination';
 import { AccountStatementPrintContent } from './AccountStatementPrintContent';
-import { formatCurrency as formatCurrencyUtil } from '../utils/currencyFormatter';
+import { currencyService } from '../services/currencyService';
+import { useOfflineData } from '../contexts/OfflineDataContext';
+import type { CurrencyCode } from '@pos-platform/shared';
 import { getTodayLocalDate } from '../utils/dateUtils';
 import type { AccountStatementPrintPayload } from '../types/electron';
 
@@ -36,10 +38,6 @@ interface AccountStatementModalProps {
   storeId: string;
   sales: BillLineItem[];
   transactions: Transaction[];
-  products: Product[];
-  inventory: InventoryItem[];
-  inventoryBills: any[];
-  bills?: any[];
   isSyncing?: boolean;
 }
 
@@ -51,14 +49,30 @@ export default function AccountStatementModal({
   storeId,
   sales,
   transactions,
-  products,
-  inventory,
-  inventoryBills,
-  bills,
   isSyncing = false
 }: AccountStatementModalProps) {
   const { t, language } = useI18n();
-  
+  const { preferredCurrency } = useOfflineData();
+
+  // Convert a per-currency balance map to a single number in the preferred currency.
+  // Used for the running-balance column and current-balance summary card so users
+  // see one comparable figure regardless of how many currencies the entity transacted in.
+  const convertMapToPreferred = (map: Partial<Record<CurrencyCode, number>> | undefined): number => {
+    if (!map) return 0;
+    let total = 0;
+    for (const c of Object.keys(map) as CurrencyCode[]) {
+      const v = map[c];
+      if (v === undefined) continue;
+      try {
+        total += currencyService.convert(v, c, preferredCurrency);
+      } catch {
+        // Missing FX rate for this currency — skip rather than throw, the row
+        // still renders its native debit/credit columns correctly.
+      }
+    }
+    return total;
+  };
+
   const [statement, setStatement] = useState<AccountStatement | null>(null);
   const [viewMode, setViewMode] = useState<'summary' | 'detailed'>('summary');
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>(() => {
@@ -232,10 +246,45 @@ export default function AccountStatementModal({
   };
 
 
-  // Unified currency formatter with symbol control
-  const formatCurrency = (amount: number, currency: 'USD' | 'LBP', includeSymbol: boolean = true) => {
-    return formatCurrencyUtil(amount, currency, includeSymbol);
+  // Unified per-currency formatter. CurrencyCode-wide so AED, EUR, etc. render correctly.
+  const formatCurrency = (amount: number, currency: CurrencyCode, includeSymbol: boolean = true) => {
+    if (!includeSymbol) {
+      const meta = currencyService.getMeta(currency);
+      return new Intl.NumberFormat(meta.locale, {
+        minimumFractionDigits: meta.decimals,
+        maximumFractionDigits: meta.decimals,
+      }).format(amount);
+    }
+    return currencyService.format(amount, currency);
   };
+
+  // The financial summary now carries per-currency maps; build a sorted
+  // list of currencies actually present so the UI iterates them in stable order.
+  const summaryCurrencies = useMemo<CurrencyCode[]>(() => {
+    if (!statement) return [];
+    const set = new Set<string>();
+    for (const map of [
+      statement.financialSummary.openingBalance,
+      statement.financialSummary.currentBalance,
+      statement.financialSummary.totalSales,
+      statement.financialSummary.totalPayments,
+      statement.financialSummary.totalReceivings,
+    ]) {
+      Object.keys(map).forEach(k => set.add(k));
+    }
+    // Always include the row currencies so multi-currency ledgers render even
+    // if a currency only has period activity but no opening or ending balance.
+    statement.transactions.forEach(t => set.add(t.currency));
+    return Array.from(set) as CurrencyCode[];
+  }, [statement]);
+
+  // Whether any row references a non-primary account_code; if so, expose the optional column.
+  const showAccountColumn = useMemo(() => {
+    if (!statement) return false;
+    const codes = new Set<string>();
+    statement.transactions.forEach(t => { if (t.account_code) codes.add(t.account_code); });
+    return codes.size > 1;
+  }, [statement]);
 
   if (!isOpen) return null;
 
@@ -262,6 +311,8 @@ export default function AccountStatementModal({
                 totalPages={totalPages}
                 pages={paginatedPages}
                 formatCurrency={formatCurrency}
+                preferredCurrency={preferredCurrency}
+                convertMapToPreferred={convertMapToPreferred}
               />
             }
           />
@@ -281,6 +332,8 @@ export default function AccountStatementModal({
               totalPages={totalPages}
               pages={paginatedPages}
               formatCurrency={formatCurrency}
+              preferredCurrency={preferredCurrency}
+              convertMapToPreferred={convertMapToPreferred}
             />
           </div>
         );
@@ -440,32 +493,25 @@ export default function AccountStatementModal({
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {/* <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="text-sm font-medium text-gray-500">Opening Balance</div>
-                        <TrendingUp className="w-4 h-4 text-gray-400" />
-                      </div>
-                      <div className="text-2xl font-bold text-gray-900">
-                        {formatCurrency(statement.financialSummary.openingBalance.USD, 'USD')}
-                      </div>
-                      <div className="text-sm text-gray-600 mt-1">
-                        {formatCurrency(statement.financialSummary.openingBalance.LBP, 'LBP')}
-                      </div>
-                    </div> */}
-
                     <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                       <div className="flex items-center justify-between mb-2">
                         <div className="text-sm font-medium text-gray-500">{t('cashDrawer.currentBalance')}</div>
                         <DollarSign className="w-4 h-4 text-gray-400" />
                       </div>
-                      <div className={`text-2xl font-bold ${
-                        statement.financialSummary.currentBalance.USD >= 0 ? 'text-green-600' : 'text-red-600'
-                      }`}>
-                        {formatCurrency(statement.financialSummary.currentBalance.USD, 'USD')}
-                      </div>
-                      <div className="text-sm text-gray-600 mt-1">
-                        {formatCurrency(statement.financialSummary.currentBalance.LBP, 'LBP')}
-                      </div>
+                      {(() => {
+                        const balancePref = convertMapToPreferred(statement.financialSummary.currentBalance);
+                        return (
+                          <>
+                            <div className={`text-2xl font-bold ${balancePref >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              {formatCurrency(balancePref, preferredCurrency)}
+                            </div>
+                            <div className="text-xs text-gray-400 mt-2">
+                              {statement.financialSummary.netSign === 1 && t('balanceReport.owesUs')}
+                              {statement.financialSummary.netSign === -1 && t('balanceReport.owedToEntity')}
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
 
                     {entityType === 'customer' ? (
@@ -475,8 +521,12 @@ export default function AccountStatementModal({
                             <div className="text-sm font-medium text-gray-500">{t('balanceReport.totalCreditSales')}</div>
                             <CreditCard className="w-4 h-4 text-red-400" />
                           </div>
-                          <div className="text-2xl font-bold text-red-600">
-                            {formatCurrency(statement.financialSummary.totalSales.LBP, 'LBP')}
+                          <div className="space-y-1">
+                            {summaryCurrencies.map((c) => (
+                              <div key={`sales-${c}`} className="text-xl font-bold text-red-600">
+                                {formatCurrency(statement.financialSummary.totalSales[c] ?? 0, c)}
+                              </div>
+                            ))}
                           </div>
                         </div>
 
@@ -485,8 +535,12 @@ export default function AccountStatementModal({
                             <div className="text-sm font-medium text-gray-500">{t('customers.totalPayments')}</div>
                             <TrendingUp className="w-4 h-4 text-green-400" />
                           </div>
-                          <div className="text-2xl font-bold text-green-600">
-                            {formatCurrency(statement.financialSummary.totalPayments.LBP, 'LBP')}
+                          <div className="space-y-1">
+                            {summaryCurrencies.map((c) => (
+                              <div key={`pay-${c}`} className="text-xl font-bold text-green-600">
+                                {formatCurrency(statement.financialSummary.totalPayments[c] ?? 0, c)}
+                              </div>
+                            ))}
                           </div>
                         </div>
                       </>
@@ -497,11 +551,12 @@ export default function AccountStatementModal({
                             <div className="text-sm font-medium text-gray-500">{t('customers.totalReceivedBills')}</div>
                             <TrendingUp className="w-4 h-4 text-purple-400" />
                           </div>
-                          <div className="text-2xl font-bold text-purple-600">
-                            {formatCurrency(statement.financialSummary.totalReceivings.LBP, 'LBP')}
-                          </div>
-                          <div className="text-sm text-gray-600 mt-1">
-                            {formatCurrency(statement.financialSummary.totalReceivings.USD, 'USD')}
+                          <div className="space-y-1">
+                            {summaryCurrencies.map((c) => (
+                              <div key={`recv-${c}`} className="text-xl font-bold text-purple-600">
+                                {formatCurrency(statement.financialSummary.totalReceivings[c] ?? 0, c)}
+                              </div>
+                            ))}
                           </div>
                         </div>
 
@@ -510,18 +565,21 @@ export default function AccountStatementModal({
                             <div className="text-sm font-medium text-gray-500">{t('customers.totalPayments')}</div>
                             <TrendingDown className="w-4 h-4 text-red-400" />
                           </div>
-                          <div className="text-2xl font-bold text-red-600">
-                            {formatCurrency(statement.financialSummary.totalPayments.USD, 'USD')}
-                          </div>
-                          <div className="text-sm text-gray-600 mt-1">
-                            {formatCurrency(statement.financialSummary.totalPayments.LBP, 'LBP')}
+                          <div className="space-y-1">
+                            {summaryCurrencies.map((c) => (
+                              <div key={`pay-${c}`} className="text-xl font-bold text-red-600">
+                                {formatCurrency(statement.financialSummary.totalPayments[c] ?? 0, c)}
+                              </div>
+                            ))}
                           </div>
                         </div>
                       </>
                     )}
                   </div>
 
-             
+                  <div className="text-xs text-gray-500 mt-4 italic">
+                    {t('balanceReport.noConversionNote')}
+                  </div>
                 </div>
 
                 {/* Transaction History Section */}
@@ -550,28 +608,29 @@ export default function AccountStatementModal({
                             <th className="px-6 py-4 text-start text-xs font-medium text-gray-500 uppercase tracking-wider">
                               {t('balanceReport.date')}
                             </th>
-                           
-                          
-                              <th className="px-6 py-4 text-start text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            {t('balanceReport.description')}
+                            <th className="px-6 py-4 text-start text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              {t('balanceReport.description')}
                             </th>
-                            
+                            {showAccountColumn && (
+                              <th className="px-6 py-4 text-start text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                {t('balanceReport.account')}
+                              </th>
+                            )}
                             {viewMode === 'detailed' && (
                               <th className="px-6 py-4 text-start text-xs font-medium text-gray-500 uppercase tracking-wider">
                                 {t('balanceReport.number')}
                               </th>
                             )}
-                             {viewMode === 'detailed' && (
+                            {viewMode === 'detailed' && (
                               <th className="px-6 py-4 text-start text-xs font-medium text-gray-500 uppercase tracking-wider">
                                 {t('balanceReport.weight')}
                               </th>
                             )}
-                             {viewMode === 'detailed' && (
+                            {viewMode === 'detailed' && (
                               <th className="px-6 py-4 text-start text-xs font-medium text-gray-500 uppercase tracking-wider">
                                 {t('balanceReport.price')}
                               </th>
                             )}
-                        
                             <th className="px-6 py-4 text-start text-xs font-medium text-gray-500 uppercase tracking-wider">
                               {t('balanceReport.credit')}
                             </th>
@@ -588,114 +647,104 @@ export default function AccountStatementModal({
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
 
-                          {statement.transactions.map((transaction, transactionIndex) => {
+                          {statement.transactions.map((transaction) => {
                             const hasLineItems = viewMode === 'detailed' && transaction.product_details && transaction.product_details.length > 0;
-                            
-                            // Calculate balance before this transaction
-                            const balanceBefore = transactionIndex === 0 
-                              ? (transaction.currency === 'USD' ? statement.financialSummary.openingBalance.USD : statement.financialSummary.openingBalance.LBP)
-                              : (statement.transactions[transactionIndex - 1].balance_after);
-                            
+                            const rowCurrency = transaction.currency;
+                            const rowDebit = transaction.debit ?? 0;
+                            const rowCredit = transaction.credit ?? 0;
+                            // Running balance is shown ONLY in the preferred currency, with each
+                            // per-currency component converted at the current FX rate. Per-row
+                            // debit/credit cells stay in their original currency (no conversion).
+                            const balanceInPreferred = convertMapToPreferred(transaction.balances_after);
+
+                            // When line items exist, suppress the parent bill row entirely —
+                            // line items represent the same posting decomposed into their
+                            // products, so showing both duplicates the data on screen.
                             return (
                               <Fragment key={transaction.id}>
-                                {/* Main transaction row - only show if no line items */}
                                 {!hasLineItems && (
                                   <tr className="hover:bg-gray-50 transition-colors">
                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                                       {new Date(transaction.date).toLocaleDateString()}
                                     </td>
-                                 
                                     <td className="px-6 py-4">
                                       <div className="text-sm font-medium text-gray-900">
-                                        {getTranslatedString(transaction.description, language, 'en')}
+                                        {getTranslatedString(transaction.description, language as SupportedLanguage, 'en')}
                                       </div>
-                                      {transaction.paymentMethod && (
+                                      {transaction.payment_method && (
                                         <div className="text-xs text-gray-500 mt-1 flex items-center">
                                           <CreditCard className="w-3 h-3 me-1" />
-                                          {transaction.paymentMethod}
+                                          {transaction.payment_method}
                                         </div>
                                       )}
                                     </td>
-                                      {viewMode === 'detailed' && (
-                                        <td className="px-6 py-4">
-                                          <div className="text-sm font-medium text-gray-900">
-                                          {transaction.quantity?`${transaction.quantity}`:'-'}
+                                    {showAccountColumn && (
+                                      <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-500">
+                                        {transaction.account_name || transaction.account_code || '-'}
+                                      </td>
+                                    )}
+                                    {viewMode === 'detailed' && (
+                                      <td className="px-6 py-4">
+                                        <div className="text-sm font-medium text-gray-900">
+                                          {transaction.quantity ? `${transaction.quantity}` : '-'}
                                         </div>
-                                      
-                                        </td>
-                                      )}
-                                      {viewMode === 'detailed' && (
-                                        <td className="px-6 py-4">
-                                          <div className="text-sm font-medium text-gray-900">
-                                          {transaction.weight?`${transaction.weight}kg`:'-'}
+                                      </td>
+                                    )}
+                                    {viewMode === 'detailed' && (
+                                      <td className="px-6 py-4">
+                                        <div className="text-sm font-medium text-gray-900">
+                                          {transaction.weight ? `${transaction.weight}kg` : '-'}
                                         </div>
-                                      
-                                        </td>
-                                      )}
-                                      {viewMode === 'detailed' && (
-                                        <td className="px-6 py-4">
-                                          <div className="text-sm font-medium text-gray-900">
-                                          {transaction.price?`LBP${transaction.price}`:'-'}
+                                      </td>
+                                    )}
+                                    {viewMode === 'detailed' && (
+                                      <td className="px-6 py-4">
+                                        <div className="text-sm font-medium text-gray-900">
+                                          {transaction.price ? formatCurrency(transaction.price, rowCurrency) : '-'}
                                         </div>
-                                      
-                                        </td>
-                                      )}
-                                    {/* credit */}
+                                      </td>
+                                    )}
+                                    {/* credit (per-currency) */}
                                     <td className="px-6 py-4 whitespace-nowrap">
-                                      {transaction.type === 'payment' ? (
+                                      {rowCredit > 0.005 ? (
                                         <span className="text-sm font-bold text-green-600">
-                                          {formatCurrency(transaction.amount || 0, transaction.currency || 'LBP')}
+                                          {formatCurrency(rowCredit, rowCurrency)}
                                         </span>
                                       ) : (
                                         <span className="text-sm text-gray-400">-</span>
                                       )}
                                     </td>
-                                    {/* debit */}
+                                    {/* debit (per-currency) */}
                                     <td className="px-6 py-4 whitespace-nowrap">
-                                      {transaction.type !== 'payment' ? (
+                                      {rowDebit > 0.005 ? (
                                         <span className="text-sm font-bold text-red-600">
-                                          {formatCurrency(transaction.amount || 0, transaction.currency || 'LBP')}
+                                          {formatCurrency(rowDebit, rowCurrency)}
                                         </span>
                                       ) : (
                                         <span className="text-sm text-gray-400">-</span>
                                       )}
                                     </td>
-                                    {/* balance USD/LBP */}
+                                    {/* balance — single number in preferred currency, FX-converted */}
                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                      {formatCurrency(transaction.balance_after, transaction.currency || 'LBP')}
+                                      {formatCurrency(balanceInPreferred, preferredCurrency)}
                                     </td>
-                                    {/* reference */}
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                       {transaction.reference || '-'}
                                     </td>
                                   </tr>
                                 )}
-                                
-                                {/* Bill line items as separate rows in detailed view */}
+
+                                {/* Line items — replace the parent row when present.
+                                    Date and reference appear only on the first line so the
+                                    bill is still visually grouped, and the running balance
+                                    sits on the LAST line (matching the parent's posting). */}
                                 {hasLineItems && transaction.product_details!.map((item, idx) => {
-                                  const itemCurrency = item.currency || transaction.currency || 'LBP';
+                                  const itemCurrency = (item.currency || rowCurrency) as CurrencyCode;
                                   const isFirstItem = idx === 0;
-                                  
-                                  // Calculate incremental balance for each line item
-                                  // Balance = previous balance + debit - credit
-                                  let itemBalance = balanceBefore;
-                                  
-                                  // Add all previous line items in this transaction
-                                  for (let i = 0; i < idx; i++) {
-                                    const prevItem = transaction.product_details![i];
-                                    const prevDebit = prevItem.debit_amount || 0;
-                                    const prevCredit = prevItem.credit_amount || 0;
-                                    itemBalance += prevDebit - prevCredit;
-                                  }
-                                  
-                                  // Add current line item
-                                  const currentDebit = item.debit_amount || 0;
-                                  const currentCredit = item.credit_amount || 0;
-                                  itemBalance += currentDebit - currentCredit;
-                                  
+                                  const isLastItem = idx === transaction.product_details!.length - 1;
                                   return (
-                                    <tr key={`${transaction.id}-item-${idx}`} className="bg-gray-50 hover:bg-gray-100 transition-colors">
-                                      <td className="px-6 py-3 text-sm text-gray-500">
+                                    <tr key={`${transaction.id}-item-${idx}`} className="hover:bg-gray-50 transition-colors">
+                                      <td className="px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
                                         {isFirstItem ? new Date(transaction.date).toLocaleDateString() : ''}
                                       </td>
                                       <td className="px-6 py-3 text-sm text-gray-900">
@@ -703,13 +752,18 @@ export default function AccountStatementModal({
                                         {item.notes && (
                                           <div className="text-xs text-gray-500 mt-1 italic">{item.notes}</div>
                                         )}
-                                        {isFirstItem && transaction.paymentMethod && (
+                                        {isFirstItem && transaction.payment_method && (
                                           <div className="text-xs text-gray-500 mt-1 flex items-center">
                                             <CreditCard className="w-3 h-3 me-1" />
-                                            {transaction.paymentMethod}
+                                            {transaction.payment_method}
                                           </div>
                                         )}
                                       </td>
+                                      {showAccountColumn && (
+                                        <td className="px-6 py-3 whitespace-nowrap text-xs text-gray-500">
+                                          {isFirstItem ? (transaction.account_name || transaction.account_code || '-') : ''}
+                                        </td>
+                                      )}
                                       {viewMode === 'detailed' && (
                                         <td className="px-6 py-3 text-sm text-gray-700">
                                           {item.quantity} {item.unit}
@@ -722,36 +776,32 @@ export default function AccountStatementModal({
                                       )}
                                       {viewMode === 'detailed' && (
                                         <td className="px-6 py-3 text-sm text-gray-700">
-                                          {formatCurrency(item.unit_price, itemCurrency, false)}
+                                          {formatCurrency(item.unit_price, itemCurrency)}
                                         </td>
                                       )}
-                                      {/* credit */}
                                       <td className="px-6 py-3 whitespace-nowrap">
                                         {item.credit_amount && item.credit_amount > 0 ? (
                                           <span className="text-sm font-bold text-green-600">
-                                            {formatCurrency(item.credit_amount, itemCurrency, false)}
+                                            {formatCurrency(item.credit_amount, itemCurrency)}
                                           </span>
                                         ) : (
                                           <span className="text-sm text-gray-400">-</span>
                                         )}
                                       </td>
-                                      {/* debit */}
                                       <td className="px-6 py-3 whitespace-nowrap">
                                         {item.debit_amount && item.debit_amount > 0 ? (
                                           <span className="text-sm font-bold text-red-600">
-                                            {formatCurrency(item.debit_amount, itemCurrency, false)}
+                                            {formatCurrency(item.debit_amount, itemCurrency)}
                                           </span>
                                         ) : (
                                           <span className="text-sm text-gray-400">-</span>
                                         )}
                                       </td>
-                                      {/* balance USD/LBP */}
                                       <td className="px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
-                                        {formatCurrency(itemBalance, itemCurrency)}
+                                        {isLastItem ? formatCurrency(balanceInPreferred, preferredCurrency) : ''}
                                       </td>
-                                      {/* reference */}
                                       <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-500">
-                                        {transaction.reference || '-'}
+                                        {isFirstItem ? (transaction.reference || '-') : ''}
                                       </td>
                                     </tr>
                                   );

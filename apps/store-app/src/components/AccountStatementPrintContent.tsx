@@ -1,13 +1,14 @@
 import React from 'react';
 import { AccountStatement } from '../services/accountStatementService';
-import { Customer, Supplier } from '../types';
 import { PrintLayout } from './common/PrintLayout';
 import { useI18n } from '../i18n';
-import { getTranslatedString } from '../utils/multilingual';
+import { getTranslatedString, type SupportedLanguage } from '../utils/multilingual';
+import type { CurrencyCode } from '@pos-platform/shared';
+import type { StatementTransaction, StatementProductDetail } from '../types';
 
 /**
  * AccountStatementPrintContent Component
- * 
+ *
  * Note: This component is used for React-based print preview only.
  * Actual printing in Electron uses a dedicated BrowserWindow with electron/print/statement.html template
  * for clean isolation and predictable A4 output.
@@ -15,16 +16,22 @@ import { getTranslatedString } from '../utils/multilingual';
 
 interface AccountStatementPrintContentProps {
   statement: AccountStatement;
-  entity: Customer | Supplier;
+  entity: { id: string; name: string; phone?: string | null;[key: string]: any };
   viewMode: 'summary' | 'detailed';
   totalPages: number;
   pages: Array<{
     pageNumber: number;
-    transactions: any[];
+    transactions: StatementTransaction[];
     isFirstPage: boolean;
     isLastPage: boolean;
   }>;
-  formatCurrency: (amount: number, currency: 'USD' | 'LBP', includeSymbol?: boolean) => string;
+  formatCurrency: (amount: number, currency: CurrencyCode, includeSymbol?: boolean) => string;
+  /** The branch/store preferred currency. Running balance + final balance are
+   *  shown in this currency only, with each per-currency component converted
+   *  at the current FX rate. Per-row debit/credit cells stay native. */
+  preferredCurrency: CurrencyCode;
+  /** Convert a per-currency balance map to a single number in preferredCurrency. */
+  convertMapToPreferred: (map: Partial<Record<CurrencyCode, number>> | undefined) => number;
 }
 
 export function AccountStatementPrintContent({
@@ -33,25 +40,52 @@ export function AccountStatementPrintContent({
   viewMode,
   totalPages,
   pages,
-  formatCurrency
+  formatCurrency,
+  preferredCurrency,
+  convertMapToPreferred,
 }: AccountStatementPrintContentProps) {
   const { t, language } = useI18n();
+
+  // Currencies the statement actually carries — used to build per-currency
+  // totals and a header currency label, no FX conversion.
+  const allCurrencies: CurrencyCode[] = (() => {
+    const set = new Set<string>();
+    for (const map of [
+      statement.financialSummary.openingBalance,
+      statement.financialSummary.currentBalance,
+    ]) {
+      Object.keys(map).forEach(k => set.add(k));
+    }
+    statement.transactions.forEach(t => set.add(t.currency));
+    return Array.from(set) as CurrencyCode[];
+  })();
+
+  const headerCurrency: CurrencyCode = (statement.transactions[0]?.currency as CurrencyCode) ?? (allCurrencies[0] ?? 'USD');
+
+  // Per-currency debit/credit totals across all transactions.
+  const totalsByCurrency: Record<string, { debit: number; credit: number }> = {};
+  for (const tr of statement.transactions) {
+    const c = tr.currency;
+    if (!totalsByCurrency[c]) totalsByCurrency[c] = { debit: 0, credit: 0 };
+    totalsByCurrency[c].debit += tr.debit ?? 0;
+    totalsByCurrency[c].credit += tr.credit ?? 0;
+  }
 
   return (
     <>
       {pages.map((page, idx) => {
         const isFirstPage = page.isFirstPage;
         const isLastPage = page.isLastPage;
-        
+
         return (
           <div key={page.pageNumber} className={idx === 0 ? '' : 'print-page-break'}>
             <PrintLayout
               title={t(viewMode === 'detailed' ? 'customers.detailedAccountStatement' : 'customers.summaryAccountStatement')}
               accountName={isFirstPage ? entity.name : undefined}
               accountNumber={isFirstPage ? entity.id.slice(0, 10) : undefined}
-              phone={isFirstPage ? entity.phone : undefined}
+              phone={isFirstPage ? entity.phone ?? undefined : undefined}
               previousBalance={isFirstPage ? statement.financialSummary.openingBalance : undefined}
-              currency={statement.transactions[0]?.currency || 'LBP'}
+              currency={headerCurrency}
               dateRange={isFirstPage ? statement.dateRange : undefined}
               reportDate={isFirstPage ? statement.statementDate : undefined}
               pageNumber={page.pageNumber}
@@ -61,7 +95,6 @@ export function AccountStatementPrintContent({
               showAccountInfo={isFirstPage}
               showOpeningBalance={isFirstPage}
             >
-              {/* Transaction Table */}
               <div className="print-table-container print-section">
                 <table className="print-table">
                   <thead>
@@ -84,25 +117,14 @@ export function AccountStatementPrintContent({
                   <tbody>
                     {page.transactions.map((transaction, transactionIndex) => {
                       const hasLineItems = viewMode === 'detailed' && transaction.product_details && transaction.product_details.length > 0;
-                      
-                      // Find the actual index in the full statement transactions array to calculate balance before
-                      const fullTransactionIndex = statement.transactions.findIndex(t => t.id === transaction.id);
-                      let balanceBefore: number;
-                      
-                      if (fullTransactionIndex === 0) {
-                        // First transaction overall - use opening balance
-                        balanceBefore = transaction.currency === 'USD' 
-                          ? statement.financialSummary.openingBalance.USD 
-                          : statement.financialSummary.openingBalance.LBP;
-                      } else {
-                        // Use previous transaction's balance_after
-                        const prevTransaction = statement.transactions[fullTransactionIndex - 1];
-                        balanceBefore = prevTransaction.balance_after;
-                      }
-                      
+                      const rowCurrency = transaction.currency;
+                      // Running balance shown in preferred currency only (FX-converted).
+                      const balanceInPreferred = convertMapToPreferred(transaction.balances_after);
+
+                      // When line items exist, suppress the parent bill row — line items
+                      // already represent the same posting decomposed into products.
                       return (
                         <React.Fragment key={transaction.id || `transaction-${transactionIndex}`}>
-                          {/* Main transaction row - only show if no line items */}
                           {!hasLineItems && (
                             <tr>
                               <td className="print-table-col-date">
@@ -114,7 +136,7 @@ export function AccountStatementPrintContent({
                               </td>
                               <td className="print-table-col-reference">{transaction.reference || '-'}</td>
                               <td className="print-table-col-description">
-                                {getTranslatedString(transaction.description, language, 'en')}
+                                {getTranslatedString(transaction.description, language as SupportedLanguage, 'en')}
                               </td>
                               {viewMode === 'detailed' && (
                                 <>
@@ -125,55 +147,43 @@ export function AccountStatementPrintContent({
                                     {transaction.weight ? `${transaction.weight}` : '-'}
                                   </td>
                                   <td className="print-table-col-price print-number">
-                                    {transaction.price ? formatCurrency(transaction.price, transaction.currency || 'LBP', false) : '-'}
+                                    {transaction.price ? formatCurrency(transaction.price, rowCurrency, false) : '-'}
                                   </td>
                                 </>
                               )}
                               <td className="print-table-col-debit print-number print-currency">
-                                {transaction.type !== 'payment' ? formatCurrency(transaction.amount || 0, transaction.currency || 'LBP', false) : '0'}
+                                {(transaction.debit ?? 0) > 0.005 ? formatCurrency(transaction.debit ?? 0, rowCurrency, false) : '0'}
                               </td>
                               <td className="print-table-col-credit print-number print-currency">
-                                {transaction.type === 'payment' ? formatCurrency(transaction.amount || 0, transaction.currency || 'LBP', false) : '0'}
+                                {(transaction.credit ?? 0) > 0.005 ? formatCurrency(transaction.credit ?? 0, rowCurrency, false) : '0'}
                               </td>
                               <td className="print-table-col-balance print-number print-currency">
-                                {formatCurrency(transaction.balance_after, transaction.currency || 'LBP', true)}
+                                {formatCurrency(balanceInPreferred, preferredCurrency, true)}
                               </td>
                             </tr>
                           )}
-                          
-                          {/* Bill line items as separate rows in detailed view */}
-                          {hasLineItems && transaction.product_details!.map((item, idx) => {
-                            const itemCurrency = item.currency || transaction.currency || 'LBP';
+
+                          {/* Line items replace the parent row when present.
+                              Date and reference appear only on the first line; the
+                              running balance sits on the LAST line (matching the
+                              parent's posting). */}
+                          {hasLineItems && transaction.product_details!.map((item: StatementProductDetail, idx: number) => {
+                            const itemCurrency: CurrencyCode = (item.currency ?? rowCurrency) as CurrencyCode;
                             const isFirstItem = idx === 0;
-                            
-                            // Calculate incremental balance for each line item
-                            // Balance = previous balance + debit - credit
-                            let itemBalance = balanceBefore;
-                            
-                            // Add all previous line items in this transaction
-                            for (let i = 0; i < idx; i++) {
-                              const prevItem = transaction.product_details![i];
-                              const prevDebit = prevItem.debit_amount || 0;
-                              const prevCredit = prevItem.credit_amount || 0;
-                              itemBalance += prevDebit - prevCredit;
-                            }
-                            
-                            // Add current line item
-                            const currentDebit = item.debit_amount || 0;
-                            const currentCredit = item.credit_amount || 0;
-                            itemBalance += currentDebit - currentCredit;
-                            
+                            const isLastItem = idx === transaction.product_details!.length - 1;
                             return (
                               <tr key={`${transaction.id || transactionIndex}-item-${idx}`}>
                                 <td className="print-table-col-date">
-                                  {isFirstItem ? new Date(transaction.date).toLocaleDateString('ar-LB', {
-                                    year: 'numeric',
-                                    month: '2-digit',
-                                    day: '2-digit',
-                                  }) : ''}
+                                  {isFirstItem
+                                    ? new Date(transaction.date).toLocaleDateString('ar-LB', {
+                                        year: 'numeric',
+                                        month: '2-digit',
+                                        day: '2-digit',
+                                      })
+                                    : ''}
                                 </td>
                                 <td className="print-table-col-reference">
-                                  {transaction.reference || '-'}
+                                  {isFirstItem ? (transaction.reference || '-') : ''}
                                 </td>
                                 <td className="print-table-col-description">
                                   <div className="font-medium">{item.product_name}</div>
@@ -195,17 +205,17 @@ export function AccountStatementPrintContent({
                                   </>
                                 )}
                                 <td className="print-table-col-debit print-number print-currency">
-                                  {item.debit_amount && item.debit_amount > 0 
-                                    ? formatCurrency(item.debit_amount, itemCurrency, false) 
+                                  {item.debit_amount && item.debit_amount > 0
+                                    ? formatCurrency(item.debit_amount, itemCurrency, false)
                                     : '0'}
                                 </td>
                                 <td className="print-table-col-credit print-number print-currency">
-                                  {item.credit_amount && item.credit_amount > 0 
-                                    ? formatCurrency(item.credit_amount, itemCurrency, false) 
+                                  {item.credit_amount && item.credit_amount > 0
+                                    ? formatCurrency(item.credit_amount, itemCurrency, false)
                                     : '0'}
                                 </td>
                                 <td className="print-table-col-balance print-number print-currency">
-                                  {formatCurrency(itemBalance, itemCurrency, true)}
+                                  {isLastItem ? formatCurrency(balanceInPreferred, preferredCurrency, true) : ''}
                                 </td>
                               </tr>
                             );
@@ -217,40 +227,38 @@ export function AccountStatementPrintContent({
                 </table>
               </div>
 
-              {/* Summary Totals - Separated from table - Only on last page */}
               {isLastPage && (
                 <div className="print-summary-totals">
+                  {/* Per-currency debit/credit totals (activity in original currency). */}
+                  {Object.keys(totalsByCurrency).map((c) => {
+                    const ccy = c as CurrencyCode;
+                    const debit = totalsByCurrency[c].debit;
+                    const credit = totalsByCurrency[c].credit;
+                    return (
+                      <div key={`tot-${c}`} className="print-summary-totals-row">
+                        <div className="print-summary-totals-item">
+                          <div className="print-summary-totals-label">{t('balanceReport.debitTotal')} ({c}):</div>
+                          <div className="print-summary-totals-value print-number print-currency">
+                            {formatCurrency(debit, ccy, true)}
+                          </div>
+                        </div>
+                        <div className="print-summary-totals-item">
+                          <div className="print-summary-totals-label">{t('balanceReport.creditTotal')} ({c}):</div>
+                          <div className="print-summary-totals-value print-number print-currency">
+                            {formatCurrency(credit, ccy, true)}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {/* Final balance: one number in the preferred currency, FX-converted. */}
                   <div className="print-summary-totals-row">
-                    <div className="print-summary-totals-item">
-                      <div className="print-summary-totals-label">{t('balanceReport.debitTotal')}:</div>
-                      <div className="print-summary-totals-value print-number print-currency">
-                        {formatCurrency(
-                          statement.transactions
-                            .filter(t => t.type !== 'payment')
-                            .reduce((sum, t) => sum + (t.amount || 0), 0),
-                          statement.transactions[0]?.currency || 'LBP',
-                          true
-                        )}
-                      </div>
-                    </div>
-                    <div className="print-summary-totals-item">
-                      <div className="print-summary-totals-label">{t('balanceReport.creditTotal')}:</div>
-                      <div className="print-summary-totals-value print-number print-currency">
-                        {formatCurrency(
-                          statement.transactions
-                            .filter(t => t.type === 'payment')
-                            .reduce((sum, t) => sum + (t.amount || 0), 0),
-                          statement.transactions[0]?.currency || 'LBP',
-                          true
-                        )}
-                      </div>
-                    </div>
                     <div className="print-summary-totals-item">
                       <div className="print-summary-totals-label">{t('customers.balance')}:</div>
                       <div className="print-summary-totals-value print-number print-currency">
                         {formatCurrency(
-                          statement.financialSummary.currentBalance[statement.transactions[0]?.currency || 'LBP'],
-                          statement.transactions[0]?.currency || 'LBP',
+                          convertMapToPreferred(statement.financialSummary.currentBalance),
+                          preferredCurrency,
                           true
                         )}
                       </div>

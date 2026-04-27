@@ -167,9 +167,9 @@ export class TransactionService {
       }
 
       // 1.5. VERIFY CASH DRAWER ACCOUNT EXISTS (no balance validation - negative balances allowed)
-      const isCashExpense = params.category === TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE || 
+      const isCashExpense = params.category === TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE ||
                            params.category === TRANSACTION_CATEGORIES.INVENTORY_CASH_PURCHASE;
-      
+
       if (isCashExpense) {
         // Get cash drawer account to verify it exists
         const account = await getDB().getCashDrawerAccount(params.context.storeId, params.context.branchId);
@@ -182,6 +182,16 @@ export class TransactionService {
             affectedRecords: []
           };
         }
+      }
+
+      // 1.7. NORMALIZE CROSS-CURRENCY PAYMENT
+      // If the entity already has a balance in a different currency than the
+      // payment, convert the entire payment (including any surplus) into that
+      // existing balance currency so the entity's debt is reduced rather than
+      // a parallel balance being created in the payment currency.
+      const normalized = await this.normalizePaymentCurrency(params);
+      if (normalized.currency !== params.currency || normalized.amount !== params.amount) {
+        params = { ...params, amount: normalized.amount, currency: normalized.currency };
       }
 
       // 2. PREPARE TRANSACTION DATA (outside transaction)
@@ -1338,6 +1348,91 @@ export class TransactionService {
       isValid: errors.length === 0,
       errors
     };
+  }
+
+  /**
+   * Normalize a payment's currency against the entity's existing balance.
+   *
+   * Why: paying in a currency the entity has no balance in would otherwise
+   * create a parallel balance in the payment currency, leaving the original
+   * debt untouched. The user-facing rule is "convert the whole payment
+   * (including any surplus) into the existing balance currency."
+   *
+   * Behavior:
+   *  - Only acts on payment categories that settle entity balances.
+   *  - If the payment currency already has any balance for this entity,
+   *    apply directly (no conversion).
+   *  - Otherwise, if the other currency has a non-zero balance, convert
+   *    the whole payment via currencyService.convert().
+   *  - If neither currency has a balance, leave the payment in its original
+   *    currency.
+   *
+   * Side effect: because journal entries balance per-currency, the cash
+   * drawer leg is also recorded in the converted currency.
+   */
+  private async normalizePaymentCurrency(
+    params: CreateTransactionParams
+  ): Promise<{ amount: number; currency: 'USD' | 'LBP' }> {
+    const { category, amount, currency, entityId } = params;
+
+    const NORMALIZABLE: TransactionCategory[] = [
+      TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT,
+      TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT_RECEIVED,
+      TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT,
+      TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT_RECEIVED,
+      TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT,
+    ];
+    if (!NORMALIZABLE.includes(category) || !entityId) {
+      return { amount, currency };
+    }
+
+    const entity = await getDB().entities.get(entityId);
+    if (!entity) {
+      return { amount, currency };
+    }
+
+    const { entityBalanceService } = await import('./entityBalanceService');
+
+    let balances: { USD: number; LBP: number };
+    try {
+      if (entity.entity_type === 'customer') {
+        balances = await entityBalanceService.getEntityBalances(entityId, '1200');
+      } else if (entity.entity_type === 'supplier') {
+        balances = await entityBalanceService.getEntityBalances(entityId, '2100');
+      } else if (entity.entity_type === 'employee') {
+        balances = await entityBalanceService.getEmployeeBalances(entityId);
+      } else {
+        return { amount, currency };
+      }
+    } catch (error) {
+      console.warn('[NORMALIZE_PAYMENT] Could not load entity balances; skipping normalization:', error);
+      return { amount, currency };
+    }
+
+    const other: 'USD' | 'LBP' = currency === 'USD' ? 'LBP' : 'USD';
+    const balanceInPayment = Math.abs(balances[currency] ?? 0);
+    const balanceInOther = Math.abs(balances[other] ?? 0);
+
+    if (balanceInPayment > 0.01) {
+      return { amount, currency };
+    }
+
+    if (balanceInOther > 0.01) {
+      const rawConverted = currencyService.convert(amount, currency as CurrencyCode, other as CurrencyCode);
+      const decimals = CURRENCY_META[other as CurrencyCode]?.decimals ?? 2;
+      const factor = Math.pow(10, decimals);
+      const convertedAmount = Math.round(rawConverted * factor) / factor;
+
+      console.log(
+        `[NORMALIZE_PAYMENT] Cross-currency payment for entity ${entityId}: ` +
+        `${amount} ${currency} → ${convertedAmount} ${other} ` +
+        `(no ${currency} balance; existing ${other} balance: ${balances[other]})`
+      );
+
+      return { amount: convertedAmount, currency: other };
+    }
+
+    return { amount, currency };
   }
 
   /**

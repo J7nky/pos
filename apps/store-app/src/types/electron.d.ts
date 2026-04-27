@@ -47,7 +47,7 @@ export interface AccountStatementPrintPayload {
   statement: AccountStatement;
   entity: {
     name: string;
-    type: 'customer' | 'supplier';
+    type: 'customer' | 'supplier' | 'employee';
   };
   viewMode: 'summary' | 'detailed';
   language: 'en' | 'ar' | 'fr';

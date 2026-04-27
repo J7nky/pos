@@ -1,9 +1,15 @@
 import { getDB } from '../lib/db';
-import { Customer, Supplier, Transaction, BillLineItem, InventoryItem, Product, inventory_bills } from '../types';
 import { StatementTransaction, StatementProductDetail } from '../types';
-import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
 import { TRANSACTION_CATEGORIES } from '../constants/transactionCategories';
 import { parseMultilingualString, getTranslatedString, type SupportedLanguage } from '../utils/multilingual';
+import {
+  amountsFromLegacyEntry,
+  getDebit,
+  getCredit,
+  amountCurrencies,
+} from './accountingCurrencyHelpers';
+import type { CurrencyCode } from '@pos-platform/shared';
+import type { JournalEntryAmounts, BalanceSnapshotMap } from '../types/database';
 // Note: snapshotService import removed - snapshots not implemented yet, using direct journal entry calculation
 
 // Import locale dictionaries for direct translation access in services
@@ -82,30 +88,16 @@ export interface AccountStatement {
   transactions: StatementTransaction[];
 
   financialSummary: {
-    openingBalance: {
-      USD: number;
-      LBP: number;
-    };
-    currentBalance: {
-      USD: number;
-      LBP: number;
-    };
-    totalSales: {
-      USD: number;
-      LBP: number;
-    };
-    totalPayments: {
-      USD: number;
-      LBP: number;
-    };
-    totalReceivings: {
-      USD: number;
-      LBP: number;
-    };
-    netChange: {
-      USD: number;
-      LBP: number;
-    };
+    /** Per-currency opening balance. Sign convention: positive = entity owes us. */
+    openingBalance: BalanceSnapshotMap;
+    /** Per-currency closing balance. */
+    currentBalance: BalanceSnapshotMap;
+    totalSales: BalanceSnapshotMap;
+    totalPayments: BalanceSnapshotMap;
+    totalReceivings: BalanceSnapshotMap;
+    netChange: BalanceSnapshotMap;
+    /** 1 = entity owes us (net); -1 = we owe entity; 0 = settled. */
+    netSign: 1 | -1 | 0;
   };
 
   // Additional metrics for detailed view
@@ -148,23 +140,31 @@ export class AccountStatementService {
   }
 
   /**
-   * Map journal entries to statement transactions, grouping by transaction_id
-   * This creates one StatementTransaction per transaction (not per journal entry)
+   * Map journal entries to statement transactions, emitting ONE row per
+   * journal entry. Group-by-transaction is used only to enrich description /
+   * bill / inventory metadata — never to collapse multiple journal lines on
+   * different account codes into a single row, which is what historically
+   * hid cross-account activity (e.g. a supplier's POS purchase posted to
+   * 1200 was invisible on the supplier ledger).
+   *
+   * Sign convention: per-currency balance += debit - credit, applied
+   * uniformly across all account codes. Positive net = entity owes us;
+   * negative net = we owe entity. AR debits and AP credits naturally
+   * combine under this rule without per-account sign flipping.
    */
   private async mapJournalEntriesToStatementTransactions(
     journalEntries: any[],
-    openingBalance: { USD: number; LBP: number },
+    openingBalance: BalanceSnapshotMap,
     viewMode: 'summary' | 'detailed',
-    entityType: 'customer' | 'supplier' | 'employee',
+    _entityType: 'customer' | 'supplier' | 'employee',
     language: SupportedLanguage = 'en'
   ): Promise<{
     statementTransactions: StatementTransaction[];
-    ending: { USD: number; LBP: number };
+    ending: BalanceSnapshotMap;
     totals: {
-      salesUSD: number;
-      salesLBP: number;
-      paymentsUSD: number;
-      paymentsLBP: number;
+      sales: BalanceSnapshotMap;
+      payments: BalanceSnapshotMap;
+      receivings: BalanceSnapshotMap;
     };
   }> {
     // Group journal entries by transaction_id
@@ -211,8 +211,10 @@ export class AccountStatementService {
         }
       }
       
-      // Collect inventory bill IDs for suppliers
-      if (entityType === 'supplier' && t.category !== TRANSACTION_CATEGORIES.INVENTORY_PRICE_ADJUSTMENT) {
+      // Collect inventory bill IDs for any transaction with a batch_id (supplier purchases).
+      // Gating on entityType is wrong: an entity may have entries that mix sale-bills
+      // (for sales TO a supplier-acting-as-customer) with received-inventory bills.
+      if (t.category !== TRANSACTION_CATEGORIES.INVENTORY_PRICE_ADJUSTMENT) {
         const batchId = (t.metadata as any)?.batch_id;
         if (batchId) {
           inventoryBillIds.add(batchId);
@@ -386,236 +388,157 @@ export class AccountStatementService {
       }
     }
 
-    // Build statement transactions
+    // Build statement transactions — ONE ROW PER JOURNAL ENTRY (not per transaction)
     const statementTransactions: StatementTransaction[] = [];
-    let runningUSD = openingBalance.USD;
-    let runningLBP = openingBalance.LBP;
-    
-    const totals = {
-      salesUSD: 0,
-      salesLBP: 0,
-      paymentsUSD: 0,
-      paymentsLBP: 0
+    const running: Partial<Record<CurrencyCode, number>> = { ...openingBalance };
+
+    const totals: { sales: Partial<Record<CurrencyCode, number>>; payments: Partial<Record<CurrencyCode, number>>; receivings: Partial<Record<CurrencyCode, number>> } = {
+      sales: {},
+      payments: {},
+      receivings: {},
     };
-    // Sort transaction IDs by posted_date (accounting date) for accurate chronological ordering
-    // This ensures transactions are ordered by their accounting date, matching how they appear after sync
-    const sortedTransactionIds = Array.from(entriesByTransaction.entries())
-      .sort(([transactionIdA, entriesA], [transactionIdB, entriesB]) => {
-        // Get account entries for both transactions
-        // For employees, prefer account 1200 entries, fall back to 2200 if not found
-        const accountEntryA = entriesA.find(e => 
-          (entityType === 'customer' && e.account_code === '1200') ||
-          (entityType === 'supplier' && e.account_code === '2100') ||
-          (entityType === 'employee' && (e.account_code === '1200' || e.account_code === '2200'))
-        ) || entriesA.find(e => entityType === 'employee' && e.account_code === '2200');
-        const accountEntryB = entriesB.find(e => 
-          (entityType === 'customer' && e.account_code === '1200') ||
-          (entityType === 'supplier' && e.account_code === '2100') ||
-          (entityType === 'employee' && (e.account_code === '1200' || e.account_code === '2200'))
-        ) || entriesB.find(e => entityType === 'employee' && e.account_code === '2200');
-        
-        if (!accountEntryA || !accountEntryB) return 0;
-        
-        // Primary sort: Use posted_date (accounting date) - YYYY-MM-DD format sorts correctly with localeCompare
-        const dateCompare = (accountEntryA.posted_date || '').localeCompare(accountEntryB.posted_date || '');
-        if (dateCompare !== 0) return dateCompare;
-        
-        // Secondary sort: Use created_at as tiebreaker (convert to Date for proper comparison)
-        const transactionA = transactionMap.get(transactionIdA);
-        const transactionB = transactionMap.get(transactionIdB);
-        
-        if (transactionA && transactionB) {
-          return new Date(transactionA.created_at).getTime() - new Date(transactionB.created_at).getTime();
+
+    const addTo = (bucket: Partial<Record<CurrencyCode, number>>, ccy: CurrencyCode, amount: number) => {
+      bucket[ccy] = (bucket[ccy] ?? 0) + amount;
+    };
+
+    // Pick a single representative currency for a row's display column.
+    // Prefer the currency carrying the largest absolute net (debit - credit).
+    const pickDominantCurrency = (amounts: JournalEntryAmounts): CurrencyCode => {
+      const codes = amountCurrencies(amounts);
+      if (codes.length === 0) return 'USD';
+      let best: CurrencyCode = codes[0];
+      let bestMag = -1;
+      for (const c of codes) {
+        const mag = Math.abs(getDebit(amounts, c) - getCredit(amounts, c));
+        if (mag > bestMag) {
+          bestMag = mag;
+          best = c;
         }
-        
-        // Fallback: Use journal entry created_at
-        return new Date(accountEntryA.created_at).getTime() - new Date(accountEntryB.created_at).getTime();
-      })
-      .map(([transactionId]) => transactionId);
-
-    // Process each transaction group in chronological order
-    for (const transactionId of sortedTransactionIds) {
-      const entries = entriesByTransaction.get(transactionId);
-      if (!entries) continue;
-
-      // Get the entry for the account we're querying
-      // For employees, prefer account 1200 (credit sales), fall back to 2200 (payments)
-      let accountEntry = entries.find(e => 
-        (entityType === 'customer' && e.account_code === '1200') ||
-        (entityType === 'supplier' && e.account_code === '2100') ||
-        (entityType === 'employee' && e.account_code === '1200')
-      );
-      
-      // For employees, if no 1200 entry found, use 2200 entry (salary payments)
-      if (!accountEntry && entityType === 'employee') {
-        accountEntry = entries.find(e => e.account_code === '2200');
       }
+      return best;
+    };
 
-      if (!accountEntry) continue;
+    // Friendly account name from the entry's stored account_name field, falling back to code
+    const accountLabel = (entry: any): string => {
+      if (entry.account_name && typeof entry.account_name === 'string') return entry.account_name;
+      const code = entry.account_code;
+      switch (code) {
+        case '1100': return 'Cash';
+        case '1200': return 'Accounts Receivable';
+        case '1300': return 'Inventory';
+        case '1400': return 'Prepaid Expenses';
+        case '2100': return 'Accounts Payable';
+        case '2200': return 'Salaries Payable';
+        case '4100': return 'Sales Revenue';
+        default: return code || '';
+      }
+    };
+
+    // Sort entries chronologically: posted_date first, then transaction created_at, then journal entry created_at.
+    const sortedEntries = [...journalEntries].sort((a, b) => {
+      const dateCompare = (a.posted_date || '').localeCompare(b.posted_date || '');
+      if (dateCompare !== 0) return dateCompare;
+      const txA = transactionMap.get(a.transaction_id);
+      const txB = transactionMap.get(b.transaction_id);
+      if (txA && txB) {
+        const t = new Date(txA.created_at).getTime() - new Date(txB.created_at).getTime();
+        if (t !== 0) return t;
+      }
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    });
+
+    // Process each entry independently — one row per entry under the unified sign rule.
+    for (const accountEntry of sortedEntries) {
+      const transactionId: string = accountEntry.transaction_id;
       const transaction = transactionMap.get(transactionId);
-      
-      // Skip reversal transactions, corrected original transactions, and deleted transactions from display
-      // These affect balances but shouldn't appear as line items:
-      // - Reversals: correction entries that reverse the original (check both transaction and journal entry)
-      // - Corrected originals: original transactions that were corrected (only corrected version should appear)
-      // - Deleted transactions: transactions that were deleted (neither original nor reversal should appear)
-      // Reversal journal entries are still included in balance calculations (they're in journalEntries parameter)
+
+      // Reversal / corrected-original / deleted entries still affect the running balance,
+      // but we don't emit a visible row for them.
       const isReversalTransaction = transaction && (transaction.is_reversal === true || transaction.reversal_of_transaction_id);
       const isReversalEntry = accountEntry.entry_type === 'reversal';
       const isCorrectedOriginal = transaction && (transaction.metadata as any)?.corrected === true;
       const isDeleted = transaction && (transaction.metadata as any)?.deleted === true;
-      
-      // Calculate amounts based on account type
-      // For employees: net balance = Account 1200 balance - Account 2200 balance
-      // Account 1200 (AR - asset): debit - credit (increases net balance)
-      // Account 2100 (AP - liability): credit - debit (increases net balance for suppliers)
-      // Account 2200 (Salaries Payable - liability): credit - debit (but DECREASES net balance for employees)
-      // 
-      // Opening balance = Account 1200 - Account 2200
-      // When processing account 2200 entries, we need to subtract (credit - debit) from running balance
-      // Subtracting (credit - debit) = adding -(credit - debit) = adding (debit - credit)
-      
-      let amountUSD: number;
-      let amountLBP: number;
-      
-      if (entityType === 'employee') {
-        // For employees: net balance = Account 1200 - Account 2200
-        if (accountEntry.account_code === '1200') {
-          // Account 1200: debit - credit (increases net balance)
-          amountUSD = accountEntry.debit_usd - accountEntry.credit_usd;
-          amountLBP = accountEntry.debit_lbp - accountEntry.credit_lbp;
-        } else if (accountEntry.account_code === '2200') {
-          // Account 2200: since opening balance = Account 1200 - Account 2200,
-          // when we process a new account 2200 entry, we need to subtract (credit - debit) from running balance
-          // Subtracting (credit - debit) = adding -(credit - debit) = adding (debit - credit)
-          amountUSD = accountEntry.debit_usd - accountEntry.credit_usd;
-          amountLBP = accountEntry.debit_lbp - accountEntry.credit_lbp;
-        } else {
-          // Fallback (shouldn't happen)
-          amountUSD = accountEntry.debit_usd - accountEntry.credit_usd;
-          amountLBP = accountEntry.debit_lbp - accountEntry.credit_lbp;
+
+      // Normalize to the per-currency amounts map. Falls back to legacy USD/LBP columns
+      // for entries written before Phase 11 dual-write landed.
+      const amounts = amountsFromLegacyEntry(accountEntry);
+      const presentCurrencies = amountCurrencies(amounts);
+
+      // Apply unified sign rule: balance += debit - credit, for every currency present.
+      for (const ccy of presentCurrencies) {
+        const delta = getDebit(amounts, ccy) - getCredit(amounts, ccy);
+        if (delta !== 0) {
+          running[ccy] = (running[ccy] ?? 0) + delta;
         }
-      } else {
-        // For customers/suppliers: standard calculation
-        const isLiabilityAccount = accountEntry.account_code === '2100';
-        amountUSD = isLiabilityAccount 
-          ? accountEntry.credit_usd - accountEntry.debit_usd
-          : accountEntry.debit_usd - accountEntry.credit_usd;
-        amountLBP = isLiabilityAccount
-          ? accountEntry.credit_lbp - accountEntry.debit_lbp
-          : accountEntry.debit_lbp - accountEntry.credit_lbp;
       }
-      
+
       if (isReversalTransaction || isReversalEntry || isCorrectedOriginal || isDeleted) {
-        // Still update running balance because reversal/corrected/deleted entries affect the balance
-        runningUSD += amountUSD;
-        runningLBP += amountLBP;
-        continue; // Skip adding to statementTransactions but keep balance updated
+        continue;
       }
-      
-      // Determine which currency has the transaction (prefer USD if both exist)
-      const hasUSD = Math.abs(amountUSD) > 0.01;
-      const hasLBP = Math.abs(amountLBP) > 0.01;
-      const currency = hasUSD ? 'USD' : (hasLBP ? 'LBP' : 'USD'); // Default to USD
-      const amount = hasUSD ? amountUSD : amountLBP;
 
-      // Update running balance for both currencies
-      runningUSD += amountUSD;
-      runningLBP += amountLBP;
+      // Skip rows that have no actual amount (zero-only entries).
+      if (presentCurrencies.length === 0) continue;
+      const totalNetMag = presentCurrencies.reduce(
+        (sum, c) => sum + Math.abs(getDebit(amounts, c) - getCredit(amounts, c)),
+        0
+      );
+      if (totalNetMag < 0.01) continue;
 
-      // Determine transaction type and description
-      // PRIMARY: Determine type from journal entry debit/credit values
-      // This is more reliable than transaction categories
+      const rowCurrency = pickDominantCurrency(amounts);
+      const rowDebit = getDebit(amounts, rowCurrency);
+      const rowCredit = getCredit(amounts, rowCurrency);
+      const amountAbs = Math.abs(rowDebit - rowCredit);
+
+      // Determine transaction type from this entry's debit/credit shape.
+      // Drives the displayed icon/colour/label and totals bucketing.
       let type: 'sale' | 'payment' | 'income' | 'expense' = 'payment';
-      // Parse and translate account entry description (may be multilingual)
-      let description = accountEntry.description 
+      const hasDebit = rowDebit > 0.01;
+      const hasCredit = rowCredit > 0.01;
+      const code: string | undefined = accountEntry.account_code;
+
+      if (code === '1200') {
+        // AR: debit = sale/charge to entity, credit = payment received from entity
+        if (hasDebit && !hasCredit) type = 'sale';
+        else if (hasCredit && !hasDebit) type = 'payment';
+      } else if (code === '2100') {
+        // AP: credit = receiving/purchase from entity, debit = payment made to entity
+        if (hasCredit && !hasDebit) type = 'income';
+        else if (hasDebit && !hasCredit) type = 'payment';
+      } else if (code === '2200') {
+        // Salaries Payable: credit = salary accrued, debit = paid to employee
+        if (hasCredit && !hasDebit) type = 'expense';
+        else if (hasDebit && !hasCredit) type = 'payment';
+      }
+
+      // Description: prefer the entry's description, then the transaction's, then a generic default.
+      let description = accountEntry.description
         ? getTranslatedString(parseMultilingualString(accountEntry.description), language, 'en')
         : 'Transaction';
-      
-      // Check debit/credit values to determine transaction type
-      const hasDebitUSD = Math.abs(accountEntry.debit_usd) > 0.01;
-      const hasDebitLBP = Math.abs(accountEntry.debit_lbp) > 0.01;
-      const hasCreditUSD = Math.abs(accountEntry.credit_usd) > 0.01;
-      const hasCreditLBP = Math.abs(accountEntry.credit_lbp) > 0.01;
-      const hasDebit = hasDebitUSD || hasDebitLBP;
-      const hasCredit = hasCreditUSD || hasCreditLBP;
-      
-      if (entityType === 'customer') {
-        // For customers (AR account 1200):
-        // - Credit to AR = payment received (reduces receivable)
-        // - Debit to AR = sale/charge (increases receivable)
-        if (hasCredit && !hasDebit) {
-          type = 'payment';
-        } else if (hasDebit && !hasCredit) {
-          type = 'sale';
-        }
-        // If both debit and credit exist, fall through to transaction category check
-      } else if (entityType === 'employee') {
-        // For employees:
-        // - Account 1200 (AR): Credit = payment received, Debit = credit sale
-        // - Account 2200 (Salaries Payable - liability): Debit = payment made (salary), Credit = salary accrued
-        if (accountEntry.account_code === '1200') {
-          // Account 1200: same logic as customers
-          if (hasCredit && !hasDebit) {
+      if (transaction) {
+        if (hasDebit && hasCredit) {
+          if (transaction.category?.includes('CREDIT_SALE') || transaction.category?.includes('SALE')) {
+            type = code === '2100' ? 'income' : 'sale';
+            description = transaction.description
+              ? getTranslatedString(parseMultilingualString(transaction.description), language, 'en')
+              : description;
+          } else if (transaction.category?.includes('PAYMENT')) {
             type = 'payment';
-          } else if (hasDebit && !hasCredit) {
-            type = 'sale';
+            description = transaction.description
+              ? getTranslatedString(parseMultilingualString(transaction.description), language, 'en')
+              : description;
+          } else if (transaction.type === 'income') {
+            type = 'income';
+          } else if (transaction.type === 'expense') {
+            type = 'expense';
           }
-        } else if (accountEntry.account_code === '2200') {
-          // Account 2200 (Salaries Payable - liability):
-          // - Debit to 2200 = payment made to employee (reduces what we owe)
-          // - Credit to 2200 = salary accrued (increases what we owe)
-          if (hasDebit && !hasCredit) {
-            type = 'payment'; // Payment made to employee
-          } else if (hasCredit && !hasDebit) {
-            type = 'expense'; // Salary accrued/expense
-          }
-        }
-        // If both debit and credit exist, fall through to transaction category check
-      } else if (entityType === 'supplier') {
-        // For suppliers (AP account 2100):
-        // - Credit to AP = receiving/purchase (increases payable)
-        // - Debit to AP = payment made (reduces payable)
-        if (hasCredit && !hasDebit) {
-          type = 'income'; // Receiving/purchase
-        } else if (hasDebit && !hasCredit) {
-          type = 'payment'; // Payment made to supplier
-        }
-        // If both debit and credit exist, fall through to transaction category check
-      }
-      
-      // FALLBACK: Use transaction category if type couldn't be determined from debit/credit
-      if (transaction && (hasDebit && hasCredit)) {
-        // Both debit and credit exist, use transaction category
-        if (transaction.category?.includes('CREDIT_SALE') || transaction.category?.includes('SALE')) {
-          // For supplier credit purchases, type should be 'income' (purchase/receiving)
-          // For customer credit sales, type should be 'sale'
-          type = entityType === 'customer' ? 'sale' : 'income';
-          description = transaction.description 
+        } else {
+          description = transaction.description
             ? getTranslatedString(parseMultilingualString(transaction.description), language, 'en')
             : description;
-        } else if (transaction.category?.includes('PAYMENT')) {
-          type = 'payment';
-          description = transaction.description 
-            ? getTranslatedString(parseMultilingualString(transaction.description), language, 'en')
-            : description;
-        } else if (transaction.type === 'income') {
-          type = 'income';
-        } else if (transaction.type === 'expense') {
-          type = 'expense';
         }
-      } else if (transaction) {
-        // Also check transaction category for supplier credit purchases when type wasn't set from debit/credit
-        if (entityType === 'supplier' && transaction.category?.includes('CREDIT_SALE')) {
-          type = 'income'; // Supplier credit purchase
-        }
-        // Update description from transaction if available (translate multilingual)
-        description = transaction.description 
-          ? getTranslatedString(parseMultilingualString(transaction.description), language, 'en')
-          : description;
       }
 
-      // Check if this is a price adjustment transaction
       const isPriceAdjustment = transaction?.category === TRANSACTION_CATEGORIES.INVENTORY_PRICE_ADJUSTMENT;
 
       // Format description for price adjustments with product details (using pre-fetched data)
@@ -662,19 +585,15 @@ export class AccountStatementService {
         }
       }
 
-      // Get inventory bill information for supplier transactions (inventory purchases)
-      // Inventory purchases link to inventory_bills via metadata.batch_id
-      // Skip price adjustments - they shouldn't show inventory items
-      // Optimize: Use pre-fetched data (no individual queries)
+      // Inventory bills (received from supplier) are gated on a metadata.batch_id —
+      // they don't depend on entityType, so a sale-to-supplier scenario won't pick
+      // them up incorrectly (it has no batch_id).
       let inventoryBill: any = null;
       let inventoryItems: any[] = [];
-      if (entityType === 'supplier' && transaction && !isPriceAdjustment) {
+      if (transaction && !isPriceAdjustment) {
         const batchId = (transaction.metadata as any)?.batch_id;
         if (batchId) {
-          // Get inventory bill from pre-fetched map
           inventoryBill = inventoryBillMap.get(batchId);
-          
-          // Get inventory items for this batch from pre-fetched map
           if (inventoryBill) {
             inventoryItems = inventoryItemsByBatch.get(batchId) || [];
           }
@@ -683,63 +602,23 @@ export class AccountStatementService {
 
       // Build product details for detailed view (using pre-fetched products)
       const productDetails: StatementProductDetail[] = [];
-      
-      // Process bill line items (for customer bills and supplier bills from POS)
+
+      // Determine line-item direction from the entry's dominant direction.
+      // If the entry net-debits, lines show as debit; if it net-credits, lines show as credit.
+      const dominantIsDebit = rowDebit >= rowCredit;
+
+      // Process bill line items (POS bills — sales OR sales-to-supplier).
       if (viewMode === 'detailed' && billLineItems.length > 0) {
         for (const item of billLineItems) {
           const product = productMap.get(item.product_id);
-          // Parse and translate multilingual product name
           const parsedName = product?.name ? parseMultilingualString(product.name) : null;
           const translatedName = parsedName ? getTranslatedString(parsedName, language, 'en') : 'Unknown Product';
-          
-          // Calculate credit/debit for each line item based on transaction type
-          // Sales show as debit (increases receivable), payments show as credit (decreases receivable)
-          let debit_amount = 0;
-          let credit_amount = 0;
-          
-          // Use the item's currency if available, otherwise use transaction currency
-          const itemCurrency = item.currency || currency;
+
+          const itemCurrency = (item.currency as CurrencyCode) || rowCurrency;
           const lineTotal = item.line_total || 0;
-          
-          // Determine debit/credit based on transaction type and entity type
-          // For customers: sales increase receivable (debit), payments decrease receivable (credit)
-          // For suppliers: purchases increase payable (credit), payments decrease payable (debit)
-          if (entityType === 'customer') {
-            if (type === 'sale' || (type === 'income' && transaction?.category?.includes('CREDIT_SALE'))) {
-              // Sales: show as debit (increases receivable)
-              debit_amount = lineTotal;
-              credit_amount = 0;
-            } else if (type === 'payment') {
-              // Payments: show as credit (decreases receivable)
-              debit_amount = 0;
-              credit_amount = lineTotal;
-            } else {
-              // Default: treat as sale for customers
-              debit_amount = lineTotal;
-              credit_amount = 0;
-            }
-          } else if (entityType === 'supplier') {
-            // Supplier credit purchases: show as credit (increases payable)
-            if (type === 'income' || 
-                transaction?.category?.includes('SUPPLIER_CREDIT_SALE') || 
-                transaction?.category?.includes('CREDIT_SALE')) {
-              debit_amount = 0;
-              credit_amount = lineTotal;
-            } else if (type === 'payment') {
-              // Payments: show as debit (decreases payable)
-              debit_amount = lineTotal;
-              credit_amount = 0;
-            } else if (type === 'expense') {
-              // Expenses: show as debit
-              debit_amount = lineTotal;
-              credit_amount = 0;
-            } else {
-              // Default: treat as purchase for suppliers
-              debit_amount = 0;
-              credit_amount = lineTotal;
-            }
-          }
-          
+          const debit_amount = dominantIsDebit ? lineTotal : 0;
+          const credit_amount = dominantIsDebit ? 0 : lineTotal;
+
           productDetails.push({
             product_id: item.product_id,
             product_name: translatedName,
@@ -751,43 +630,25 @@ export class AccountStatementService {
             notes: item.notes || undefined,
             debit_amount,
             credit_amount,
-            currency: itemCurrency
+            currency: itemCurrency,
           } as StatementProductDetail);
         }
       }
 
-      // Process inventory items for supplier inventory bills (inventory purchases)
-      if (viewMode === 'detailed' && inventoryItems.length > 0 && entityType === 'supplier') {
+      // Process inventory items (received-from-supplier bills).
+      if (viewMode === 'detailed' && inventoryItems.length > 0) {
         for (const item of inventoryItems) {
           const product = productMap.get(item.product_id);
-          // Parse and translate multilingual product name
           const parsedName = product?.name ? parseMultilingualString(product.name) : null;
           const translatedName = parsedName ? getTranslatedString(parsedName, language, 'en') : 'Unknown Product';
-          
-          // Calculate credit/debit for each inventory item
-          // For suppliers: purchases increase payable (credit)
-          let debit_amount = 0;
-          let credit_amount = 0;
-          
-          // Use the item's currency if available, otherwise use transaction currency
-          const itemCurrency = item.currency || currency;
-          // Calculate line total: quantity * price (or use received_quantity if different)
+
+          const itemCurrency = (item.currency as CurrencyCode) || rowCurrency;
           const itemQuantity = item.received_quantity || item.quantity || 0;
           const itemPrice = item.price || 0;
           const lineTotal = itemQuantity * itemPrice;
-          
-          // Supplier inventory purchases: show as credit (increases payable)
-          if (type === 'income' || 
-              transaction?.category?.includes('SUPPLIER_CREDIT_SALE') || 
-              transaction?.category?.includes('CREDIT_SALE')) {
-            debit_amount = 0;
-            credit_amount = lineTotal;
-          } else {
-            // Default: treat as purchase for suppliers
-            debit_amount = 0;
-            credit_amount = lineTotal;
-          }
-          
+          const debit_amount = dominantIsDebit ? lineTotal : 0;
+          const credit_amount = dominantIsDebit ? 0 : lineTotal;
+
           productDetails.push({
             product_id: item.product_id,
             product_name: translatedName,
@@ -796,77 +657,83 @@ export class AccountStatementService {
             unit_price: itemPrice,
             total_price: lineTotal,
             weight: item.weight || undefined,
-            notes: undefined, // Inventory items don't have notes field
+            notes: undefined,
             debit_amount,
             credit_amount,
-            currency: itemCurrency
+            currency: itemCurrency,
           } as StatementProductDetail);
         }
       }
 
-      // Calculate totals for both currencies
-      if (type === 'sale' || (type === 'income' && entityType === 'customer')) {
-        totals.salesUSD += Math.abs(amountUSD);
-        totals.salesLBP += Math.abs(amountLBP);
-      } else if (type === 'payment') {
-        totals.paymentsUSD += Math.abs(amountUSD);
-        totals.paymentsLBP += Math.abs(amountLBP);
+      // Per-currency totals bucket. Drives the financial summary cards.
+      for (const ccy of presentCurrencies) {
+        const debit = getDebit(amounts, ccy);
+        const credit = getCredit(amounts, ccy);
+        if (type === 'sale') {
+          addTo(totals.sales, ccy, Math.abs(debit - credit));
+        } else if (type === 'income') {
+          addTo(totals.receivings, ccy, Math.abs(debit - credit));
+        } else if (type === 'payment') {
+          addTo(totals.payments, ccy, Math.abs(debit - credit));
+        }
       }
 
-      // When product_details (line items) exist, don't use multilingual description
-      // The line items will be displayed instead, so description should be empty or a summary
-      const finalDescription = productDetails.length > 0 
-        ? '' // Empty when line items are shown - they will display the product details
-        : description; // Use multilingual description only when no line items
-
-      // Calculate quantity and average price from line items (bill items or inventory items)
+      // Quantity / average-price hint shown when there are no line items expanded.
       const allLineItems = billLineItems.length > 0 ? billLineItems : inventoryItems;
       const totalQuantity = allLineItems.length > 0
-        ? allLineItems.reduce((sum, item) => {
-            if (item.quantity !== undefined) {
-              return sum + (item.quantity || 0);
-            } else if (item.received_quantity !== undefined) {
-              return sum + (item.received_quantity || 0);
-            }
+        ? allLineItems.reduce((sum: number, it: any) => {
+            if (it.quantity !== undefined) return sum + (it.quantity || 0);
+            if (it.received_quantity !== undefined) return sum + (it.received_quantity || 0);
             return sum;
           }, 0)
         : 0;
-      
       const averagePrice = allLineItems.length > 0
-        ? allLineItems.reduce((sum, item) => {
-            const price = item.unit_price || item.price || 0;
-            return sum + price;
-          }, 0) / allLineItems.length
+        ? allLineItems.reduce((sum: number, it: any) => sum + (it.unit_price || it.price || 0), 0) / allLineItems.length
         : 0;
 
+      // Snapshot the running balance map AFTER applying this entry.
+      const balancesAfter: Partial<Record<CurrencyCode, number>> = {};
+      for (const c of Object.keys(running) as CurrencyCode[]) {
+        const v = running[c];
+        if (v !== undefined) balancesAfter[c] = v;
+      }
+
       statementTransactions.push({
-        id: transactionId,
+        id: `${transactionId}:${accountEntry.id ?? statementTransactions.length}`,
         date: accountEntry.posted_date || accountEntry.created_at,
         type,
-        description: finalDescription,
-        amount: Math.abs(amount),
+        description, // keep the meaningful description even when line items are present
+        debit: rowDebit,
+        credit: rowCredit,
+        amount: amountAbs,
         quantity: totalQuantity,
         weight: 0,
         price: averagePrice,
-        currency,
-        balance_after: currency === 'USD' ? runningUSD : runningLBP,
-        payment_method: transaction?.category?.includes('CASH') ? 'cash' : 
-                       transaction?.category?.includes('CREDIT') ? 'credit' : undefined,
+        currency: rowCurrency,
+        balances_after: balancesAfter,
+        balance_after: balancesAfter[rowCurrency] ?? 0,
+        account_code: accountEntry.account_code,
+        account_name: accountLabel(accountEntry),
+        payment_method: transaction?.category?.includes('CASH') ? 'cash'
+          : transaction?.category?.includes('CREDIT') ? 'credit'
+          : undefined,
         product_details: productDetails.length > 0 ? productDetails : undefined,
-        reference: (transaction?.reference && transaction.reference.trim() !== '') 
-          ? transaction.reference 
-          : `TXN-${transactionId.slice(-8)}`
+        reference: (transaction?.reference && transaction.reference.trim() !== '')
+          ? transaction.reference
+          : `TXN-${transactionId.slice(-8)}`,
       });
     }
 
-    // DO NOT re-sort after calculating balances - this would break the running balance calculation
-    // Transactions are already in chronological order from processing
-    // The balance_after values depend on the processing order, so we must maintain it
+    const ending: BalanceSnapshotMap = {};
+    for (const c of Object.keys(running) as CurrencyCode[]) {
+      const v = running[c];
+      if (v !== undefined && Math.abs(v) > 0.005) ending[c] = v;
+    }
 
     return {
       statementTransactions,
-      ending: { USD: runningUSD, LBP: runningLBP },
-      totals
+      ending,
+      totals,
     };
   }
 
@@ -920,7 +787,7 @@ export class AccountStatementService {
     const inventoryBillIdsArray = Array.from(inventoryBillIds);
     
     // Parallelize fetching bills, bill line items, inventory bills, and inventory items
-    const [bills, inventoryBills] = await Promise.all([
+    const [bills] = await Promise.all([
       billReferences.length > 0
         ? getDB().bills.where('bill_number').anyOf(billReferences).toArray()
         : Promise.resolve([]),
@@ -1071,125 +938,103 @@ export class AccountStatementService {
       throw new Error(`${entityType.charAt(0).toUpperCase() + entityType.slice(1)} ${entityId} not found`);
     }
 
-    // Determine account code(s) based on entity type
-    // Employees have entries in TWO accounts: 1200 (credit sales) and 2200 (salary payments)
-    const accountCodes = entityType === 'supplier' 
-      ? ['2100'] 
-      : entityType === 'employee' 
-        ? ['1200', '2200'] // Both AR and Salaries Payable for employees
-        : ['1200']; // AR for customers
-    const statementEntityType = entityType === 'employee' ? 'customer' : entityType; // Employees use customer logic
+    const statementEntityType = entityType === 'employee' ? 'customer' : entityType;
 
-    // Optimize: Use string comparison for date filtering (faster than Date objects)
-    const startDateStr = startDate.split('T')[0]; // YYYY-MM-DD format
+    const startDateStr = startDate.split('T')[0];
     const endDateStr = endDate.split('T')[0];
-    
-    // Fetch entries for all relevant accounts
-    // For employees, we need to combine entries from both accounts
+
+    // Both legs of a journal pair carry the SAME entity_id (see journalService.ts
+    // lines 116 and 144). If we queried purely by entity_id, a $100 customer
+    // payment would return BOTH the Cash debit (account 1100) and the AR credit
+    // (account 1200), summing to zero on the ledger. To prevent that — and still
+    // surface cross-account entity activity (supplier buying from POS posts to
+    // 1200; employee salary posts to 2200) — restrict to the three entity-balance
+    // accounts uniformly across all entity types.
+    const ENTITY_BALANCE_ACCOUNTS = new Set(['1200', '2100', '2200']);
+
     let allAccountEntries: any[] = [];
-    
-    for (const accountCode of accountCodes) {
-      try {
-        const entries = await getDB().journal_entries
-          .where('[store_id+account_code]')
-          .equals([storeId, accountCode])
-          .filter(entry => 
-            entry.entity_id === entityId && 
-            entry.is_posted === true
-          )
-          .toArray();
-        allAccountEntries.push(...entries);
-      } catch (error) {
-        // Fallback: If compound index doesn't exist, filter manually
-        console.warn(`Compound index [store_id+account_code] not available for account ${accountCode}, using fallback query:`, error);
-        const allStoreEntries = await getDB().journal_entries
-          .where('store_id')
-          .equals(storeId)
-          .filter(entry => 
-            entry.entity_id === entityId && 
-            entry.account_code === accountCode &&
-            entry.is_posted === true
-          )
-          .toArray();
-        allAccountEntries.push(...allStoreEntries);
+    try {
+      allAccountEntries = await getDB().journal_entries
+        .where('entity_id')
+        .equals(entityId)
+        .filter(entry =>
+          entry.store_id === storeId &&
+          entry.is_posted === true &&
+          ENTITY_BALANCE_ACCOUNTS.has(entry.account_code)
+        )
+        .toArray();
+    } catch (error) {
+      console.warn('[ACCOUNT_STATEMENT] entity_id index unavailable, falling back to store_id scan:', error);
+      allAccountEntries = await getDB().journal_entries
+        .where('store_id')
+        .equals(storeId)
+        .filter(entry =>
+          entry.entity_id === entityId &&
+          entry.is_posted === true &&
+          ENTITY_BALANCE_ACCOUNTS.has(entry.account_code)
+        )
+        .toArray();
+    }
+
+    console.log(`[ACCOUNT_STATEMENT] Found ${allAccountEntries.length} journal entries for ${entityType} ${entityId} (entity-balance accounts: 1200, 2100, 2200)`);
+
+    const prePeriodEntries = allAccountEntries.filter(entry =>
+      (entry.posted_date || '') < startDateStr
+    );
+
+    // Per-currency opening balance under the unified sign rule:
+    // balance += debit - credit, applied across ALL account codes uniformly.
+    const openingBalance: BalanceSnapshotMap = {};
+    for (const e of prePeriodEntries) {
+      const amounts = amountsFromLegacyEntry(e);
+      for (const ccy of amountCurrencies(amounts)) {
+        const delta = getDebit(amounts, ccy) - getCredit(amounts, ccy);
+        if (delta !== 0) {
+          openingBalance[ccy] = (openingBalance[ccy] ?? 0) + delta;
+        }
       }
     }
-    
-    console.log(`[ACCOUNT_STATEMENT] Found ${allAccountEntries.length} journal entries for ${entityType} ${entityId}, accounts: ${accountCodes.join(', ')}`);
-    
-    // Optimize: Use string comparison for date filtering (faster)
-    const prePeriodEntries = allAccountEntries.filter(entry => 
-      entry.posted_date < startDateStr
-    );
-    
-    // Calculate opening balance based on entity type
-    let openingBalance: { USD: number; LBP: number };
-    
-    if (entityType === 'employee') {
-      // For employees: combine balances from both accounts
-      // Account 1200 (AR - asset): debit - credit
-      // Account 2200 (Salaries Payable - liability): credit - debit
-      // Net opening balance = AR balance - Salaries Payable balance
-      const prePeriod1200 = prePeriodEntries.filter(e => e.account_code === '1200');
-      const prePeriod2200 = prePeriodEntries.filter(e => e.account_code === '2200');
-      
-      const opening1200 = {
-        USD: prePeriod1200.reduce((sum, e) => sum + (e.debit_usd - e.credit_usd), 0),
-        LBP: prePeriod1200.reduce((sum, e) => sum + (e.debit_lbp - e.credit_lbp), 0)
-      };
-      
-      const opening2200 = {
-        USD: prePeriod2200.reduce((sum, e) => sum + (e.credit_usd - e.debit_usd), 0), // Liability: credit - debit
-        LBP: prePeriod2200.reduce((sum, e) => sum + (e.credit_lbp - e.debit_lbp), 0)
-      };
-      
-      openingBalance = {
-        USD: opening1200.USD - opening2200.USD,
-        LBP: opening1200.LBP - opening2200.LBP
-      };
-    } else {
-      // For customers/suppliers: standard calculation
-      openingBalance = {
-        USD: prePeriodEntries.reduce((sum, e) => sum + (e.debit_usd - e.credit_usd), 0),
-        LBP: prePeriodEntries.reduce((sum, e) => sum + (e.debit_lbp - e.credit_lbp), 0)
-      };
-    }
 
-    // Get journal entries for the period using string comparison
-    const journalEntries = allAccountEntries.filter(entry => 
-      entry.posted_date >= startDateStr && entry.posted_date <= endDateStr
+    const journalEntries = allAccountEntries.filter(entry =>
+      (entry.posted_date || '') >= startDateStr &&
+      (entry.posted_date || '') <= endDateStr
     );
 
-    // Map journal entries to statement transactions
-    // Pass the actual entityType (not statementEntityType) so the method knows it's an employee
     const { statementTransactions, ending, totals } = await this.mapJournalEntriesToStatementTransactions(
       journalEntries,
       openingBalance,
       viewMode,
-      entityType, // Pass actual entityType so method can handle employees correctly
+      entityType,
       language
     );
 
-    // Calculate product summary for detailed view
-    const productSummary = viewMode === 'detailed' 
+    const productSummary = viewMode === 'detailed'
       ? await this.calculateProductSummaryFromJournalEntries(journalEntries, statementEntityType, language)
       : undefined;
 
-    // Build financial summary based on entity type
+    // Per-currency net change.
+    const netChange: BalanceSnapshotMap = {};
+    const currencyKeys = new Set<CurrencyCode>([
+      ...(Object.keys(openingBalance) as CurrencyCode[]),
+      ...(Object.keys(ending) as CurrencyCode[]),
+    ]);
+    for (const c of currencyKeys) {
+      const delta = (ending[c] ?? 0) - (openingBalance[c] ?? 0);
+      if (Math.abs(delta) > 0.005) netChange[c] = delta;
+    }
+
+    // Net sign aggregated across currencies. Used to show "owes us" / "we owe" labels.
+    const netTotal = Object.values(ending).reduce<number>((sum, v) => sum + (v ?? 0), 0);
+    const netSign: 1 | -1 | 0 = Math.abs(netTotal) < 0.005 ? 0 : (netTotal > 0 ? 1 : -1);
+
     const financialSummary = {
       openingBalance,
-      currentBalance: { USD: ending.USD, LBP: ending.LBP },
-      totalSales: entityType === 'supplier' 
-        ? { USD: 0, LBP: 0 } 
-        : { USD: totals.salesUSD, LBP: totals.salesLBP },
-      totalPayments: { USD: totals.paymentsUSD, LBP: totals.paymentsLBP },
-      totalReceivings: entityType === 'supplier'
-        ? { USD: totals.salesUSD, LBP: totals.salesLBP } // Received bills are "sales" in the totals
-        : { USD: 0, LBP: 0 },
-      netChange: { 
-        USD: ending.USD - openingBalance.USD, 
-        LBP: ending.LBP - openingBalance.LBP 
-      }
+      currentBalance: ending,
+      totalSales: totals.sales,
+      totalPayments: totals.payments,
+      totalReceivings: totals.receivings,
+      netChange,
+      netSign,
     };
 
     return {
@@ -1249,88 +1094,6 @@ export class AccountStatementService {
   }
 
   /**
-   * Calculate product summary statistics
-   * @deprecated This method is not used. Use calculateProductSummaryFromJournalEntries instead.
-   */
-  private calculateProductSummary(
-    sales: BillLineItem[], 
-    products: Product[],
-    language: SupportedLanguage = 'en'
-  ): {
-    totalProducts: number;
-    topProducts: Array<{
-      productName: string;
-      totalQuantity: number;
-      totalValue: number;
-      averagePrice: number;
-    }>;
-    categoryBreakdown: Record<string, {
-      quantity: number;
-      value: number;
-    }>;
-  } {
-    const productStats = new Map<string, {
-      productName: string;
-      category: string;
-      totalQuantity: number;
-      totalValue: number;
-      transactionCount: number;
-    }>();
-
-    // Aggregate product data
-    sales.forEach(sale => {
-      const product = products.find(p => p.id === sale.product_id);
-      if (!product) return;
-
-      // Parse and translate multilingual product name
-      const parsedName = parseMultilingualString(product.name);
-      const translatedName = getTranslatedString(parsedName, language, 'en');
-
-      const existing = productStats.get(sale.product_id) || {
-        productName: translatedName,
-        category: product.category,
-        totalQuantity: 0,
-        totalValue: 0,
-        transactionCount: 0
-      };
-
-      existing.totalQuantity += sale.quantity;
-      existing.totalValue += sale.line_total;
-      existing.transactionCount += 1;
-
-      productStats.set(sale.product_id, existing);
-    });
-
-    // Calculate top products
-    const topProducts = Array.from(productStats.values())
-      .map(stat => ({
-        productName: stat.productName,
-        totalQuantity: stat.totalQuantity,
-        totalValue: stat.totalValue,
-        averagePrice: stat.totalValue / stat.totalQuantity
-      }))
-      .sort((a, b) => b.totalValue - a.totalValue)
-      .slice(0, 10);
-
-    // Calculate category breakdown
-    const categoryBreakdown: Record<string, { quantity: number; value: number }> = {};
-
-    productStats.forEach(stat => {
-      if (!categoryBreakdown[stat.category]) {
-        categoryBreakdown[stat.category] = { quantity: 0, value: 0 };
-      }
-      categoryBreakdown[stat.category].quantity += stat.totalQuantity;
-      categoryBreakdown[stat.category].value += stat.totalValue;
-    });
-
-    return {
-      totalProducts: productStats.size,
-      topProducts,
-      categoryBreakdown
-    };
-  }
-
-  /**
    * Export statement to PDF format
    */
   public async exportToPDF(statement: AccountStatement): Promise<Blob> {
@@ -1352,13 +1115,24 @@ export class AccountStatementService {
     text += `Statement Date: ${new Date(statement.statementDate).toLocaleDateString()}\n`;
     text += `Period: ${new Date(statement.dateRange.start).toLocaleDateString()} - ${new Date(statement.dateRange.end).toLocaleDateString()}\n\n`;
 
-    // Financial Summary
+    // Financial Summary — per-currency, no FX conversion.
     text += `FINANCIAL SUMMARY\n`;
     text += `================\n`;
-    text += `Opening Balance (USD): $${statement.financialSummary.openingBalance.USD.toFixed(2)}\n`;
-    text += `Opening Balance (LBP): ${statement.financialSummary.openingBalance.LBP.toLocaleString()}\n`;
-    text += `Current Balance (USD): $${statement.financialSummary.currentBalance.USD.toFixed(2)}\n`;
-    text += `Current Balance (LBP): ${statement.financialSummary.currentBalance.LBP.toLocaleString()}\n\n`;
+    const opening = statement.financialSummary.openingBalance;
+    const current = statement.financialSummary.currentBalance;
+    const allCurrencies = Array.from(new Set([
+      ...Object.keys(opening),
+      ...Object.keys(current),
+    ])) as CurrencyCode[];
+    if (allCurrencies.length === 0) {
+      text += `(no balance activity)\n`;
+    } else {
+      for (const c of allCurrencies) {
+        text += `Opening (${c}): ${(opening[c] ?? 0).toLocaleString()}\n`;
+        text += `Current (${c}): ${(current[c] ?? 0).toLocaleString()}\n`;
+      }
+    }
+    text += `\n`;
 
     // Product Summary (for detailed view)
     if (statement.viewMode === 'detailed' && statement.productSummary) {

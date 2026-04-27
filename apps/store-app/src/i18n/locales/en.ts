@@ -1149,7 +1149,14 @@ const en = {
     description: 'Description',
     amount: 'Amount',
     reference: 'Reference',
-    category: 'Category'
+    category: 'Category',
+    account: 'Account',
+    netPosition: 'Net Position',
+    owesUs: 'Owes us',
+    owedToEntity: 'Owed to',
+    multipleCurrencies: 'Multiple currencies',
+    accountStream: 'Stream',
+    noConversionNote: 'Balances shown per currency (no FX conversion).'
   },
   receipt: {
     storeName: 'KIWI VEGETABLES MARKET',

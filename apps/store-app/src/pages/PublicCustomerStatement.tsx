@@ -1,50 +1,63 @@
-import React from 'react';
 import { useParams } from 'react-router-dom';
-import { 
-  ArrowLeft, 
-  Download, 
-  Printer, 
-  Calendar, 
-  FileText, 
-  DollarSign, 
-  TrendingUp, 
-  TrendingDown,
+import {
+  ArrowLeft,
+  Download,
+  Printer,
+  Calendar,
+  FileText,
+  DollarSign,
+  TrendingUp,
   CreditCard,
   Users,
   BarChart3,
   List,
   Info,
-  Smartphone,
   QrCode
 } from 'lucide-react';
 import { AccountStatement, AccountStatementService } from '../services/accountStatementService';
 import { getCustomerByToken } from '../services/publicStatementService';
-import { Customer, Product } from '../types';
+import { Customer } from '../types';
 import { useI18n } from '../i18n';
 import { useErrorHandler } from '../hooks/useErrorHandler';
-import { getTranslatedString } from '../utils/multilingual';
+import { getTranslatedString, type SupportedLanguage } from '../utils/multilingual';
 import { PrintLayout } from '../components/common/PrintLayout';
 import { PrintPreview } from '../components/common/PrintPreview';
 import { useState as useStateReact, useRef, useEffect } from 'react';
 import { setupPrintWithPageSelection } from '../utils/printUtils';
 import { paginateTransactions, getTotalPages } from '../utils/printPagination';
 import { getLocalDateString, getTodayLocalDate } from '../utils/dateUtils';
-
-interface PublicCustomerStatementProps {
-  // This component will be used in a public route, so it needs to fetch its own data
-}
+import { currencyService } from '../services/currencyService';
+import { useOfflineData } from '../contexts/OfflineDataContext';
+import type { CurrencyCode } from '@pos-platform/shared';
 
 export default function PublicCustomerStatement() {
   const { token: encodedToken } = useParams<{ token: string }>();
   const { language } = useI18n();
   const { handleError } = useErrorHandler();
-  
+  const { preferredCurrency } = useOfflineData();
+
+  // Convert per-currency balance map to a single preferredCurrency value via FX rate.
+  const convertMapToPreferred = (map: Partial<Record<CurrencyCode, number>> | undefined): number => {
+    if (!map) return 0;
+    let total = 0;
+    for (const c of Object.keys(map) as CurrencyCode[]) {
+      const v = map[c];
+      if (v === undefined) continue;
+      try {
+        total += currencyService.convert(v, c, preferredCurrency);
+      } catch {
+        // Missing FX rate — skip; row's native debit/credit cells still render.
+      }
+    }
+    return total;
+  };
+
   // URL-decode the token (it was encoded to handle special characters)
   const token = encodedToken ? decodeURIComponent(encodedToken) : undefined;
 
   const [statement, setStatement] = useStateReact<AccountStatement | null>(null);
   const [customer, setCustomer] = useStateReact<Customer | null>(null);
-  const [customerId, setCustomerId] = useStateReact<string | null>(null);
+  const [, setCustomerId] = useStateReact<string | null>(null);
   const [isLoading, setIsLoading] = useStateReact(true);
   const [error, setError] = useStateReact<string | null>(null);
   const [viewMode, setViewMode] = useStateReact<'summary' | 'detailed'>('summary');
@@ -122,13 +135,9 @@ export default function PublicCustomerStatement() {
     setShowPrintPreview(false);
   };
 
-  // Format currency helper for print
-  const formatCurrencyValue = (amount: number, currency: 'USD' | 'LBP') => {
-    if (currency === 'USD') {
-      return `$${amount.toFixed(2)}`;
-    } else {
-      return `${Math.round(amount).toLocaleString()}`;
-    }
+  // Format currency helper — multi-currency aware (no FX conversion).
+  const formatCurrencyValue = (amount: number, currency: CurrencyCode) => {
+    return currencyService.format(amount, currency);
   };
 
   const handleDownload = async () => {
@@ -152,13 +161,26 @@ export default function PublicCustomerStatement() {
     }
   };
 
-  const formatCurrency = (amount: number, currency: 'USD' | 'LBP') => {
-    if (currency === 'USD') {
-      return `$${amount.toFixed(2)}`;
-    } else {
-      return `${amount.toLocaleString()} ل.ل`;
-    }
+  const formatCurrency = (amount: number, currency: CurrencyCode) => {
+    return currencyService.format(amount, currency);
   };
+
+  // Currencies actually present anywhere on the statement (header + rows + summary).
+  const allCurrencies: CurrencyCode[] = (() => {
+    if (!statement) return [];
+    const set = new Set<string>();
+    for (const map of [
+      statement.financialSummary.openingBalance,
+      statement.financialSummary.currentBalance,
+      statement.financialSummary.totalSales,
+      statement.financialSummary.totalPayments,
+    ]) {
+      Object.keys(map).forEach(k => set.add(k));
+    }
+    statement.transactions.forEach(t => set.add(t.currency));
+    return Array.from(set) as CurrencyCode[];
+  })();
+  const headerCurrency: CurrencyCode = (statement?.transactions[0]?.currency as CurrencyCode) ?? (allCurrencies[0] ?? 'USD');
 
   if (isLoading) {
     return (
@@ -209,7 +231,7 @@ export default function PublicCustomerStatement() {
                 accountNumber={customer.id.slice(0, 10)}
                 phone={customer.phone}
                 previousBalance={statement.financialSummary.openingBalance}
-                currency={statement.transactions[0]?.currency || 'LBP'}
+                currency={headerCurrency}
                 dateRange={statement.dateRange}
                 reportDate={statement.statementDate}
                 totalPages={totalPages}
@@ -219,10 +241,9 @@ export default function PublicCustomerStatement() {
                   <span className="print-opening-balance-label">الرصيد ما قبل:</span>
                   <span className="print-opening-balance-value">
                     {formatCurrencyValue(
-                      statement.financialSummary.openingBalance[statement.transactions[0]?.currency || 'LBP'],
-                      statement.transactions[0]?.currency || 'LBP'
+                      statement.financialSummary.openingBalance[headerCurrency] ?? 0,
+                      headerCurrency
                     )}
-                    {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
                   </span>
                 </div>
 
@@ -257,7 +278,7 @@ export default function PublicCustomerStatement() {
                             })}
                           </td>
                           <td className="print-table-col-reference">{transaction.reference || '-'}</td>
-                          <td className="print-table-col-description">{getTranslatedString(transaction.description, language, 'en')}</td>
+                          <td className="print-table-col-description">{getTranslatedString(transaction.description, language as SupportedLanguage, 'en')}</td>
                           {viewMode === 'detailed' && (
                             <>
                               <td className="print-table-col-quantity print-number">
@@ -267,19 +288,18 @@ export default function PublicCustomerStatement() {
                                 {transaction.weight ? `${transaction.weight}` : '-'}
                               </td>
                               <td className="print-table-col-price print-number">
-                                {transaction.price ? formatCurrencyValue(transaction.price, transaction.currency || 'LBP') : '-'}
+                                {transaction.price ? formatCurrencyValue(transaction.price, transaction.currency) : '-'}
                               </td>
                             </>
                           )}
                           <td className="print-table-col-debit print-number print-currency">
-                            {transaction.type !== 'payment' ? formatCurrencyValue(transaction.amount || 0, transaction.currency) : '0'}
+                            {(transaction.debit ?? 0) > 0.005 ? formatCurrencyValue(transaction.debit ?? 0, transaction.currency) : '0'}
                           </td>
                           <td className="print-table-col-credit print-number print-currency">
-                            {transaction.type === 'payment' ? formatCurrencyValue(transaction.amount || 0, transaction.currency) : '0'}
+                            {(transaction.credit ?? 0) > 0.005 ? formatCurrencyValue(transaction.credit ?? 0, transaction.currency) : '0'}
                           </td>
                           <td className="print-table-col-balance print-number print-currency">
-                            {formatCurrencyValue(transaction.balance_after, transaction.currency)}
-                            {transaction.currency === 'LBP' ? ' ل.ل' : ''}
+                            {formatCurrencyValue(convertMapToPreferred(transaction.balances_after), preferredCurrency)}
                           </td>
                         </tr>
                       ))}
@@ -287,41 +307,31 @@ export default function PublicCustomerStatement() {
                   </table>
                 </div>
 
-                {/* Summary Footer */}
+                {/* Summary Footer — per-currency totals (no FX conversion) */}
                 <div className="print-summary print-section">
-                  <div className="print-summary-row">
-                    <span>إجمالي مدين:</span>
-                    <span className="print-number">
-                      {formatCurrencyValue(
-                        statement.transactions
-                          .filter(t => t.type !== 'payment')
-                          .reduce((sum, t) => sum + (t.amount || 0), 0),
-                        statement.transactions[0]?.currency || 'LBP'
-                      )}
-                      {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
-                    </span>
-                  </div>
-                  <div className="print-summary-row">
-                    <span>إجمالي دائن:</span>
-                    <span className="print-number">
-                      {formatCurrencyValue(
-                        statement.transactions
-                          .filter(t => t.type === 'payment')
-                          .reduce((sum, t) => sum + (t.amount || 0), 0),
-                        statement.transactions[0]?.currency || 'LBP'
-                      )}
-                      {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
-                    </span>
-                  </div>
+                  {/* Per-currency activity totals (debit/credit in original currencies). */}
+                  {allCurrencies.map((c) => {
+                    const debitTotal = statement.transactions.filter(t => t.currency === c).reduce((s, t) => s + (t.debit ?? 0), 0);
+                    const creditTotal = statement.transactions.filter(t => t.currency === c).reduce((s, t) => s + (t.credit ?? 0), 0);
+                    return (
+                      <div key={`tot-${c}`}>
+                        <div className="print-summary-row">
+                          <span>إجمالي مدين ({c}):</span>
+                          <span className="print-number">{formatCurrencyValue(debitTotal, c)}</span>
+                        </div>
+                        <div className="print-summary-row">
+                          <span>إجمالي دائن ({c}):</span>
+                          <span className="print-number">{formatCurrencyValue(creditTotal, c)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {/* Final balance: single number in preferred currency. */}
                   <div className="print-total-row">
                     <div className="print-final-balance">
                       <div className="print-final-balance-label">الرصيد</div>
                       <div className="print-final-balance-value">
-                        {formatCurrencyValue(
-                          statement.financialSummary.currentBalance[statement.transactions[0]?.currency || 'LBP'],
-                          statement.transactions[0]?.currency || 'LBP'
-                        )}
-                        {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
+                        {formatCurrencyValue(convertMapToPreferred(statement.financialSummary.currentBalance), preferredCurrency)}
                       </div>
                     </div>
                   </div>
@@ -350,7 +360,7 @@ export default function PublicCustomerStatement() {
                     accountNumber={isFirstPage ? customer.id.slice(0, 10) : undefined}
                     phone={isFirstPage ? customer.phone : undefined}
                     previousBalance={isFirstPage ? statement.financialSummary.openingBalance : undefined}
-                    currency={statement.transactions[0]?.currency || 'LBP'}
+                    currency={headerCurrency}
                     dateRange={isFirstPage ? statement.dateRange : undefined}
                     reportDate={isFirstPage ? statement.statementDate : undefined}
                     pageNumber={page.pageNumber}
@@ -360,21 +370,18 @@ export default function PublicCustomerStatement() {
                     showAccountInfo={isFirstPage}
                     showOpeningBalance={isFirstPage}
                   >
-                    {/* Opening Balance - Only on first page */}
                     {isFirstPage && (
                       <div className="print-opening-balance print-section">
                         <span className="print-opening-balance-label">الرصيد ما قبل:</span>
                         <span className="print-opening-balance-value">
                           {formatCurrencyValue(
-                            statement.financialSummary.openingBalance[statement.transactions[0]?.currency || 'LBP'],
-                            statement.transactions[0]?.currency || 'LBP'
+                            statement.financialSummary.openingBalance[headerCurrency] ?? 0,
+                            headerCurrency
                           )}
-                          {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
                         </span>
                       </div>
                     )}
 
-                    {/* Transaction Table */}
                     <div className="print-table-container print-section">
                       <table className="print-table">
                         <thead>
@@ -405,7 +412,7 @@ export default function PublicCustomerStatement() {
                                 })}
                               </td>
                               <td className="print-table-col-reference">{transaction.reference || '-'}</td>
-                              <td className="print-table-col-description">{getTranslatedString(transaction.description, language, 'en')}</td>
+                              <td className="print-table-col-description">{getTranslatedString(transaction.description, language as SupportedLanguage, 'en')}</td>
                               {viewMode === 'detailed' && (
                                 <>
                                   <td className="print-table-col-quantity print-number">
@@ -415,19 +422,18 @@ export default function PublicCustomerStatement() {
                                     {transaction.weight ? `${transaction.weight}` : '-'}
                                   </td>
                                   <td className="print-table-col-price print-number">
-                                    {transaction.price ? formatCurrencyValue(transaction.price, transaction.currency || 'LBP') : '-'}
+                                    {transaction.price ? formatCurrencyValue(transaction.price, transaction.currency) : '-'}
                                   </td>
                                 </>
                               )}
                               <td className="print-table-col-debit print-number print-currency">
-                                {transaction.type !== 'payment' ? formatCurrencyValue(transaction.amount || 0, transaction.currency) : '0'}
+                                {(transaction.debit ?? 0) > 0.005 ? formatCurrencyValue(transaction.debit ?? 0, transaction.currency) : '0'}
                               </td>
                               <td className="print-table-col-credit print-number print-currency">
-                                {transaction.type === 'payment' ? formatCurrencyValue(transaction.amount || 0, transaction.currency) : '0'}
+                                {(transaction.credit ?? 0) > 0.005 ? formatCurrencyValue(transaction.credit ?? 0, transaction.currency) : '0'}
                               </td>
                               <td className="print-table-col-balance print-number print-currency">
-                                {formatCurrencyValue(transaction.balance_after, transaction.currency)}
-                                {transaction.currency === 'LBP' ? ' ل.ل' : ''}
+                                {formatCurrencyValue(convertMapToPreferred(transaction.balances_after), preferredCurrency)}
                               </td>
                             </tr>
                           ))}
@@ -435,42 +441,29 @@ export default function PublicCustomerStatement() {
                       </table>
                     </div>
 
-                    {/* Summary Footer - Only on last page */}
                     {isLastPage && (
                       <div className="print-summary print-section">
-                        <div className="print-summary-row">
-                          <span>إجمالي مدين:</span>
-                          <span className="print-number">
-                            {formatCurrencyValue(
-                              statement.transactions
-                                .filter(t => t.type !== 'payment')
-                                .reduce((sum, t) => sum + (t.amount || 0), 0),
-                              statement.transactions[0]?.currency || 'LBP'
-                            )}
-                            {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
-                          </span>
-                        </div>
-                        <div className="print-summary-row">
-                          <span>إجمالي دائن:</span>
-                          <span className="print-number">
-                            {formatCurrencyValue(
-                              statement.transactions
-                                .filter(t => t.type === 'payment')
-                                .reduce((sum, t) => sum + (t.amount || 0), 0),
-                              statement.transactions[0]?.currency || 'LBP'
-                            )}
-                            {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
-                          </span>
-                        </div>
+                        {allCurrencies.map((c) => {
+                          const debitTotal = statement.transactions.filter(tx => tx.currency === c).reduce((s, tx) => s + (tx.debit ?? 0), 0);
+                          const creditTotal = statement.transactions.filter(tx => tx.currency === c).reduce((s, tx) => s + (tx.credit ?? 0), 0);
+                          return (
+                            <div key={`tot2-${c}`}>
+                              <div className="print-summary-row">
+                                <span>إجمالي مدين ({c}):</span>
+                                <span className="print-number">{formatCurrencyValue(debitTotal, c)}</span>
+                              </div>
+                              <div className="print-summary-row">
+                                <span>إجمالي دائن ({c}):</span>
+                                <span className="print-number">{formatCurrencyValue(creditTotal, c)}</span>
+                              </div>
+                            </div>
+                          );
+                        })}
                         <div className="print-total-row">
                           <div className="print-final-balance">
                             <div className="print-final-balance-label">الرصيد</div>
                             <div className="print-final-balance-value">
-                              {formatCurrencyValue(
-                                statement.financialSummary.currentBalance[statement.transactions[0]?.currency || 'LBP'],
-                                statement.transactions[0]?.currency || 'LBP'
-                              )}
-                              {statement.transactions[0]?.currency === 'LBP' ? ' ل.ل' : ''}
+                              {formatCurrencyValue(convertMapToPreferred(statement.financialSummary.currentBalance), preferredCurrency)}
                             </div>
                           </div>
                         </div>
@@ -616,14 +609,14 @@ export default function PublicCustomerStatement() {
                     <div className="text-sm font-medium text-gray-500">Current Balance</div>
                     <DollarSign className="w-4 h-4 text-gray-400" />
                   </div>
-                  <div className={`text-2xl font-bold ${
-                    statement.financialSummary.currentBalance.USD >= 0 ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    {formatCurrency(statement.financialSummary.currentBalance.USD, 'USD')}
-                  </div>
-                  <div className="text-sm text-gray-600 mt-1">
-                    {formatCurrency(statement.financialSummary.currentBalance.LBP, 'LBP')}
-                  </div>
+                  {(() => {
+                    const balancePref = convertMapToPreferred(statement.financialSummary.currentBalance);
+                    return (
+                      <div className={`text-2xl font-bold ${balancePref >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {formatCurrency(balancePref, preferredCurrency)}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
@@ -631,8 +624,12 @@ export default function PublicCustomerStatement() {
                     <div className="text-sm font-medium text-gray-500">Total Credit Sales</div>
                     <CreditCard className="w-4 h-4 text-red-400" />
                   </div>
-                  <div className="text-2xl font-bold text-red-600">
-                    {formatCurrency(statement.financialSummary.totalSales.LBP, 'LBP')}
+                  <div className="space-y-1">
+                    {allCurrencies.map((c) => (
+                      <div key={`pcs-${c}`} className="text-xl font-bold text-red-600">
+                        {formatCurrency(statement.financialSummary.totalSales[c] ?? 0, c)}
+                      </div>
+                    ))}
                   </div>
                 </div>
 
@@ -641,8 +638,12 @@ export default function PublicCustomerStatement() {
                     <div className="text-sm font-medium text-gray-500">Total Payments</div>
                     <TrendingUp className="w-4 h-4 text-green-400" />
                   </div>
-                  <div className="text-2xl font-bold text-green-600">
-                    {formatCurrency(statement.financialSummary.totalPayments.LBP, 'LBP')}
+                  <div className="space-y-1">
+                    {allCurrencies.map((c) => (
+                      <div key={`ppay-${c}`} className="text-xl font-bold text-green-600">
+                        {formatCurrency(statement.financialSummary.totalPayments[c] ?? 0, c)}
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -702,67 +703,73 @@ export default function PublicCustomerStatement() {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {statement.transactions.map((transaction) => (
-                        <tr key={transaction.id} className="hover:bg-gray-50 transition-colors">
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            {new Date(transaction.date).toLocaleDateString()}
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="text-sm font-medium text-gray-900">
-                              {getTranslatedString(transaction.description, language, 'en')}
-                            </div>
-                            {transaction.paymentMethod && (
-                              <div className="text-xs text-gray-500 mt-1 flex items-center">
-                                <CreditCard className="w-3 h-3 mr-1" />
-                                {transaction.paymentMethod}
+                      {statement.transactions.map((transaction) => {
+                        const rowCurrency = transaction.currency;
+                        const rowDebit = transaction.debit ?? 0;
+                        const rowCredit = transaction.credit ?? 0;
+                        const balanceInPreferred = convertMapToPreferred(transaction.balances_after);
+                        return (
+                          <tr key={transaction.id} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                              {new Date(transaction.date).toLocaleDateString()}
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="text-sm font-medium text-gray-900">
+                                {getTranslatedString(transaction.description, language as SupportedLanguage, 'en')}
                               </div>
-                            )}
-                          </td>
-                          {viewMode === 'detailed' && (
-                            <>
-                              <td className="px-6 py-4">
-                                <div className="text-sm font-medium text-gray-900">
-                                  {transaction.quantity ? `${transaction.quantity}` : '-'}
+                              {transaction.payment_method && (
+                                <div className="text-xs text-gray-500 mt-1 flex items-center">
+                                  <CreditCard className="w-3 h-3 mr-1" />
+                                  {transaction.payment_method}
                                 </div>
-                              </td>
-                              <td className="px-6 py-4">
-                                <div className="text-sm font-medium text-gray-900">
-                                  {transaction.weight ? `${transaction.weight}kg` : '-'}
-                                </div>
-                              </td>
-                              <td className="px-6 py-4">
-                                <div className="text-sm font-medium text-gray-900">
-                                  {transaction.price ? `LBP${transaction.price}` : '-'}
-                                </div>
-                              </td>
-                            </>
-                          )}
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            {transaction.type === 'payment' ? (
-                              <span className="text-sm font-bold text-green-600">
-                                {formatCurrency(transaction.amount || 0, transaction.currency)}
-                              </span>
-                            ) : (
-                              <span className="text-sm text-gray-400">-</span>
+                              )}
+                            </td>
+                            {viewMode === 'detailed' && (
+                              <>
+                                <td className="px-6 py-4">
+                                  <div className="text-sm font-medium text-gray-900">
+                                    {transaction.quantity ? `${transaction.quantity}` : '-'}
+                                  </div>
+                                </td>
+                                <td className="px-6 py-4">
+                                  <div className="text-sm font-medium text-gray-900">
+                                    {transaction.weight ? `${transaction.weight}kg` : '-'}
+                                  </div>
+                                </td>
+                                <td className="px-6 py-4">
+                                  <div className="text-sm font-medium text-gray-900">
+                                    {transaction.price ? formatCurrency(transaction.price, rowCurrency) : '-'}
+                                  </div>
+                                </td>
+                              </>
                             )}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            {transaction.type !== 'payment' ? (
-                              <span className="text-sm font-bold text-red-600">
-                                {formatCurrency(transaction.amount || 0, transaction.currency)}
-                              </span>
-                            ) : (
-                              <span className="text-sm text-gray-400">-</span>
-                            )}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            {formatCurrency(transaction.balance_after, transaction.currency)}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {transaction.reference || '-'}
-                          </td>
-                        </tr>
-                      ))}
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              {rowCredit > 0.005 ? (
+                                <span className="text-sm font-bold text-green-600">
+                                  {formatCurrency(rowCredit, rowCurrency)}
+                                </span>
+                              ) : (
+                                <span className="text-sm text-gray-400">-</span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              {rowDebit > 0.005 ? (
+                                <span className="text-sm font-bold text-red-600">
+                                  {formatCurrency(rowDebit, rowCurrency)}
+                                </span>
+                              ) : (
+                                <span className="text-sm text-gray-400">-</span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                              {formatCurrency(balanceInPreferred, preferredCurrency)}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              {transaction.reference || '-'}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

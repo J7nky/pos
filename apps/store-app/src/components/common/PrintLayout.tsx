@@ -2,14 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { useOfflineData } from '../../contexts/OfflineDataContext';
 import { useI18n } from '../../i18n';
 import { useSupabaseAuth } from '../../contexts/SupabaseAuthContext';
+import { currencyService } from '../../services/currencyService';
+import type { CurrencyCode } from '@pos-platform/shared';
+
 interface PrintLayoutProps {
   children: React.ReactNode;
   title: string;
   accountName?: string;
   accountNumber?: string;
   phone?: string;
-  previousBalance?: { USD: number; LBP: number };
-  currency?: 'USD' | 'LBP';
+  previousBalance?: Partial<Record<CurrencyCode, number>>;
+  currency?: CurrencyCode;
   dateRange?: { start: string; end: string };
   reportDate?: string;
   pageNumber?: number;
@@ -98,12 +101,8 @@ export function PrintLayout({
     fetchStoreData();
   }, [offlineData?.receiptSettings, offlineData?.currentBranchId, offlineData?.getBranchLogo, userProfile?.store_id]);
 
-  const formatCurrency = (amount: number, curr: 'USD' | 'LBP') => {
-    if (curr === 'USD') {
-      return `$${amount.toFixed(2)}`;
-    } else {
-      return `${Math.round(amount).toLocaleString()}`;
-    }
+  const formatCurrency = (amount: number, curr: CurrencyCode) => {
+    return currencyService.format(amount, curr);
   };
 
   const formatDate = (dateString: string) => {
@@ -217,8 +216,7 @@ export function PrintLayout({
                 <div>
                   <span className="print-account-label">{t('receipt.previousBalance')}:</span>{' '}
                   <span className="print-opening-balance-value">
-                    {formatCurrency(previousBalance[currency], currency)}{' '}
-                    {currency === 'LBP' ? 'ل.ل' : ''}
+                    {formatCurrency(previousBalance[currency] ?? 0, currency)}
                   </span>
                 </div>
               )}
@@ -226,7 +224,7 @@ export function PrintLayout({
             <div className="print-account-info-col">
               <div>
                 <span className="print-account-label">{t('receipt.currency')}:</span>{' '}
-                <span className="print-currency-box">{currency === 'USD' ? '$' : 'ل.ل'}</span>
+                <span className="print-currency-box">{currencyService.getMeta(currency).symbol}</span>
               </div>
             </div>
           </div>

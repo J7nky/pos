@@ -1275,7 +1275,14 @@ const ar = {
     total: 'الإجمالي',
     unknown: 'غير معروف',
     amount: 'المبلغ',
-    category: 'الفئة'
+    category: 'الفئة',
+    account: 'الحساب',
+    netPosition: 'الرصيد الصافي',
+    owesUs: 'يدين لنا',
+    owedToEntity: 'مستحق لـ',
+    multipleCurrencies: 'عملات متعددة',
+    accountStream: 'تيار الحساب',
+    noConversionNote: 'الأرصدة معروضة لكل عملة (بدون تحويل صرف).'
   },
   receipt: {
     direction: 'rtl',

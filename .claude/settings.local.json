@@ -67,7 +67,11 @@
       "Bash(echo \"ADMIN_EXIT=$?\")",
       "Bash(grep -r \"\\\\${.*\\\\.name\" /c/Users/User/Desktop/pos/apps/store-app/src --include=\"*.tsx\" --include=\"*.ts\")",
       "Bash(grep -rn \"\\\\\\\\.name\\\\}\" /c/Users/User/Desktop/pos/apps/admin-app/src --include=\"*.tsx\" --include=\"*.ts\")",
-      "Bash(grep -n \"ReceivedBill\\\\|bill\\\\\\\\.productName\\\\|getBillLabel\" /c/Users/User/Desktop/pos/apps/store-app/src/components/accountingPage/tabs/ReceivedBills.tsx)"
+      "Bash(grep -n \"ReceivedBill\\\\|bill\\\\\\\\.productName\\\\|getBillLabel\" /c/Users/User/Desktop/pos/apps/store-app/src/components/accountingPage/tabs/ReceivedBills.tsx)",
+      "Bash(git log *)",
+      "Bash(grep -E \"\\\\.\\(tsx?|md\\)$\")",
+      "Bash(pnpm --filter @pos-platform/store-app exec tsc --noEmit -p tsconfig.app.json)",
+      "Bash(pnpm --filter @pos-platform/store-app test:run)"
     ]
   }
 }

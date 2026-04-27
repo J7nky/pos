@@ -530,12 +530,22 @@ export interface StatementTransaction {
   date: string;
   type: 'sale' | 'payment'|'income'|'expense';
   description: string;
+  // Per-currency debit/credit. Each row carries one currency natively.
+  debit: number;
+  credit: number;
+  // Deprecated. Equals max(debit, credit). Kept so legacy callers don't crash.
   amount: number;
   quantity: number;
   weight: number;
   price: number;
-  currency: 'USD' | 'LBP';
+  currency: CurrencyCode;
+  // Per-currency running balance snapshot at this row.
+  balances_after: Partial<Record<CurrencyCode, number>>;
+  // Deprecated alias = balances_after[currency]. Kept for legacy print paths.
   balance_after: number;
+  // Source account this row posted to (e.g. '1200' AR, '2100' AP, '2200' Salaries Payable).
+  account_code?: string;
+  account_name?: string;
   payment_method?: string;
   product_details?: StatementProductDetail[];
   reference?: string;
@@ -554,7 +564,7 @@ export interface StatementProductDetail {
   notes?: string;
   debit_amount?: number;
   credit_amount?: number;
-  currency?: 'USD' | 'LBP';
+  currency?: CurrencyCode;
 }
 
 // Additional interfaces for db.ts (Dexie-specific) - matches database schema exactly

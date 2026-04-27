@@ -1116,10 +1116,6 @@ export default function Customers() {
           storeId={userProfile?.store_id || ''}
           sales={raw.sales || []}
           transactions={raw.transactions as any || []}
-          products={raw.products || []}
-          inventory={raw.inventory || []}
-          inventoryBills={raw.inventoryBills || []}
-          bills={raw.bills || []}
           isSyncing={raw.getSyncStatus().isSyncing}
         />
       )}
