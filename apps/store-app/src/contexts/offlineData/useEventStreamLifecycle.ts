@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
 import { eventStreamService } from '../../services/syncOrchestrator';
+import { entityBalanceCache } from '../../services/entityBalanceCache';
+import { invalidateCashDrawerBalanceCache } from '../../utils/cacheManager';
 
 export interface UseEventStreamLifecycleParams {
   storeId: string | null;
@@ -33,11 +35,25 @@ export function useEventStreamLifecycle({
       if (result.processed > 0) {
         try {
           console.log(`🔄 [EventStream] Calling refreshData() to update UI...`);
+          // Invalidate derived-balance caches before downstream consumers refetch.
+          // Remote events (payments, journal entries from other devices) change
+          // entity balances and cash drawer totals, but their caches are not
+          // mutation-driven — without this, consumers read stale values until TTL.
+          entityBalanceCache.invalidateAll();
+          invalidateCashDrawerBalanceCache();
           await refreshData();
           await refreshCashDrawerStatus();
           window.dispatchEvent(
             new CustomEvent('data-synced', {
               detail: { processed: result.processed, timestamp: new Date().toISOString() },
+            })
+          );
+          // Also notify cash-drawer-specific listeners (CashDrawerMonitor,
+          // CashDrawerBalanceReport, etc.) — they predate `data-synced` and only
+          // listen for `cash-drawer-updated`.
+          window.dispatchEvent(
+            new CustomEvent('cash-drawer-updated', {
+              detail: { event: 'remote-sync', processed: result.processed },
             })
           );
           console.log(`✅ [EventStream] Data and cash drawer status refreshed`);

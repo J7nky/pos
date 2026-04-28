@@ -141,13 +141,11 @@ export class EntityBalanceService {
       today
     );
 
-    // If snapshot exists, use it as opening balance and add today's entries
-    if (snapshot && snapshot.snapshotDate === today) {
-      // Snapshot is current, return it directly
-      return currency === 'USD' ? snapshot.balanceUSD : snapshot.balanceLBP;
-    }
-
-    // If snapshot is from yesterday or earlier, get entries since snapshot date
+    // If snapshot is from a prior day, use it as opening balance and add
+    // entries posted after it. snapshotService now never returns an exact-today
+    // snapshot when asOfDate is today (see comment in entityBalanceService.ts:
+    // getBalancesWithSnapshot), so we always go through the incremental path
+    // when asOfDate is the current day.
     if (snapshot) {
       const snapshotDate = new Date(snapshot.snapshotDate);
       snapshotDate.setHours(23, 59, 59, 999); // End of snapshot day
@@ -204,20 +202,16 @@ export class EntityBalanceService {
       today
     );
 
-    // If snapshot exists and is current, return it directly
-    if (snapshot && snapshot.snapshotDate === today) {
-      return {
-        USD: snapshot.balanceUSD,
-        LBP: snapshot.balanceLBP,
-        lastCalculated: snapshot.snapshotDate
-      };
-    }
-
-    // If snapshot is from yesterday or earlier, get entries since snapshot date
+    // If snapshot is from a prior day, get incremental entries since the snapshot.
+    // Note: snapshotService now always returns a snapshot dated *strictly before
+    // today* when asOfDate is today (so post-snapshot entries from today are
+    // included via the journal-entry sum below). The old "snapshotDate === today"
+    // short-circuit was a stale-balance bug — payments arriving after the
+    // snapshot was taken were not reflected until full page reload.
     if (snapshot) {
       const snapshotDate = new Date(snapshot.snapshotDate);
       snapshotDate.setHours(23, 59, 59, 999); // End of snapshot day
-      
+
       const incrementalEntries = await getDB().journal_entries
         .where('[entity_id+account_code]')
         .equals([entityId, accountCode])

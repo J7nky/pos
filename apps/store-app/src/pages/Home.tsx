@@ -353,9 +353,11 @@ export default function Home() {
     };
 
     const handleDataSynced = () => {
-      if (!isLoadingCashDrawer) {
-        debouncedLoadCashDrawerStatus();
-      }
+      // Always queue a debounced reload — the debounce already coalesces rapid
+      // events. Gating on `isLoadingCashDrawer` would (a) capture a stale value
+      // in this closure for the lifetime of the listener, and (b) silently drop
+      // the only refresh signal we get for remote payments.
+      debouncedLoadCashDrawerStatus();
     };
 
     window.addEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
@@ -367,7 +369,7 @@ export default function Home() {
       window.removeEventListener('undo-completed', handleUndoCompleted as any);
       window.removeEventListener('data-synced', handleDataSynced as any);
     };
-  }, [raw.storeId, debouncedLoadCashDrawerStatus, isLoadingCashDrawer]);
+  }, [raw.storeId, debouncedLoadCashDrawerStatus]);
 
   const lowStockItems = lowStockAlertsEnabled
     ? stockLevels.filter(item => item.currentStock < lowStockThreshold)

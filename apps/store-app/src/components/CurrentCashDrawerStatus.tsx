@@ -161,6 +161,25 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
     loadStatus();
   }, [storeId, currentBranchId]);
 
+  // Re-load when remote sync downloads new journal entries / transactions, and
+  // when local cash-drawer events fire — otherwise the displayed balance stays
+  // stale until remount.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = () => { loadStatus(); };
+    window.addEventListener('data-synced', handler);
+    window.addEventListener('cash-drawer-updated', handler);
+    window.addEventListener('undo-completed', handler);
+    return () => {
+      window.removeEventListener('data-synced', handler);
+      window.removeEventListener('cash-drawer-updated', handler);
+      window.removeEventListener('undo-completed', handler);
+    };
+    // loadStatus is defined in component scope and reads the latest props/state
+    // at call time — no need to add it to deps and risk re-binding listeners.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeId, currentBranchId]);
+
   const loadStatus = async () => {
     setLoading(true);
     try {

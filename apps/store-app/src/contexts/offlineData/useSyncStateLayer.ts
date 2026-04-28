@@ -9,7 +9,6 @@ import { useCallback, useEffect, useRef } from 'react';
 import { syncService, type SyncResult } from '../../services/syncOrchestrator';
 import { crudHelperService } from '../../services/crudHelperService';
 import type { SyncStateLayerAdapter, SyncStateLayerResult } from './types';
-import { invalidateCashDrawerBalanceCache } from '../../utils/cacheManager';
 
 function debug(...args: unknown[]) {
   if (typeof window !== 'undefined' && (window as any).__DEBUG_OFFLINE) {

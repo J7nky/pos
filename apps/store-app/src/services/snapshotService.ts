@@ -285,31 +285,40 @@ export class SnapshotService {
     asOfDate: string,
     branchId?: string | null
   ): Promise<HistoricalBalance> {
-    // Try to find exact snapshot for the date
-    let snapshot = await getDB().balance_snapshots
-      .where('[store_id+account_code+entity_id+snapshot_date]')
-      .equals([storeId, accountCode, entityId, asOfDate])
-      .first()
-      .catch((error) => {
-        throw error;
-      });
-    
-    if (snapshot) {
-      return {
-        accountCode,
-        entityId,
-        balanceUSD: snapshot.balance_usd,
-        balanceLBP: snapshot.balance_lbp,
-        snapshotDate: snapshot.snapshot_date,
-        isCalculated: false
-      };
+    // A snapshot dated today is a point-in-time capture as of when it was
+    // created (e.g. 9am for an end-of-shift roll-up); new journal entries can
+    // land after it (sales, payments, remote events from another device).
+    // Returning that snapshot as the final answer freezes the balance at its
+    // creation time. For the current local day, *don't* short-circuit — fall
+    // through and recompute from the prior day's snapshot + today's entries.
+    const today = getLocalDateString(new Date().toISOString());
+    const isToday = asOfDate === today;
+
+    if (!isToday) {
+      const exact = await getDB().balance_snapshots
+        .where('[store_id+account_code+entity_id+snapshot_date]')
+        .equals([storeId, accountCode, entityId, asOfDate])
+        .first()
+        .catch((error) => { throw error; });
+
+      if (exact) {
+        return {
+          accountCode,
+          entityId,
+          balanceUSD: exact.balance_usd,
+          balanceLBP: exact.balance_lbp,
+          snapshotDate: exact.snapshot_date,
+          isCalculated: false
+        };
+      }
     }
-    
-    // Try to find the most recent snapshot before the requested date
+
+    // Try to find the most recent snapshot before the requested date.
+    // For "today", require strictly-before so today's stale snapshot is not picked.
     const recentSnapshot = await getDB().balance_snapshots
       .where('[store_id+account_code+entity_id]')
       .equals([storeId, accountCode, entityId])
-      .filter(s => s.snapshot_date <= asOfDate)
+      .filter(s => isToday ? s.snapshot_date < asOfDate : s.snapshot_date <= asOfDate)
       .reverse()
       .first();
     

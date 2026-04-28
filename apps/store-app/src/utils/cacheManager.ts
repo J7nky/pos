@@ -428,3 +428,13 @@ export const CacheKeys = {
     createCacheKey('query', queryName, ...params)
 };
 
+/**
+ * Invalidate every cached cash-drawer / entity balance keyed under `balance:`.
+ * Use after any data refresh that may change cash drawer journals (remote sync,
+ * payment, undo, advance) — the underlying TTL is 1 s, which is too long when
+ * the UI refresh debounce fires immediately after a download.
+ */
+export function invalidateCashDrawerBalanceCache(): number {
+  return CacheManager.invalidatePattern('^balance:');
+}
+

@@ -44,6 +44,8 @@ export interface ProcessPaymentDeps {
   ) => any;
   pushUndo: (data: any) => void;
   refreshData: () => Promise<void>;
+  updateUnsyncedCount: () => Promise<void>;
+  debouncedSync: () => void;
   i18n: { en: any; ar: any };
 }
 
@@ -53,6 +55,8 @@ export interface ProcessEmployeePaymentDeps {
   employees: any[];
   exchangeRate: number;
   refreshData: () => Promise<void>;
+  updateUnsyncedCount: () => Promise<void>;
+  debouncedSync: () => void;
   i18n: { en: any; ar: any };
   pushUndo: (action: any) => void;
 }
@@ -109,7 +113,7 @@ export async function processPayment(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const { entityType, entityId, amount, currency, description: _description, reference, storeId, createdBy, paymentDirection } = params;
-    const { currentBranchId, customers, suppliers, exchangeRate, createCashDrawerUndoData, pushUndo, refreshData, i18n } = deps;
+    const { currentBranchId, customers, suppliers, exchangeRate, createCashDrawerUndoData, pushUndo, refreshData, updateUnsyncedCount, debouncedSync, i18n } = deps;
 
     if (!currentBranchId) {
       return { success: false, error: 'No branch selected. Please select a branch before processing payment.' };
@@ -192,6 +196,8 @@ export async function processPayment(
     });
 
     try { await refreshData(); } catch (e) { console.warn('Data refresh failed (non-critical):', e); }
+    try { await updateUnsyncedCount(); } catch (e) { console.warn('Unsynced count refresh failed (non-critical):', e); }
+    try { debouncedSync(); } catch (e) { console.warn('Debounced sync failed (non-critical):', e); }
 
     return { success: true };
   } catch (error) {
@@ -216,7 +222,7 @@ export async function processEmployeePayment(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const { employeeId, amount, currency, description, reference, storeId, createdBy } = params;
-    const { currentBranchId, employees, exchangeRate, refreshData, i18n, pushUndo } = deps;
+    const { currentBranchId, employees, exchangeRate, refreshData, updateUnsyncedCount, debouncedSync, i18n, pushUndo } = deps;
 
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
@@ -330,6 +336,8 @@ export async function processEmployeePayment(
     });
 
     try { await refreshData(); } catch (e) { console.warn('Data refresh failed (non-critical):', e); }
+    try { await updateUnsyncedCount(); } catch (e) { console.warn('Unsynced count refresh failed (non-critical):', e); }
+    try { debouncedSync(); } catch (e) { console.warn('Debounced sync failed (non-critical):', e); }
 
     return { success: true };
   } catch (error) {

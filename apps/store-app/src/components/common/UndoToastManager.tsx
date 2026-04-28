@@ -13,6 +13,9 @@ const UndoToastManager: React.FC = () => {
   const [feedbackType, setFeedbackType] = useState<'success' | 'error' | null>(null);
   const [actionType, setActionType] = useState<string | null>(null);
   const [progress, setProgress] = useState(100);
+  // Bumped on every pushUndo via the 'undo-pushed' window event so the effect below
+  // re-runs even when canUndo stays true across consecutive (still-unsynced) operations.
+  const [pushTick, setPushTick] = useState(0);
   const lastUndoTimestamp = useRef<number>(
     (() => {
       if (typeof sessionStorage === 'undefined') return 0;
@@ -106,7 +109,14 @@ const UndoToastManager: React.FC = () => {
       }
     }
 
-  }, [canUndo, feedback]);
+  }, [canUndo, feedback, pushTick]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = () => setPushTick(t => t + 1);
+    window.addEventListener('undo-pushed', handler);
+    return () => window.removeEventListener('undo-pushed', handler);
+  }, []);
 
   // Cleanup timers on unmount
   useEffect(() => {

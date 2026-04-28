@@ -53,13 +53,13 @@ class SyncTriggerService {
 
     this.syncTriggered = false;
 
-    const callbacks = (crudHelperService as any).callbacks;
+    const callbacks = (crudHelperService as any).host;
 
-    if (!callbacks) {
-      // Callbacks not set up yet — retry once after a short delay
+    if (!callbacks || (!callbacks.onUpdateUnsyncedCount && !callbacks.onPerformSync && !callbacks.onDebouncedSync)) {
+      // Lifecycle host not bound yet — retry once after a short delay
       console.warn('⚠️ Sync trigger service: Callbacks not available yet. Retrying in 2s...');
       setTimeout(async () => {
-        const retryCallbacks = (crudHelperService as any).callbacks;
+        const retryCallbacks = (crudHelperService as any).host;
         if (retryCallbacks) {
           if (retryCallbacks.onUpdateUnsyncedCount) {
             try { await retryCallbacks.onUpdateUnsyncedCount(); } catch { /* ignore */ }

@@ -357,6 +357,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       sessionStorage.setItem(undoOps.UNDO_STORAGE_KEY, JSON.stringify({ ...undoData, timestamp: Date.now() }));
     }
     setCanUndo(true);
+    // Notify listeners that a new undoable action was pushed. setCanUndo(true) is a
+    // no-op when canUndo was already true (consecutive operations before sync), so
+    // the UndoToastManager effect needs an explicit signal to re-trigger.
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('undo-pushed'));
+    }
   }, []);
 
   // ─── refreshData — calls each layer's hydrate() ───────────────────────────
@@ -721,6 +727,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     currentBranchId, customers, suppliers,
     exchangeRate: settingsLayer.exchangeRate,
     createCashDrawerUndoData, pushUndo, refreshData,
+    updateUnsyncedCount: stableUpdateUnsyncedCount,
+    debouncedSync: stableDebouncedSync,
     i18n: { en: enLocale, ar: arLocale },
   };
 
@@ -728,6 +736,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   processEmployeePaymentDepsRef.current = {
     storeId, currentBranchId, employees: employeeLayer.employees,
     exchangeRate: settingsLayer.exchangeRate, refreshData,
+    updateUnsyncedCount: stableUpdateUnsyncedCount,
+    debouncedSync: stableDebouncedSync,
     i18n: { en: enLocale, ar: arLocale },
     pushUndo,
   };

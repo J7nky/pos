@@ -168,8 +168,14 @@ export function useEntityBalances(
       });
 
       if (toRefetch.length > 0) {
+        // Force `useSnapshot=false` on invalidation-driven refetches.
+        // Snapshots may exist for *today* (created earlier in the day or downloaded
+        // from another device) and short-circuit the read in `getHistoricalBalance`,
+        // so the snapshot path can return a stale balance even after we know
+        // journal entries have changed (e.g. remote payment via eventStream).
+        // Bypass it and read directly from journal entries — accurate by definition.
         void Promise.all(
-          toRefetch.map(async (id) => ({ id, result: await fetchBalance(id, type, snap, ac) })),
+          toRefetch.map(async (id) => ({ id, result: await fetchBalance(id, type, false, ac) })),
         ).then((results) => {
           setBalances((prev) => {
             const next = new Map(prev);
@@ -327,10 +333,11 @@ export function useEntityBalance(
             : { entityId: eid, USD: cached.USD, LBP: cached.LBP, isLoading: false, error: null },
         );
       } else {
-        // Cache miss after notification: entry was invalidated — re-fetch.
+        // Cache miss after notification: entry was invalidated — re-fetch
+        // bypassing the snapshot (see comment in `useEntityBalances` above).
         setBalance((prev) => {
           if (prev.isLoading) return prev; // already fetching
-          void fetchBalance(eid, type, snap, ac).then((result) => {
+          void fetchBalance(eid, type, false, ac).then((result) => {
             setBalance(
               isError(result)
                 ? { entityId: eid, USD: 0, LBP: 0, isLoading: false, error: result.error }

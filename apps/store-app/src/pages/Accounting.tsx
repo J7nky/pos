@@ -343,6 +343,25 @@ export default function Accounting() {
     fetchBalance();
   }, [userProfile?.store_id, raw]);
 
+  // Refresh local cash drawer balance after a remote sync downloads new journals.
+  // Entity balances are auto-refreshed via entityBalanceCache subscription, but
+  // the cash drawer total here lives in component state and needs an explicit
+  // re-fetch.
+  useEffect(() => {
+    const handleDataSynced = async () => {
+      try {
+        if (userProfile?.store_id) {
+          const balance = (await raw.getCurrentCashDrawerBalance?.(userProfile.store_id)) || 0;
+          setCashDrawerBalance(balance);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener('data-synced', handleDataSynced);
+    return () => window.removeEventListener('data-synced', handleDataSynced);
+  }, [userProfile?.store_id, raw]);
+
   const refreshCashDrawerBalance = async () => {
     try {
       if (userProfile?.store_id) {
