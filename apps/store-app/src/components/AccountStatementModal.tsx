@@ -736,12 +736,14 @@ export default function AccountStatementModal({
 
                                 {/* Line items — replace the parent row when present.
                                     Date and reference appear only on the first line so the
-                                    bill is still visually grouped, and the running balance
-                                    sits on the LAST line (matching the parent's posting). */}
+                                    bill is still visually grouped; each row carries its own
+                                    incremental running balance so the column is never blank. */}
                                 {hasLineItems && transaction.product_details!.map((item, idx) => {
                                   const itemCurrency = (item.currency || rowCurrency) as CurrencyCode;
                                   const isFirstItem = idx === 0;
-                                  const isLastItem = idx === transaction.product_details!.length - 1;
+                                  const itemBalanceInPreferred = item.balances_after
+                                    ? convertMapToPreferred(item.balances_after)
+                                    : balanceInPreferred;
                                   return (
                                     <tr key={`${transaction.id}-item-${idx}`} className="hover:bg-gray-50 transition-colors">
                                       <td className="px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
@@ -798,7 +800,7 @@ export default function AccountStatementModal({
                                         )}
                                       </td>
                                       <td className="px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
-                                        {isLastItem ? formatCurrency(balanceInPreferred, preferredCurrency) : ''}
+                                        {formatCurrency(itemBalanceInPreferred, preferredCurrency)}
                                       </td>
                                       <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-500">
                                         {isFirstItem ? (transaction.reference || '-') : ''}

@@ -164,13 +164,15 @@ export function AccountStatementPrintContent({
                           )}
 
                           {/* Line items replace the parent row when present.
-                              Date and reference appear only on the first line; the
-                              running balance sits on the LAST line (matching the
-                              parent's posting). */}
+                              Date and reference appear only on the first line; each row
+                              carries its own incremental running balance so the column
+                              is never blank. */}
                           {hasLineItems && transaction.product_details!.map((item: StatementProductDetail, idx: number) => {
                             const itemCurrency: CurrencyCode = (item.currency ?? rowCurrency) as CurrencyCode;
                             const isFirstItem = idx === 0;
-                            const isLastItem = idx === transaction.product_details!.length - 1;
+                            const itemBalanceInPreferred = item.balances_after
+                              ? convertMapToPreferred(item.balances_after)
+                              : balanceInPreferred;
                             return (
                               <tr key={`${transaction.id || transactionIndex}-item-${idx}`}>
                                 <td className="print-table-col-date">
@@ -215,7 +217,7 @@ export function AccountStatementPrintContent({
                                     : '0'}
                                 </td>
                                 <td className="print-table-col-balance print-number print-currency">
-                                  {isLastItem ? formatCurrency(balanceInPreferred, preferredCurrency, true) : ''}
+                                  {formatCurrency(itemBalanceInPreferred, preferredCurrency, true)}
                                 </td>
                               </tr>
                             );

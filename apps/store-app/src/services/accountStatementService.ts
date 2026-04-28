@@ -465,6 +465,10 @@ export class AccountStatementService {
       const amounts = amountsFromLegacyEntry(accountEntry);
       const presentCurrencies = amountCurrencies(amounts);
 
+      // Snapshot running balance BEFORE this entry is applied — used as the starting
+      // point for per-line-item incremental balances below.
+      const runningBefore: Partial<Record<CurrencyCode, number>> = { ...running };
+
       // Apply unified sign rule: balance += debit - credit, for every currency present.
       for (const ccy of presentCurrencies) {
         const delta = getDebit(amounts, ccy) - getCredit(amounts, ccy);
@@ -607,6 +611,19 @@ export class AccountStatementService {
       // If the entry net-debits, lines show as debit; if it net-credits, lines show as credit.
       const dominantIsDebit = rowDebit >= rowCredit;
 
+      // Per-line-item rolling balance — starts from runningBefore (the balance prior
+      // to this entry) and steps forward as each line's debit/credit is applied,
+      // so each row carries its own balance_after snapshot.
+      const lineRunning: Partial<Record<CurrencyCode, number>> = { ...runningBefore };
+      const snapshotLineRunning = (): Partial<Record<CurrencyCode, number>> => {
+        const snap: Partial<Record<CurrencyCode, number>> = {};
+        for (const c of Object.keys(lineRunning) as CurrencyCode[]) {
+          const v = lineRunning[c];
+          if (v !== undefined) snap[c] = v;
+        }
+        return snap;
+      };
+
       // Process bill line items (POS bills — sales OR sales-to-supplier).
       if (viewMode === 'detailed' && billLineItems.length > 0) {
         for (const item of billLineItems) {
@@ -618,6 +635,9 @@ export class AccountStatementService {
           const lineTotal = item.line_total || 0;
           const debit_amount = dominantIsDebit ? lineTotal : 0;
           const credit_amount = dominantIsDebit ? 0 : lineTotal;
+
+          const lineDelta = debit_amount - credit_amount;
+          lineRunning[itemCurrency] = (lineRunning[itemCurrency] ?? 0) + lineDelta;
 
           productDetails.push({
             product_id: item.product_id,
@@ -631,6 +651,7 @@ export class AccountStatementService {
             debit_amount,
             credit_amount,
             currency: itemCurrency,
+            balances_after: snapshotLineRunning(),
           } as StatementProductDetail);
         }
       }
@@ -649,6 +670,9 @@ export class AccountStatementService {
           const debit_amount = dominantIsDebit ? lineTotal : 0;
           const credit_amount = dominantIsDebit ? 0 : lineTotal;
 
+          const lineDelta = debit_amount - credit_amount;
+          lineRunning[itemCurrency] = (lineRunning[itemCurrency] ?? 0) + lineDelta;
+
           productDetails.push({
             product_id: item.product_id,
             product_name: translatedName,
@@ -661,6 +685,7 @@ export class AccountStatementService {
             debit_amount,
             credit_amount,
             currency: itemCurrency,
+            balances_after: snapshotLineRunning(),
           } as StatementProductDetail);
         }
       }

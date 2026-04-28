@@ -565,6 +565,8 @@ export interface StatementProductDetail {
   debit_amount?: number;
   credit_amount?: number;
   currency?: CurrencyCode;
+  // Per-currency running balance snapshot AFTER this line item is applied.
+  balances_after?: Partial<Record<CurrencyCode, number>>;
 }
 
 // Additional interfaces for db.ts (Dexie-specific) - matches database schema exactly
