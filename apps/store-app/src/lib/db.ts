@@ -912,8 +912,18 @@ class POSDatabase extends Dexie {
   };
 
   private addUpdateFields = (modifications: any, primKey: any, obj: any, trans: any) => {
-    modifications.updated_at = new Date().toISOString();
-    if (modifications._synced === undefined) modifications._synced = false;
+    // Only stamp updated_at when the caller didn't supply one. Sync downloads pass
+    // the server's updated_at and must not have it stomped to "now" — doing so makes
+    // the row look newer than the server on the next change-detection pass and
+    // causes a download↔upload ping-pong.
+    if (modifications.updated_at === undefined) {
+      modifications.updated_at = new Date().toISOString();
+    }
+    // Do NOT default _synced to false. User-initiated edits go through
+    // crudHelperService.updateEntity which sets _synced: false explicitly.
+    // Sync-path writes set _synced: true explicitly. Defaulting to false here
+    // silently flips records back to unsynced on metadata-only writes (e.g.
+    // when only _lastSyncedAt changes), causing spurious upload churn.
   };
 
   /**

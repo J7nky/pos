@@ -19,7 +19,7 @@ interface BranchSelectionScreenProps {
 
 export default function BranchSelectionScreen({ onBranchSelected }: BranchSelectionScreenProps) {
   const { userProfile } = useSupabaseAuth();
-  const { branchSyncStatus, ensureDataReady, getBranchById, getFirstBranchForStore } = useOfflineData();
+  const { branchSyncStatus, getBranchById, getFirstBranchForStore } = useOfflineData();
   
   const [branches, setBranches] = useState<Branch[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -88,8 +88,13 @@ export default function BranchSelectionScreen({ onBranchSelected }: BranchSelect
       }
       
       try {
-        // Ensure database is open before querying
-        await ensureDataReady();
+        // NOTE: do NOT call ensureDataReady() here. It waits on isDataReady,
+        // which is set by initializeData(), which early-returns until
+        // currentBranchId is set — and currentBranchId only gets set when
+        // the admin picks a branch on this screen. That deadlock used to
+        // burn the full 10s safety timeout on every fresh admin sign-in.
+        // BranchAccessValidationService.getAccessibleBranches already
+        // ensures the DB is open before reading.
 
         // Get all branches for the store
         // Pass role and branch_id directly to avoid database lookup (user might not be synced yet)

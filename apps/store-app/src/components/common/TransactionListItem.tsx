@@ -120,7 +120,7 @@ export default function TransactionListItem({
 
   const getDescription = (): string => {
     if (transaction.description) {
-      const desc = getText(transaction.description);
+      const desc = getText(parseMultilingualString(transaction.description) as any);
       if (desc) return desc;
     }
     // Fallback to category if description is empty

@@ -116,11 +116,19 @@ export default function Home() {
 
   // Helper function to convert expense amounts to preferred currency
   const convertExpenseAmount = useCallback((expense: any): number => {
-    // Expenses are stored in LBP in the database
     const amount = expense.amount || 0;
-    if (storePreferredCurrency === 'USD') {
+    const transactionCurrency = expense.currency || 'LBP';
+
+    if (transactionCurrency === storePreferredCurrency) {
+      return amount;
+    }
+
+    if (transactionCurrency === 'USD' && storePreferredCurrency === 'LBP') {
+      return amount * exchangeRate;
+    } else if (transactionCurrency === 'LBP' && storePreferredCurrency === 'USD') {
       return amount / exchangeRate;
     }
+
     return amount;
   }, [storePreferredCurrency, exchangeRate]);
 
