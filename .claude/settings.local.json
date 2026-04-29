@@ -71,7 +71,8 @@
       "Bash(git log *)",
       "Bash(grep -E \"\\\\.\\(tsx?|md\\)$\")",
       "Bash(pnpm --filter @pos-platform/store-app exec tsc --noEmit -p tsconfig.app.json)",
-      "Bash(pnpm --filter @pos-platform/store-app test:run)"
+      "Bash(pnpm --filter @pos-platform/store-app test:run)",
+      "Bash(echo \"exit=$?\")"
     ]
   }
 }

@@ -29,8 +29,13 @@ export default function Customers() {
   const customerEntities = raw.entities.filter(e => e.entity_type === 'customer');
   const customerIds = useMemo(() => customerEntities.map(c => c.id), [customerEntities]);
 
-  // Get calculated balances from journal entries (source of truth)
-  const customerBalances = useEntityBalances(customerIds, 'customer', true);
+  // Get calculated balances from journal entries (source of truth).
+  // useSnapshot=false: skip the snapshot+incremental optimization and read
+  // journal entries directly. The snapshot path can return stale values when
+  // a today snapshot was taken before recent edits (see useEntityBalances.ts
+  // line 171-176), causing the table balance to disagree with the account
+  // statement modal — which always reads journal entries directly.
+  const customerBalances = useEntityBalances(customerIds, 'customer', false);
 
   const customers = useMemo(() => {
     const mappedCustomers = customerEntities.map(c => {
@@ -59,8 +64,9 @@ export default function Customers() {
   const supplierEntities = raw.entities.filter(e => e.entity_type === 'supplier');
   const supplierIds = useMemo(() => supplierEntities.map(s => s.id), [supplierEntities]);
 
-  // Get calculated balances from journal entries (source of truth)
-  const supplierBalances = useEntityBalances(supplierIds, 'supplier', true);
+  // Get calculated balances from journal entries (source of truth).
+  // useSnapshot=false for the same reason as customerBalances above.
+  const supplierBalances = useEntityBalances(supplierIds, 'supplier', false);
 
   const suppliers = useMemo(() => {
     const mappedSuppliers = supplierEntities.map(s => {
@@ -547,6 +553,20 @@ export default function Customers() {
     };
     window.addEventListener('undo-completed', handleUndoCompleted);
     return () => window.removeEventListener('undo-completed', handleUndoCompleted);
+  }, [customerBalances.refreshAll, supplierBalances.refreshAll]);
+
+  // Refresh balances when a bill edit elsewhere posts entries to an entity ledger
+  // (e.g. cash → credit conversion in SoldBills). Without this the Customers table
+  // could keep showing a stale balance while the account statement modal already
+  // reflects the new journal entries — i.e. two sources of truth for the same
+  // ledger evidence with unequal values.
+  useEffect(() => {
+    const handleEntityBalanceChanged = async () => {
+      await customerBalances.refreshAll();
+      await supplierBalances.refreshAll();
+    };
+    window.addEventListener('entity-balance-changed', handleEntityBalanceChanged);
+    return () => window.removeEventListener('entity-balance-changed', handleEntityBalanceChanged);
   }, [customerBalances.refreshAll, supplierBalances.refreshAll]);
 
 

@@ -7,14 +7,19 @@ import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useProductMultilingual } from '../../../hooks/useMultilingual';
 import { Pagination } from '../../common/Pagination';
 import { calculateBillTotals, BillWithTotals, addComputedTotals } from '../../../utils/billCalculations';
-import { 
-  calculatePaymentStatus, 
-  handleCustomerTypeChange, 
+import {
+  calculatePaymentStatus,
+  handleCustomerTypeChange,
   validateCreditCustomerPayment,
   calculateBalanceAdjustments,
   resolveSupplierName,
-  canEditBill 
+  canEditBill
 } from '../../../utils/billBusinessRules';
+import { withUndoOperation } from '../../../contexts/offlineData/operations/withUndoOperation';
+import SearchableSelect from '../../common/SearchableSelect';
+import { transactionService } from '../../../services/transactionService';
+import { TRANSACTION_CATEGORIES } from '../../../constants/transactionCategories';
+import { entityBalanceCache } from '../../../services/entityBalanceCache';
 
 import { 
   FileText, 
@@ -153,12 +158,18 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
   const suppliers = raw.suppliers || [];
   const employees = raw.employees || [];
 
-  // Helper function to get customer name - memoized for performance
-  const getCustomerName = useCallback((customerId: string | null): string => {
-    if (!customerId) return 'Walk-in Customer';
-    const customer = customers.find(c => c.id === customerId);
-    return customer?.name || 'Walk-in Customer';
-  }, [customers]);
+  // Resolves the display name for any entity (customer / supplier / employee).
+  // Bills carry a unified entity_id, so the lookup must span all three lists.
+  const getCustomerName = useCallback((entityId: string | null): string => {
+    if (!entityId) return 'Walk-in Customer';
+    const customer = customers.find(c => c.id === entityId);
+    if (customer) return customer.name;
+    const supplier = suppliers.find((s: any) => s.id === entityId);
+    if (supplier) return supplier.name;
+    const employee = employees.find((e: any) => e.id === entityId);
+    if (employee) return employee.name;
+    return 'Walk-in Customer';
+  }, [customers, suppliers, employees]);
 
   // Helper function to get user name - memoized for performance
   const getUserName = useCallback((userId: string | null | undefined): string => {
@@ -179,6 +190,7 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
   const [businessRuleWarnings, setBusinessRuleWarnings] = useState<string[]>([]);
   const [originalCustomerId, setOriginalCustomerId] = useState<string | null>(null);
+  const [entityFilter, setEntityFilter] = useState<'all' | 'customers' | 'suppliers' | 'employees'>('all');
 
   // Filters - persisted in localStorage
   const [searchTerm, setSearchTerm] = useLocalStorage('soldBills_searchTerm', '');
@@ -199,20 +211,44 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
     return `${year}-${month}-${day}`;
   }, []);
 
-  // Initialize with today's date by default (only once, if not already set from localStorage)
+  // On mount, sync dateFrom/dateTo to whatever fastDateFilter says.
+  // Respects the user's saved fastDateFilter (so "All Time" stays "All Time"
+  // across reloads) and refreshes 'today'/'week'/'month' dates so they don't
+  // go stale across a day boundary.
   useEffect(() => {
     if (!storeId || isInitialized) return;
-    
-    // Only set default dates if not already set from localStorage
-    if (!dateFrom && !dateTo) {
-      const now = new Date();
-      // Set to today - use local timezone
-      setDateFrom(formatLocalDate(now));
-      setDateTo(formatLocalDate(now));
-      setFastDateFilter('today'); // Set fast filter to today as well
+
+    const now = new Date();
+    let fromDate = dateFrom;
+    let toDate = dateTo;
+
+    switch (fastDateFilter) {
+      case 'today':
+        fromDate = formatLocalDate(now);
+        toDate = formatLocalDate(now);
+        break;
+      case 'week': {
+        const startOfWeek = new Date(now);
+        startOfWeek.setDate(now.getDate() - now.getDay());
+        startOfWeek.setHours(0, 0, 0, 0);
+        fromDate = formatLocalDate(startOfWeek);
+        toDate = formatLocalDate(now);
+        break;
+      }
+      case 'month': {
+        const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        fromDate = formatLocalDate(firstDayOfMonth);
+        toDate = formatLocalDate(now);
+        break;
+      }
+      case 'all':
+        break;
     }
+
+    if (fromDate !== dateFrom) setDateFrom(fromDate);
+    if (toDate !== dateTo) setDateTo(toDate);
     setIsInitialized(true);
-  }, [storeId, isInitialized, dateFrom, dateTo, formatLocalDate, setDateFrom, setDateTo, setFastDateFilter]);
+  }, [storeId, isInitialized, dateFrom, dateTo, fastDateFilter, formatLocalDate, setDateFrom, setDateTo]);
   
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
@@ -603,11 +639,14 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
   }, [storeId, debouncedSearchTerm, dateFrom, dateTo, paymentStatusFilter, statusFilter, raw, showToast]);
 
   useEffect(() => {
-    if (storeId) {
+    // Wait until the init effect has reconciled dateFrom/dateTo with
+    // fastDateFilter; otherwise the first fetch races init and an empty/stale
+    // result can resolve last, showing the wrong rows under the right button.
+    if (storeId && isInitialized) {
       loadBills();
       setCurrentPage(1); // Reset to first page when filters change
     }
-  }, [storeId, loadBills]);
+  }, [storeId, isInitialized, loadBills]);
 
   const loadBillDetails = async (billId: string) => {
     try {
@@ -718,6 +757,31 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
         return;
       }
 
+      // Pre-mutation validation: Walk-in customers cannot use credit payment method.
+      // Run before any mutations so we don't half-apply changes on failure.
+      {
+        const prospectivePaymentMethod = editForm.payment_method ?? selectedBill.payment_method;
+        const prospectiveEntityId = editForm.entity_id !== undefined ? editForm.entity_id : selectedBill.entity_id;
+        const prospectiveAmountPaid = editForm.amount_paid ?? (selectedBill.amount_paid ?? 0);
+        const prospectiveTotalAmount = selectedBill.total_amount || 0;
+        const entityChanged = editForm.entity_id !== undefined && (editForm.entity_id ?? null) !== (selectedBill.entity_id ?? null);
+        const preValidation = validateCreditCustomerPayment(
+          prospectivePaymentMethod,
+          prospectiveEntityId ?? null,
+          prospectiveAmountPaid,
+          prospectiveTotalAmount,
+          entityChanged
+        );
+        if (!preValidation.valid) {
+          showToast(preValidation.error || 'Invalid payment configuration', 'error');
+          setIsEditing(false);
+          return;
+        }
+      }
+
+      // Wrap all mutations in a single undoable operation so the bill update,
+      // cash drawer adjustment, and line-item updates can be reversed together.
+      await withUndoOperation('operation', raw.pushUndo, async () => {
       // Save all line item changes first
       console.log('🔍 Starting to save line items. Total items:', billLineItems.length);
       console.log('🔍 Line item edits:', lineItemEdits);
@@ -861,30 +925,17 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
         console.log(`🔍 Payment status auto-calculated: ${calculatedPaymentStatus} (was: ${selectedBill.payment_status})`);
       }
       
-      // VALIDATE: Walk-in customers cannot use credit payment method
-      const finalPaymentMethod = updates.payment_method || selectedBill.payment_method;
-      const finalEntityId = updates.entity_id !== undefined ? updates.entity_id : selectedBill.entity_id;
-      const creditValidation = validateCreditCustomerPayment(
-        finalPaymentMethod,
-        finalEntityId,
-        newAmountPaid,
-        totalAmount,
-        updates.entity_id !== undefined && updates.entity_id !== selectedBill.entity_id
-      );
-      
-      if (!creditValidation.valid) {
-        showToast(creditValidation.error || 'Invalid payment configuration', 'error');
-        setIsEditing(false);
-        return;
-      }
-      
+      // Credit/payment validation already ran before any mutations.
+
       if (editForm.notes !== undefined && normalizeForComparison(editForm.notes) !== normalizeForComparison(selectedBill.notes)) {
         updates.notes = editForm.notes ?? null;
       }
       
       // Handle balance adjustments if amount_paid or payment_method changed
       if (amountPaidChanged || paymentMethodChanged) {
-        const finalCustomerId = updates.customer_id !== undefined ? updates.customer_id : selectedBill.customer_id;
+        // Bills use the unified `entity_id`. The previous `customer_id` lookup never
+        // resolved because the field doesn't exist on the bill row.
+        const finalCustomerId = updates.entity_id !== undefined ? updates.entity_id : selectedBill.entity_id;
         
         // Calculate adjustments based on what changed
         let customerBalanceDelta = 0;
@@ -952,31 +1003,117 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
           }
         }
         
-        // Update cash drawer if there's a delta
+        // Post the right journal entries for the change.
+        // When an entity is involved and cash flow shifts, we must touch the entity's
+        // ledger account (1200/2100/2200) so the bill shows up on their statement —
+        // the legacy CASH_DRAWER_EXPENSE refund only touched 5900 and left the entity
+        // ledger empty. For walk-ins (no entity), fall back to the legacy cash-drawer
+        // transaction path which only updates the drawer balance.
         if (cashDrawerDelta !== 0) {
-          console.log(`💰 Updating cash drawer by: ${cashDrawerDelta}`);
-          
-          try {
+          const billCurrency = (selectedBill.currency ?? preferredCurrency) as 'USD' | 'LBP';
+          const absoluteAmount = Math.abs(cashDrawerDelta);
+
+          // Resolve entity across all three lists — bills can be tied to a customer,
+          // supplier, or employee since the bill-edit dropdown allows any of them.
+          let resolvedEntityType: 'customer' | 'supplier' | 'employee' | null = null;
+          let resolvedEntity: any = null;
+          if (finalCustomerId) {
+            const c = customers.find(x => x.id === finalCustomerId);
+            if (c) { resolvedEntity = c; resolvedEntityType = 'customer'; }
+            else {
+              const s = suppliers.find((x: any) => x.id === finalCustomerId);
+              if (s) { resolvedEntity = s; resolvedEntityType = 'supplier'; }
+              else {
+                const e = employees.find((x: any) => x.id === finalCustomerId);
+                if (e) { resolvedEntity = e; resolvedEntityType = 'employee'; }
+              }
+            }
+          }
+
+          const description: { en: string; ar: string } = {
+            en: `Bill #${selectedBill.bill_number} - Payment ${paymentMethodChanged ? 'method' : 'amount'} adjustment`,
+            ar: `فاتورة #${selectedBill.bill_number} - تعديل ${paymentMethodChanged ? 'طريقة' : 'مبلغ'} الدفع`,
+          };
+          const context = {
+            userId: userProfile.id,
+            storeId: storeId!,
+            branchId: raw.currentBranchId || '',
+            module: 'bills',
+            source: 'web' as const,
+          };
+
+          if (resolvedEntity && finalCustomerId) {
+            // Entity-aware path: post against the entity's receivable/payable account
+            // so the bill is reflected on their account ledger. The category must
+            // target the account the Customers page reads for that entity type
+            // (otherwise the table balance won't match the account statement):
+            //   - customer  → 1200 (AR)        via CUSTOMER_REFUND / CUSTOMER_PAYMENT
+            //   - supplier  → 2100 (AP)        via SUPPLIER_PAYMENT / SUPPLIER_PAYMENT_RECEIVED
+            //   - employee  → 1200+2200 combo  CUSTOMER_REFUND/PAYMENT lands on 1200,
+            //                                  which calculateEmployeeBalance includes.
+            // Direction follows the cash drawer delta:
+            //   delta < 0 → cash leaves the drawer → entity now owes that amount
+            //   delta > 0 → cash enters the drawer → entity paid down their balance
+            let category: typeof TRANSACTION_CATEGORIES[keyof typeof TRANSACTION_CATEGORIES];
+            if (resolvedEntityType === 'supplier') {
+              category = cashDrawerDelta < 0
+                ? TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT          // Dr 2100, Cr 1100
+                : TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT_RECEIVED;// Dr 1100, Cr 2100
+            } else {
+              category = cashDrawerDelta < 0
+                ? TRANSACTION_CATEGORIES.CUSTOMER_REFUND   // Dr 1200, Cr 1100
+                : TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT; // Dr 1100, Cr 1200
+            }
+
+            const result = await transactionService.createTransaction({
+              category,
+              amount: absoluteAmount,
+              currency: billCurrency,
+              description,
+              entityId: finalCustomerId,
+              reference: `BILL-${selectedBill.bill_number}`,
+              context,
+              updateCashDrawer: true,
+              createAuditLog: true,
+            });
+
+            if (!result?.success) {
+              throw new Error(result?.error || 'Failed to record entity ledger entry');
+            }
+
+            // The Customers page (and any other useEntityBalances consumer) reads from
+            // a process-level cache that doesn't know we just wrote new journal entries.
+            // Invalidate so subscribers refetch and show the updated balance.
+            if (resolvedEntityType) {
+              entityBalanceCache.invalidate(resolvedEntityType, finalCustomerId);
+            }
+            // Notify any mounted page (Customers, etc.) to refreshAll. Without this,
+            // an unmounted Customers page would, on remount, hit the snapshot path
+            // which can return a stale "today" value that doesn't include the
+            // entries we just wrote — leading to a different number than what the
+            // account statement shows for the same entity.
+            window.dispatchEvent(
+              new CustomEvent('entity-balance-changed', {
+                detail: { entityId: finalCustomerId, entityType: resolvedEntityType },
+              })
+            );
+            console.log(`✅ Posted ${category} for ${resolvedEntityType} ${finalCustomerId}: ${absoluteAmount} ${billCurrency}`);
+          } else {
+            // Legacy path: walk-in customer (no entity). Only the cash drawer changes.
             const transactionType: 'sale' | 'payment' | 'expense' | 'refund' = cashDrawerDelta > 0 ? 'sale' : 'refund';
-            const absoluteAmount = Math.abs(cashDrawerDelta);
-            
             const result = await raw.processCashDrawerTransaction({
               type: transactionType,
               amount: absoluteAmount,
-              currency: 'USD' as 'USD' | 'LBP', // TODO: Use bill currency
-              description: `Bill #${selectedBill.bill_number} - Payment ${paymentMethodChanged ? 'method' : 'amount'} adjustment`,
-              reference: `bill_${selectedBill.id}`,
+              currency: billCurrency,
+              description: description.en,
+              reference: `BILL-${selectedBill.bill_number}`,
               customerId: finalCustomerId || undefined,
-              storeId: storeId!,
-              createdBy: userProfile.id
-            });
-            
-            if (result.success) {
-              console.log(`✅ Cash drawer updated successfully: ${cashDrawerDelta > 0 ? '+' : ''}${cashDrawerDelta}`);
+            } as any);
+
+            if (!result?.success) {
+              throw new Error('Failed to record cash drawer adjustment');
             }
-          } catch (error) {
-            console.error('❌ Failed to update cash drawer:', error);
-            showToast('Bill saved but cash drawer update failed', 'error');
+            console.log(`✅ Cash drawer updated: ${cashDrawerDelta > 0 ? '+' : ''}${cashDrawerDelta} ${billCurrency}`);
           }
         }
       }
@@ -988,6 +1125,7 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
       } else {
         console.log('⏭️ No bill-level changes to save');
       }
+      }); // end withUndoOperation
 
       showToast('Bill updated successfully');
       
@@ -1963,65 +2101,113 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('soldBills.customer')}</label>
-                  <select
+                  <SearchableSelect
+                    options={(() => {
+                      const customerOptions = [
+                        { id: '', label: t('soldBills.walkInCustomer'), value: '', category: t('common.labels.customer') },
+                        ...customers.filter(c => c.isActive).map(c => ({
+                          id: c.id, label: c.name, value: c.id, category: t('common.labels.customer'),
+                        })),
+                      ];
+                      const supplierOptions = suppliers
+                        .filter((s: any) => s.name !== 'Trade')
+                        .map((s: any) => ({ id: s.id, label: s.name, value: s.id, category: t('customers.supplier') }));
+                      const employeeOptions = employees.map((e: any) => ({
+                        id: e.id, label: e.name, value: e.id, category: t('customers.employees'),
+                      }));
+                      if (entityFilter === 'customers') return customerOptions;
+                      if (entityFilter === 'suppliers') return supplierOptions;
+                      if (entityFilter === 'employees') return employeeOptions;
+                      return [...customerOptions, ...supplierOptions, ...employeeOptions];
+                    })()}
                     value={editForm.entity_id || ''}
-                    onChange={(e) => {
-                      const newCustomerId = e.target.value || null;
+                    onChange={(value) => {
+                      const newEntityId = (value as string) || null;
                       const totalAmount = (editForm as any).total_amount || 0;
-                      
-                      // Special handling for walk-in customer selection
-                      if (newCustomerId === null) {
-                        // Walk-in customer: auto-set payment method to cash and amount to full
+
+                      if (newEntityId === null) {
                         const warnings: string[] = [];
                         if (originalCustomerId !== null) {
                           warnings.push('Changed to walk-in customer');
                           warnings.push('Payment method set to Cash, amount set to full payment');
                         }
-                        
-                        setEditForm(prev => ({ 
-                          ...prev, 
+                        setEditForm(prev => ({
+                          ...prev,
                           entity_id: null,
                           payment_method: 'cash',
                           amount_paid: totalAmount,
-                          payment_status: 'paid'
+                          payment_status: 'paid',
                         }));
-                        
-                        if (warnings.length > 0) {
-                          setBusinessRuleWarnings(warnings);
-                        }
+                        if (warnings.length > 0) setBusinessRuleWarnings(warnings);
                       } else {
-                        // Regular customer: use standard customer type change logic
                         const result = handleCustomerTypeChange(
                           editForm,
-                          newCustomerId,
+                          newEntityId,
                           originalCustomerId,
-                          totalAmount
+                          totalAmount,
                         );
-                        
-                        // Update form with new values
-                        setEditForm(prev => ({ 
-                          ...prev, 
-                          customer_id: newCustomerId,
+                        setEditForm(prev => ({
+                          ...prev,
+                          entity_id: newEntityId,
                           payment_method: result.payment_method,
                           amount_paid: result.amount_paid,
-                          payment_status: result.payment_status
+                          payment_status: result.payment_status,
                         }));
-                        
-                        // Show warnings if any
-                        if (result.warnings.length > 0) {
-                          setBusinessRuleWarnings(result.warnings);
-                        }
+                        if (result.warnings.length > 0) setBusinessRuleWarnings(result.warnings);
                       }
                     }}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="">{t('soldBills.walkInCustomer')}</option>
-                    {customers.map(customer => (
-                      <option key={customer.id} value={customer.id}>
-                        {customer.name}
-                      </option>
-                    ))}
-                  </select>
+                    searchPlaceholder={t('pos.searchCustomers')}
+                    placeholder={t('soldBills.walkInCustomer')}
+                    className="w-full"
+                    customFilterButtons={
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setEntityFilter('all'); }}
+                          className={`flex-1 px-3 py-1.5 text-xs rounded-lg border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                            entityFilter === 'all'
+                              ? 'bg-blue-50 border-blue-500 text-blue-700 font-medium'
+                              : 'bg-gray-50 border-gray-300 text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          {t('common.labels.all')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setEntityFilter('customers'); }}
+                          className={`flex-1 px-3 py-1.5 text-xs rounded-lg border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                            entityFilter === 'customers'
+                              ? 'bg-blue-50 border-blue-500 text-blue-700 font-medium'
+                              : 'bg-gray-50 border-gray-300 text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          {t('customers.customers')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setEntityFilter('suppliers'); }}
+                          className={`flex-1 px-3 py-1.5 text-xs rounded-lg border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                            entityFilter === 'suppliers'
+                              ? 'bg-blue-50 border-blue-500 text-blue-700 font-medium'
+                              : 'bg-gray-50 border-gray-300 text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          {t('customers.suppliers')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setEntityFilter('employees'); }}
+                          className={`flex-1 px-3 py-1.5 text-xs rounded-lg border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                            entityFilter === 'employees'
+                              ? 'bg-blue-50 border-blue-500 text-blue-700 font-medium'
+                              : 'bg-gray-50 border-gray-300 text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          {t('customers.employees')}
+                        </button>
+                      </div>
+                    }
+                  />
                 </div>
 
                 <div>
@@ -2089,22 +2275,6 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
                   )}
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2 rtl:text-right">{t('soldBills.paymentStatus')}</label>
-                  <select
-                    value={editForm.payment_status || 'pending'}
-                    disabled={true}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-100 cursor-not-allowed"
-                    title="Payment status is automatically calculated based on amount paid"
-                  >
-                    <option value="paid">{t('soldBills.paid')}</option>
-                    <option value="partial">{t('soldBills.partial')}</option>
-                    <option value="pending">{t('soldBills.pending')}</option>
-                  </select>
-                  <p className="text-xs text-gray-500 mt-1 rtl:text-right">
-                    Status is automatically calculated from payment amounts
-                  </p>
-                </div>
               </div>
 
               <div className="space-y-4">
@@ -2231,7 +2401,7 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
                                 )}
                               </td>
                               <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                                {formatCurrency(typeof computedTotalValue === 'number' ? computedTotalValue : 0)}
+                                {formatCurrencyWithSymbol(typeof computedTotalValue === 'number' ? computedTotalValue : 0, selectedBill?.currency ?? preferredCurrency)}
                               </td>
                               <td className="px-4 py-3">
                                 <textarea
