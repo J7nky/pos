@@ -117,7 +117,7 @@ const fr = {
     recordExpense: 'Enregistrer dépense', recordExpenseDesc: 'Enregistrer les dépenses',
     todaySales: 'Ventes du jour', todaySalesDesc: 'Voir les performances de vente',
     checkStock: 'Vérifier le stock', checkStockDesc: 'Surveiller les niveaux de stock',
-    cashInDrawer: 'Caisse ({{currency}})', notOpenedToday: 'Non ouvert aujourd\'hui', openCashDrawer: 'Ouvrir la caisse', todaysExpenses: 'Dépenses du jour ({{currency}})', todaysIncome: 'Revenu du jour ({{currency}})', lowStockItems: 'Articles à faible stock', needAttention: 'Nécessite une attention', alertsDisabled: 'Alertes désactivées', lowStockAlert: 'Alerte de stock faible', allWellStocked: 'Tous les produits sont bien approvisionnés !', recentActions: 'Actions récentes', noRecentSales: 'Aucune action récente', showBothCurrencies: 'Afficher les deux devises', showCombined: 'Afficher le solde combiné'
+    cashInDrawer: 'Caisse ({{currency}})', notOpenedToday: 'Non ouvert aujourd\'hui', openCashDrawer: 'Ouvrir la caisse', todaysExpenses: 'Dépenses du jour ({{currency}})', todaysIncome: 'Revenu du jour ({{currency}})', sessionExpenses: 'Dépenses de la session ({{currency}})', sessionIncome: 'Revenu de la session ({{currency}})', session: 'cette session', lowStockItems: 'Articles à faible stock', needAttention: 'Nécessite une attention', alertsDisabled: 'Alertes désactivées', lowStockAlert: 'Alerte de stock faible', allWellStocked: 'Tous les produits sont bien approvisionnés !', recentActions: 'Actions récentes', noRecentSales: 'Aucune action récente', showBothCurrencies: 'Afficher les deux devises', showCombined: 'Afficher le solde combiné'
   },
   inventory: {
     currencyNotAccepted: 'Cette devise n\'est pas acceptée dans ce magasin. Acceptées : {{list}}',

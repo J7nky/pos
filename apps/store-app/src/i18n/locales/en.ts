@@ -233,7 +233,7 @@ const en = {
     recordExpense: 'Record Expense', recordExpenseDesc: 'Log business expenses',
     todaySales: "Today's Sales", todaySalesDesc: 'View sales performance',
     checkStock: 'Check Stock', checkStockDesc: 'Monitor inventory levels',
-    cashInDrawer: 'Cash in Drawer ({{currency}})', notOpenedToday: 'Not opened today', openCashDrawer: 'Open Cash Drawer', todaysExpenses: "Today's Expenses ({{currency}})", todaysIncome: "Today's Income ({{currency}})", lowStockItems: 'Low Stock Items', needAttention: 'Need attention', alertsDisabled: 'Alerts disabled', showBothCurrencies: 'Show both currencies', showCombined: 'Show combined balance'
+    cashInDrawer: 'Cash in Drawer ({{currency}})', notOpenedToday: 'Not opened today', openCashDrawer: 'Open Cash Drawer', todaysExpenses: "Today's Expenses ({{currency}})", todaysIncome: "Today's Income ({{currency}})", sessionExpenses: 'Session Expenses ({{currency}})', sessionIncome: 'Session Income ({{currency}})', session: 'this session', lowStockItems: 'Low Stock Items', needAttention: 'Need attention', alertsDisabled: 'Alerts disabled', showBothCurrencies: 'Show both currencies', showCombined: 'Show combined balance'
   },
   inventory: {
     currencyNotAccepted: 'That currency is not accepted at this store. Accepted: {{list}}',

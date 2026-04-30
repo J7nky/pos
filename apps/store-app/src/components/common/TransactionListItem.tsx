@@ -13,6 +13,7 @@ interface TransactionListItemProps {
   showCurrency?: boolean;
   showReference?: boolean;
   onNavigate?: (transaction: Transaction | any) => void;
+  originalAmountLabel?: string;
 }
 
 export default function TransactionListItem({
@@ -22,6 +23,7 @@ export default function TransactionListItem({
   showCurrency = true,
   showReference = false,
   onNavigate,
+  originalAmountLabel,
 }: TransactionListItemProps) {
   const navigate = useNavigate();
   const { getText } = useMultilingual();
@@ -184,7 +186,12 @@ export default function TransactionListItem({
           )}
         </div>
       </div>
-      <div className="text-right flex-shrink-0 ml-4">
+      <div className="flex items-center justify-end flex-shrink-0 ml-4 gap-2">
+      {originalAmountLabel && (
+          <div className="text-sm font-semibold text-gray-700 bg-gray-100 rounded px-2 py-0.5">
+            ({originalAmountLabel})
+          </div>
+        )}
         <div
           className={`text-sm font-semibold ${
             isIncome ? 'text-green-600' : 'text-red-600'
@@ -193,6 +200,7 @@ export default function TransactionListItem({
           {isIncome ? '+' : '-'}
           {displayAmount}
         </div>
+       
       </div>
     </div>
   );

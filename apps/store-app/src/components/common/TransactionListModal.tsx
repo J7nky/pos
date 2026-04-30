@@ -10,7 +10,13 @@ interface TransactionListModalProps {
   title: string;
   formatCurrency: (amount: number) => string;
   convertAmount: (transaction: Transaction | any) => number;
+  storePreferredCurrency?: 'USD' | 'LBP';
 }
+
+const formatOriginalAmount = (amount: number, currency: string): string => {
+  if (currency === 'USD') return `$${amount.toFixed(2)}`;
+  return `${Math.round(amount).toLocaleString()} ل.ل`;
+};
 
 export default function TransactionListModal({
   isOpen,
@@ -19,6 +25,7 @@ export default function TransactionListModal({
   title,
   formatCurrency,
   convertAmount,
+  storePreferredCurrency,
 }: TransactionListModalProps) {
   const { t } = useI18n();
 
@@ -73,7 +80,13 @@ export default function TransactionListModal({
                 ...transaction,
                 amount: Math.abs(convertedAmount),
               };
-              
+
+              const transactionCurrency = transaction.currency || 'LBP';
+              const originalAmountLabel =
+                storePreferredCurrency && transactionCurrency !== storePreferredCurrency
+                  ? formatOriginalAmount(Math.abs(transaction.amount || 0), transactionCurrency)
+                  : undefined;
+
               return (
                 <TransactionListItem
                   key={transaction.id}
@@ -82,6 +95,7 @@ export default function TransactionListModal({
                   showDate={true}
                   showCurrency={true}
                   showReference={true}
+                  originalAmountLabel={originalAmountLabel}
                 />
               );
             })}

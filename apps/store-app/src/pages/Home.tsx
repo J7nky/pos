@@ -102,16 +102,34 @@ export default function Home() {
     ), [sales, today]
   );
 
-  const todayExpenses = useMemo(() =>
-    transactions.filter(t =>
-      t.type === 'expense' && t.createdAt && getLocalDateString(t.createdAt) === today
-    ), [transactions, today]
+  // Session start: prefer the open cash drawer session's opened_at so expenses/income
+  // align with the cash drawer balance (which is computed for the active session).
+  // Fallback to start-of-today when no session is open.
+  const sessionStartMs = useMemo(() => {
+    const openedAt = (cashDrawer as any)?.opened_at;
+    if (openedAt) {
+      const t = new Date(openedAt).getTime();
+      if (!Number.isNaN(t)) return t;
+    }
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    return startOfToday.getTime();
+  }, [cashDrawer]);
+
+  const sessionExpenses = useMemo(() =>
+    transactions.filter(t => {
+      if (t.type !== 'expense' || !t.createdAt) return false;
+      const ts = new Date(t.createdAt).getTime();
+      return !Number.isNaN(ts) && ts >= sessionStartMs;
+    }), [transactions, sessionStartMs]
   );
 
-  const todayIncome = useMemo(() =>
-    transactions.filter(t =>
-      t.type === 'income' && t.createdAt && getLocalDateString(t.createdAt) === today
-    ), [transactions, today]
+  const sessionIncome = useMemo(() =>
+    transactions.filter(t => {
+      if (t.type !== 'income' || !t.createdAt) return false;
+      const ts = new Date(t.createdAt).getTime();
+      return !Number.isNaN(ts) && ts >= sessionStartMs;
+    }), [transactions, sessionStartMs]
   );
 
   // Helper function to convert expense amounts to preferred currency
@@ -472,7 +490,7 @@ export default function Home() {
       color: 'bg-amber-500',
       hoverColor: 'hover:bg-amber-600',
       action: () => setShowRecordExpenseModal(true),
-      stats: `${formatCurrencyForStore(todayExpenses.reduce((sum, expense) => sum + convertExpenseAmount(expense), 0))} ${t('home.today')} (${t(`common.currency.${storePreferredCurrency}`)})`
+      stats: `${formatCurrencyForStore(sessionExpenses.reduce((sum, expense) => sum + convertExpenseAmount(expense), 0))} ${t('home.session')} (${t(`common.currency.${storePreferredCurrency}`)})`
     },
     {
       id: 'today-sales',
@@ -556,19 +574,19 @@ export default function Home() {
       onToggleCombined: () => setShowCombinedBalance(!showCombinedBalance),
     },
     {
-      title: t('home.todaysExpenses', { currency: t(`common.currency.${storePreferredCurrency}`) }),
-      value: formatCurrencyForStore(todayExpenses.reduce((sum, expense) => sum + convertExpenseAmount(expense), 0)),
+      title: t('home.sessionExpenses', { currency: t(`common.currency.${storePreferredCurrency}`) }),
+      value: formatCurrencyForStore(sessionExpenses.reduce((sum, expense) => sum + convertExpenseAmount(expense), 0)),
       icon: Receipt,
       color: 'bg-red-500',
-      change: `${transactions.filter(t => t.type === 'expense' && t.createdAt && getLocalDateString(t.createdAt) === today).length} ${t('common.transactions')}`,
+      change: `${sessionExpenses.length} ${t('common.transactions')}`,
       onClick: () => setShowExpensesModal(true)
     },
     {
-      title: t('home.todaysIncome', { currency: t(`common.currency.${storePreferredCurrency}`) }),
-      value: formatCurrencyForStore(todayIncome.reduce((sum, income) => sum + convertIncomeAmount(income), 0)),
+      title: t('home.sessionIncome', { currency: t(`common.currency.${storePreferredCurrency}`) }),
+      value: formatCurrencyForStore(sessionIncome.reduce((sum, income) => sum + convertIncomeAmount(income), 0)),
       icon: Receipt,
       color: 'bg-green-500',
-      change: `${transactions.filter(t => t.type === 'income' && t.createdAt && getLocalDateString(t.createdAt) === today).length} ${t('common.transactions')}`,
+      change: `${sessionIncome.length} ${t('common.transactions')}`,
       onClick: () => setShowIncomeModal(true)
     },
     {
@@ -677,19 +695,21 @@ export default function Home() {
       <TransactionListModal
         isOpen={showExpensesModal}
         onClose={() => setShowExpensesModal(false)}
-        transactions={todayExpenses as any}
-        title={t('home.todaysExpenses', { currency: t(`common.currency.${storePreferredCurrency}`) })}
+        transactions={sessionExpenses as any}
+        title={t('home.sessionExpenses', { currency: t(`common.currency.${storePreferredCurrency}`) })}
         formatCurrency={formatCurrencyForStore}
         convertAmount={convertExpenseAmount}
+        storePreferredCurrency={storePreferredCurrency as 'USD' | 'LBP'}
       />
 
       <TransactionListModal
         isOpen={showIncomeModal}
         onClose={() => setShowIncomeModal(false)}
-        transactions={todayIncome as any}
-        title={t('home.todaysIncome', { currency: t(`common.currency.${storePreferredCurrency}`) })}
+        transactions={sessionIncome as any}
+        title={t('home.sessionIncome', { currency: t(`common.currency.${storePreferredCurrency}`) })}
         formatCurrency={formatCurrencyForStore}
         convertAmount={convertIncomeAmount}
+        storePreferredCurrency={storePreferredCurrency as 'USD' | 'LBP'}
       />
 
       {/* Cash Drawer Opening Modal */}
