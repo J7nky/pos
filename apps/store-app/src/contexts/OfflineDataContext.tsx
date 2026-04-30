@@ -521,6 +521,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     storeId,
     currentBranchId,
     isOnline,
+    syncSession,
     refreshData,
     refreshCashDrawerStatus: cashDrawerLayer.refreshCashDrawerStatus,
   });

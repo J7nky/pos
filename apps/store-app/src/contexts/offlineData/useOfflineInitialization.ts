@@ -1,7 +1,7 @@
 import { useCallback, useEffect, type Dispatch, type SetStateAction } from 'react';
 import { getDB } from '../../lib/db';
 import { syncService } from '../../services/syncOrchestrator';
-import { SYNC_TIERS } from '../../services/syncConfig';
+import { SYNC_TIERS, type SyncTable } from '../../services/syncConfig';
 import type { OfflineSyncSessionState } from './offlineDataContextContract';
 import { receivedBillMonitoringService } from '../../services/receivedBillMonitoringService';
 import { reminderMonitoringService } from '../../services/reminderMonitoringService';
@@ -275,32 +275,32 @@ export function useOfflineInitialization(params: UseOfflineInitializationParams)
             // H1: Use a shared AbortController so tier 2/3 can be cancelled if the
             // component unmounts or the user switches stores before they finish.
             const bgController = new AbortController();
+            // Run Tier 2 and Tier 3 in parallel, then refresh React state ONCE
+            // when both complete (instead of once per tier). Saves a redundant
+            // full Dexie hydration on cold start.
             void (async () => {
+              const [t2, t3] = await Promise.allSettled([
+                syncService.downloadTier('tier2', capturedStoreId, capturedBranchId, { signal: bgController.signal }),
+                syncService.downloadTier('tier3', capturedStoreId, capturedBranchId, { signal: bgController.signal }),
+              ]);
+              if (t2.status === 'rejected' && (t2.reason as Error)?.name !== 'AbortError') {
+                console.warn('Tier 2 background sync:', t2.reason);
+              }
+              if (t3.status === 'rejected' && (t3.reason as Error)?.name !== 'AbortError') {
+                console.warn('Tier 3 background sync:', t3.reason);
+              }
               try {
-                await syncService.downloadTier('tier2', capturedStoreId, capturedBranchId, { signal: bgController.signal });
-                // Re-hydrate React state so balances, inventory, transactions, etc.
-                // appear without requiring a full app reload.
                 await refreshData();
                 await updateUnsyncedCount();
-                // journal_entries are now in Dexie. Invalidate cached zero-balances
-                // so useEntityBalances re-fetches and customer/supplier balances render.
                 const { entityBalanceCache } = await import('../../services/entityBalanceCache');
                 entityBalanceCache.invalidateAll();
-              } catch (e) {
-                if ((e as Error)?.name !== 'AbortError') console.warn('Tier 2 background sync:', e);
+                // We just downloaded the full dataset to Dexie. Seed the validation
+                // cache from local instead of letting the next uploadOnly() call
+                // re-fetch every FK target ID from Supabase (~15 s of redundant work).
+                const { dataValidationService } = await import('../../services/dataValidationService');
+                await dataValidationService.populateFromLocal(capturedStoreId);
               } finally {
-                setSyncSession((s) => (s ? { ...s, tier2Complete: true } : s));
-              }
-            })();
-            void (async () => {
-              try {
-                await syncService.downloadTier('tier3', capturedStoreId, capturedBranchId, { signal: bgController.signal });
-                await refreshData();
-                await updateUnsyncedCount();
-              } catch (e) {
-                if ((e as Error)?.name !== 'AbortError') console.warn('Tier 3 background sync:', e);
-              } finally {
-                setSyncSession((s) => (s ? { ...s, tier3Complete: true } : s));
+                setSyncSession((s) => (s ? { ...s, tier2Complete: true, tier3Complete: true } : s));
               }
             })();
           } else {
@@ -329,8 +329,22 @@ export function useOfflineInitialization(params: UseOfflineInitializationParams)
               } else {
                 debug('🔄 Rebuilding Tier 1 checkpoints in background');
               }
-              for (const tableName of SYNC_TIERS.tier1) {
-                await syncService.downloadTablePaged(tableName, storeId, {});
+              await syncService.downloadTier('tier1', storeId, currentBranchId);
+              // Recovery: re-run any Tier 2/3 tables whose previous hydration didn't
+              // complete (e.g. a prior cold-start aborted mid-paging). For healthy
+              // installs every checkpoint is already complete and this is a no-op.
+              const recoverable = [...SYNC_TIERS.tier2, ...SYNC_TIERS.tier3] as readonly SyncTable[];
+              const checkpoints = await Promise.all(
+                recoverable.map((t) => syncService.getCheckpoint(t, storeId))
+              );
+              const incomplete = recoverable.filter((_, i) => !checkpoints[i].hydrationComplete);
+              if (incomplete.length > 0) {
+                debug(`🩹 Re-hydrating ${incomplete.length} incomplete table(s): ${incomplete.join(', ')}`);
+                await Promise.all(
+                  incomplete.map((t) => syncService.downloadTablePaged(t, storeId, {}))
+                );
+                const { entityBalanceCache } = await import('../../services/entityBalanceCache');
+                entityBalanceCache.invalidateAll();
               }
               await refreshData();
             } catch (e) {

@@ -437,7 +437,7 @@ export class BalanceMigrationService {
     }
 
     const result = data as MigrationRPCResult;
-    
+      
     if (!result.success) {
       console.error(`❌ Migration failed for ${row.entityName}:`, result);
       throw new Error(result.error || 'Migration failed');

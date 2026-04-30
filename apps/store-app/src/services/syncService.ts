@@ -11,7 +11,7 @@ import type { Store, PendingSync } from '../types';
 import {
   SYNC_CONFIG,
   SYNC_TABLES,
-  getTablesInTierOrdered,
+  getTierWaves,
 } from './syncConfig';
 import type {
   SyncResult,
@@ -933,6 +933,8 @@ export class SyncService {
     const useDeltaMode = cursor > 0;
     let idCursor: string | null = null; // used for cold-start id-based pagination
 
+    let pageCount = 0;
+
     while (true) {
       if (options?.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
@@ -970,6 +972,10 @@ export class SyncService {
 
       const { data: page, error } = await query;
       if (error) {
+        console.error(
+          `🔥 [sync] table '${tableName}' Supabase query error — pageCount=${pageCount}, idCursor=${idCursor}, cursor=${cursor}`,
+          { code: (error as any).code, details: (error as any).details, hint: (error as any).hint, message: error.message }
+        );
         await this.handleSyncTransportError(storeId, error);
         throw new Error(error.message);
       }
@@ -981,6 +987,7 @@ export class SyncService {
         await (db as any)[tableName].bulkPut(bulk);
       }
 
+      pageCount += 1;
       total += rows.length;
       lastCount = rows.length;
       const complete = rows.length < pageSize;
@@ -1015,14 +1022,6 @@ export class SyncService {
         });
         if (complete) { break; }
       }
-
-      // Keep original break-on-complete path unreachable (handled above)
-      if (complete) {
-        finalMax = cursor;
-        break;
-      }
-      cursor = pageMax;
-      finalMax = pageMax;
     }
 
     return {
@@ -1041,25 +1040,38 @@ export class SyncService {
     options?: { signal?: AbortSignal }
   ): Promise<SyncResult> {
     this.emitSyncStructuredLog('tier_started', storeId, branchId, { tier });
+    const tierStart = performance.now();
     const result: SyncResult = {
       success: true,
       errors: [],
       synced: { uploaded: 0, downloaded: 0 },
       conflicts: 0,
     };
-    const tables = getTablesInTierOrdered(tier);
-    for (const t of tables) {
-      try {
-        const r = await this.downloadTablePaged(t, storeId, { signal: options?.signal });
-        result.synced.downloaded += r.totalRecordsDownloaded;
-      } catch (e) {
-        // Log and continue — one table failure must not abort the remaining tier tables
-        const msg = e instanceof Error ? e.message : 'downloadTier failed';
-        result.errors.push(`${t}: ${msg}`);
-        result.success = false;
-        console.warn(`[sync] downloadTier '${tier}': table '${t}' failed — continuing`, msg);
+    const waves = getTierWaves(tier);
+    for (const wave of waves) {
+      const settled = await Promise.all(
+        wave.map((t) =>
+          this.downloadTablePaged(t, storeId, { signal: options?.signal })
+            .then((r) => ({ table: t, ok: true as const, r }))
+            .catch((e) => ({ table: t, ok: false as const, e }))
+        )
+      );
+      for (const s of settled) {
+        if (s.ok) {
+          result.synced.downloaded += s.r.totalRecordsDownloaded;
+        } else {
+          const msg = s.e instanceof Error ? s.e.message : String(s.e);
+          result.errors.push(`${s.table}: ${msg}`);
+          result.success = false;
+          console.error(`🔥 [sync] tier '${tier}' table '${s.table}' FAILED — continuing`, s.e);
+        }
       }
     }
+    const tierMs = performance.now() - tierStart;
+    console.log(
+      `⏱️ [sync] tier ${tier}: ${tierMs.toFixed(0)}ms ` +
+      `(${waves.length} waves, downloaded=${result.synced.downloaded}, success=${result.success})`
+    );
     this.emitSyncStructuredLog('tier_completed', storeId, branchId, {
       tier,
       downloaded: result.synced.downloaded,

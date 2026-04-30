@@ -2,11 +2,13 @@ import { useEffect } from 'react';
 import { eventStreamService } from '../../services/syncOrchestrator';
 import { entityBalanceCache } from '../../services/entityBalanceCache';
 import { invalidateCashDrawerBalanceCache } from '../../utils/cacheManager';
+import type { OfflineSyncSessionState } from './offlineDataContextContract';
 
 export interface UseEventStreamLifecycleParams {
   storeId: string | null;
   currentBranchId: string | null;
   isOnline: boolean;
+  syncSession: OfflineSyncSessionState | null;
   refreshData: () => Promise<void>;
   refreshCashDrawerStatus: () => Promise<void>;
 }
@@ -15,16 +17,29 @@ export function useEventStreamLifecycle({
   storeId,
   currentBranchId,
   isOnline,
+  syncSession,
   refreshData,
   refreshCashDrawerStatus,
 }: UseEventStreamLifecycleParams): void {
+  // Hold the realtime websocket subscription during a cold-start hydration.
+  // When the websocket subscribes mid-download it competes with the Tier 1/2
+  // HTTP/2 streams on the same connection and causes 'subscription timed out'
+  // reconnect attempts that visibly slow the cold-start sync. Catch-up events
+  // are pulled by version on subscribe, so deferring loses no data.
+  const holdForColdStart =
+    syncSession?.isColdStart === true && syncSession.tier2Complete === false;
+
   useEffect(() => {
-    if (!storeId || !currentBranchId || !isOnline) {
-      console.log(`🛑 [EventStream] Conditions not met, clearing callback:`, {
-        hasStoreId: !!storeId,
-        hasBranchId: !!currentBranchId,
-        isOnline,
-      });
+    if (!storeId || !currentBranchId || !isOnline || holdForColdStart) {
+      if (holdForColdStart) {
+        console.log(`⏸ [EventStream] Holding subscription until cold-start tier2 completes`);
+      } else {
+        console.log(`🛑 [EventStream] Conditions not met, clearing callback:`, {
+          hasStoreId: !!storeId,
+          hasBranchId: !!currentBranchId,
+          isOnline,
+        });
+      }
       eventStreamService.setOnEventsProcessed(undefined);
       return;
     }
@@ -75,5 +90,5 @@ export function useEventStreamLifecycle({
       eventStreamService.stop(currentBranchId);
       eventStreamService.setOnEventsProcessed(undefined);
     };
-  }, [storeId, currentBranchId, isOnline, refreshData, refreshCashDrawerStatus]);
+  }, [storeId, currentBranchId, isOnline, holdForColdStart, refreshData, refreshCashDrawerStatus]);
 }

@@ -1031,8 +1031,8 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
           }
 
           const description: { en: string; ar: string } = {
-            en: `Bill #${selectedBill.bill_number} - Payment ${paymentMethodChanged ? 'method' : 'amount'} adjustment`,
-            ar: `فاتورة #${selectedBill.bill_number} - تعديل ${paymentMethodChanged ? 'طريقة' : 'مبلغ'} الدفع`,
+            en: `Payment ${paymentMethodChanged ? 'method' : 'amount'} adjustment`,
+            ar: `تعديل ${paymentMethodChanged ? 'طريقة' : 'مبلغ'} الدفع`,
           };
           const context = {
             userId: userProfile.id,

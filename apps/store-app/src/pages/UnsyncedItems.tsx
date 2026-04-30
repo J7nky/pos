@@ -191,7 +191,7 @@ export default function UnsyncedItems() {
   const formatRecordPreview = (record: any, tableName: string): string => {
     // Create a preview string based on common fields
     if (record.name) return record.name;
-    if (record.bill_number) return `Bill #${record.bill_number}`;
+    if (record.bill_number) return record.bill_number;
     if (record.product_name) return record.product_name;
     if (record.description) return record.description.substring(0, 50);
     if (record.id) return record.id.substring(0, 8) + '...';

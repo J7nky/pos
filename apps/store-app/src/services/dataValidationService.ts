@@ -107,6 +107,51 @@ export class DataValidationService {
   private refreshPromise: Promise<void> | null = null;
 
   /**
+   * Populate the validation cache directly from local Dexie. Use this after a
+   * cold-start hydration: Dexie just received the authoritative dataset from
+   * Supabase, so reading IDs locally is equivalent to (and ~100× faster than)
+   * re-querying Supabase via `refreshCache`. Marks the cache as warm so the
+   * next `refreshCache` call short-circuits via the TTL gate.
+   */
+  async populateFromLocal(storeId: string): Promise<void> {
+    const [products, entities, users, batches, bills] = await Promise.all([
+      getDB().products.where('store_id').equals(storeId).primaryKeys(),
+      getDB().entities.where('store_id').equals(storeId).toArray(),
+      getDB().users.where('store_id').equals(storeId).primaryKeys(),
+      getDB().inventory_bills.where('store_id').equals(storeId).primaryKeys(),
+      getDB().bills.where('store_id').equals(storeId).primaryKeys(),
+    ]);
+
+    const supplierIds: string[] = [];
+    const customerIds: string[] = [];
+    const allEntityIds: string[] = [];
+    for (const e of entities) {
+      allEntityIds.push(e.id);
+      if (e.entity_type === 'supplier') supplierIds.push(e.id);
+      else if (e.entity_type === 'customer') customerIds.push(e.id);
+    }
+
+    this.cache.products = new Set(products as string[]);
+    this.cache.entities = new Set(allEntityIds);
+    this.cache.suppliers = new Set(supplierIds);
+    this.cache.customers = new Set(customerIds);
+    this.cache.users = new Set(users as string[]);
+    this.cache.batches = new Set(batches as string[]);
+    this.cache.bills = new Set(bills as string[]);
+    this.cache.recordCounts = {
+      products: this.cache.products.size,
+      entities: this.cache.entities.size,
+      suppliers: this.cache.suppliers.size,
+      customers: this.cache.customers.size,
+      users: this.cache.users.size,
+      batches: this.cache.batches.size,
+      bills: this.cache.bills.size,
+    };
+    this.cache.storeId = storeId;
+    this.cache.lastUpdated = new Date();
+  }
+
+  /**
    * Refresh validation cache from Supabase
    * OPTIMIZED: Uses delta-based refresh and pagination for large datasets
    */

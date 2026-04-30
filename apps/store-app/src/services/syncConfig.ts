@@ -132,6 +132,37 @@ export function getTablesInTierOrdered(tier: DataTierName): SyncTable[] {
   return sorted;
 }
 
+/**
+ * Group a tier's tables into dependency waves. Each wave's tables can run in
+ * parallel; waves run sequentially. Cross-tier dependencies are assumed
+ * satisfied (earlier tiers complete before later tiers start).
+ */
+export function getTierWaves(tier: DataTierName): SyncTable[][] {
+  const tierTables = SYNC_TIERS[tier];
+  const inTier = new Set<SyncTable>(tierTables);
+  const placed = new Set<SyncTable>();
+  const waves: SyncTable[][] = [];
+
+  while (placed.size < tierTables.length) {
+    const wave: SyncTable[] = [];
+    for (const t of tierTables) {
+      if (placed.has(t)) continue;
+      const deps = (SYNC_DEPENDENCIES[t] ?? []).filter((d) => inTier.has(d));
+      if (deps.every((d) => placed.has(d))) {
+        wave.push(t);
+      }
+    }
+    if (wave.length === 0) {
+      // Cycle or unsatisfiable dep — fall back to remaining tables sequentially
+      for (const t of tierTables) if (!placed.has(t)) wave.push(t);
+    }
+    for (const t of wave) placed.add(t);
+    waves.push(wave);
+  }
+
+  return waves;
+}
+
 export interface SyncResult {
   success: boolean;
   errors: string[];

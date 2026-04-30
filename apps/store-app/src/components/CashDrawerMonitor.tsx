@@ -1,12 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { cashDrawerUpdateService } from '../services/cashDrawerUpdateService';
 import { useCurrency } from '../hooks/useCurrency';
 import { useI18n } from '../i18n';
-import { 
-  TrendingUp, 
-  TrendingDown, 
-  Clock, 
+import { useMultilingual } from '../hooks/useMultilingual';
+import { parseMultilingualString } from '../utils/multilingual';
+import {
+  TrendingUp,
+  TrendingDown,
+  Clock,
 } from 'lucide-react';
 
 interface CashDrawerStatus {
@@ -15,31 +17,47 @@ interface CashDrawerStatus {
   transactionCount: number;
 }
 
+// Module-level cache so the list survives navigation away/back to Home
+// without re-rendering the empty state while the next fetch is in flight.
+const cache: {
+  scope: string | null;
+  status: CashDrawerStatus | null;
+  history: any[];
+  lastLoadedAt: number;
+} = { scope: null, status: null, history: [], lastLoadedAt: 0 };
+
 export default function CashDrawerMonitor() {
   const raw = useOfflineData();
   const { formatCurrency } = useCurrency();
   const { t } = useI18n();
-  
-  const [cashDrawerStatus, setCashDrawerStatus] = useState<CashDrawerStatus | null>(null);
-  const [transactionHistory, setTransactionHistory] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const { getText } = useMultilingual();
+
+  const scope = raw.storeId && raw.currentBranchId ? `${raw.storeId}:${raw.currentBranchId}` : null;
+  const initial = scope && cache.scope === scope ? cache : null;
+
+  const [cashDrawerStatus, setCashDrawerStatus] = useState<CashDrawerStatus | null>(initial?.status ?? null);
+  const [transactionHistory, setTransactionHistory] = useState<any[]>(initial?.history ?? []);
+  const [_isLoading, setIsLoading] = useState(false);
   const [range, setRange] = useState<'today' | 'week'>('today');
+  const lastTxLenRef = useRef<number | null>(null);
 
   const loadCashDrawerStatus = async () => {
     if (!raw.storeId || !raw.currentBranchId) return;
-    
+
     setIsLoading(true);
     try {
-      console.log('branch 675443',raw.currentBranchId)
       const balance = await cashDrawerUpdateService.getCurrentCashDrawerBalance(raw.storeId, raw.currentBranchId);
       const history = await cashDrawerUpdateService.getCashDrawerTransactionHistory(raw.storeId);
-      console.log('💰 Balance:', balance);
-      setCashDrawerStatus({
+      const status: CashDrawerStatus = {
         currentBalance: balance,
         lastUpdated: new Date().toISOString(),
-        transactionCount: history.length
-      });
-      
+        transactionCount: history.length,
+      };
+      cache.scope = `${raw.storeId}:${raw.currentBranchId}`;
+      cache.status = status;
+      cache.history = history;
+      cache.lastLoadedAt = Date.now();
+      setCashDrawerStatus(status);
       setTransactionHistory(history);
     } catch (error) {
       console.error('Error loading cash drawer status:', error);
@@ -48,12 +66,15 @@ export default function CashDrawerMonitor() {
     }
   };
 
+  // Initial mount + branch change: only fetch if cache is stale (>5s) or scope mismatched.
   useEffect(() => {
     if (!raw.storeId || !raw.currentBranchId) return;
-    
-    loadCashDrawerStatus();
+    const currentScope = `${raw.storeId}:${raw.currentBranchId}`;
+    const cacheFresh = cache.scope === currentScope && Date.now() - cache.lastLoadedAt < 5000;
+    if (!cacheFresh) {
+      loadCashDrawerStatus();
+    }
 
-    // Live updates from cash drawer events (local changes)
     const handleCashDrawerUpdated = (e: any) => {
       if (!raw.storeId || !raw.currentBranchId || (e?.detail?.storeId && e.detail.storeId !== raw.storeId)) return;
       loadCashDrawerStatus();
@@ -63,7 +84,6 @@ export default function CashDrawerMonitor() {
       window.addEventListener('cash-drawer-updated', handleCashDrawerUpdated as any);
     }
 
-    // Refresh every 30 seconds (fallback)
     const interval = setInterval(() => {
       if (raw.storeId && raw.currentBranchId) {
         loadCashDrawerStatus();
@@ -77,18 +97,19 @@ export default function CashDrawerMonitor() {
     };
   }, [raw.storeId, raw.currentBranchId]);
 
-  // Re-fetch after initial sync completes
+  // Refetch only when the transactions array length actually changes after mount
+  // (covers sync downloads). Skip the initial render — the mount effect handles it.
   useEffect(() => {
     if (!raw.storeId || !raw.currentBranchId) return;
-    if (!raw.loading?.sync) {
+    const len = raw.transactions?.length ?? 0;
+    if (lastTxLenRef.current === null) {
+      lastTxLenRef.current = len;
+      return;
+    }
+    if (lastTxLenRef.current !== len) {
+      lastTxLenRef.current = len;
       loadCashDrawerStatus();
     }
-  }, [raw.storeId, raw.currentBranchId, raw.loading?.sync]);
-
-  // Re-fetch when transactions change (e.g., after sync downloads new ones)
-  useEffect(() => {
-    if (!raw.storeId || !raw.currentBranchId) return;
-    loadCashDrawerStatus();
   }, [raw.storeId, raw.currentBranchId, raw.transactions?.length]);
 
   const filteredTransactions = (() => {
@@ -120,18 +141,20 @@ export default function CashDrawerMonitor() {
   };
 
   const getTransactionIcon = (type: string) => {
-    if (type.includes('sale') || type.includes('payment')) {
+    const t = (type || '').toLowerCase();
+    if (t.includes('sale') || t.includes('payment')) {
       return <TrendingUp className="w-4 h-4 text-green-600" />;
-    } else if (type.includes('expense') || type.includes('refund')) {
+    } else if (t.includes('expense') || t.includes('refund')) {
       return <TrendingDown className="w-4 h-4 text-red-600" />;
     }
     return <Clock className="w-4 h-4 text-gray-600" />;
   };
 
   const getTransactionColor = (type: string) => {
-    if (type.includes('sale') || type.includes('payment')) {
+    const t = (type || '').toLowerCase();
+    if (t.includes('sale') || t.includes('payment')) {
       return 'text-green-600';
-    } else if (type.includes('expense') || type.includes('refund')) {
+    } else if (t.includes('expense') || t.includes('refund')) {
       return 'text-red-600';
     }
     return 'text-gray-600';
@@ -182,7 +205,7 @@ export default function CashDrawerMonitor() {
                     {getTransactionIcon(transaction.category)}
                     <div>
                       <p className={`text-sm font-medium ${getTransactionColor(transaction.category)}`}>
-                        {transaction.description}
+                        {getText(parseMultilingualString(transaction.description) as any) || ''}
                       </p>
                       <p className="text-xs text-gray-500">
                         {formatDate(transaction.created_at)}
@@ -197,7 +220,7 @@ export default function CashDrawerMonitor() {
                       {formatCurrency(transaction.amount)}
                     </p>
                     <p className="text-xs text-gray-500 capitalize">
-                      {transaction.category.replace('cash_drawer_', '')}
+                      {(transaction.category || '').replace(/^Cash Drawer\s*/i, '')}
                     </p>
                   </div>
                 </div>

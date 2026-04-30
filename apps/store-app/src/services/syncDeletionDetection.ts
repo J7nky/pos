@@ -17,11 +17,13 @@ export async function detectAndSyncDeletions(
   deletionStateCache: Map<string, DeletionState>
 ) {
   const result = { deleted: 0, errors: [] as string[] };
-  
+
   console.log('🔍 Starting optimized deletion detection...');
   const detectionStart = performance.now();
-  
-  for (const tableName of SYNC_TABLES) {
+
+  // Tables are independent — each does its own full-id scan against Supabase.
+  // Run them in parallel; total wall-clock = max(per-table time) instead of sum.
+  const checkOneTable = async (tableName: string) => {
     const tableStart = performance.now();
     try {
       // NOTE: Deletion detection runs for ALL tables as a safety mechanism
@@ -36,7 +38,7 @@ export async function detectAndSyncDeletions(
         .toArray();
       
       if (localRecords.length === 0) {
-        continue;
+        return;
       }
       
       const localCount = localRecords.length;
@@ -53,7 +55,7 @@ export async function detectAndSyncDeletions(
         const countDiff = Math.abs(localCount - lastState.record_count);
         if (countDiff === 0) {
           console.log(`⚡ ${tableName}: No count change, skipping deletion check`);
-          continue;
+          return;
         }
         
         if (countDiff < 10 && localCount > 100) {
@@ -138,7 +140,7 @@ export async function detectAndSyncDeletions(
         console.warn(`⚠️ Skipping deletion detection for ${tableName} - query timed out or failed. Will retry next sync.`);
         const tableTime = performance.now() - tableStart;
         console.log(`  ⏱️  ${tableName} deletion check: ${tableTime.toFixed(2)}ms (skipped due to timeout)`);
-        continue; // Skip to next table
+        return; // Skip this table
       }
       
       console.log(`📊 ${tableName}: Fetched ${totalFetched} remote IDs, comparing with ${localCount} local records`);
@@ -186,8 +188,10 @@ export async function detectAndSyncDeletions(
       console.error(`❌ Deletion detection failed for ${tableName} after ${tableTime.toFixed(2)}ms:`, error);
       result.errors.push(`Deletion detection error for ${tableName}: ${error}`);
     }
-  }
-  
+  };
+
+  await Promise.all(SYNC_TABLES.map((t) => checkOneTable(t)));
+
   const totalTime = performance.now() - detectionStart;
   console.log(`🗑️  Deletion detection complete: ${result.deleted} records removed in ${totalTime.toFixed(2)}ms`);
   return result;

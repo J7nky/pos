@@ -496,7 +496,7 @@ export class CashDrawerUpdateService {
             try {
               // Get cash drawer transactions using optimized query
               const transactions = await QueryHelpers.byStore(getDB().transactions, storeId)
-                .filter(trans => trans.category.startsWith('cash_drawer_'))
+                .filter(trans => typeof trans.category === 'string' && trans.category.startsWith('Cash Drawer '))
                 .toArray();
 
               // Apply date filtering using utility
