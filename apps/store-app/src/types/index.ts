@@ -22,7 +22,8 @@ export interface Employee {
   branch_id: string | null; // null for admin (can access all branches), branch ID for manager/cashier
   phone?: string | null;
   address?: string | null;
-  monthly_salary?: string | null; // Monthly salary configuration (e.g., "500.00 USD" or "1000000 LBP")
+  monthly_salary?: string | null; // Monthly salary amount as a numeric string (e.g., "500.00", "1000000"). Currency lives in salary_currency.
+  salary_currency?: CurrencyCode | null; // Currency code for monthly_salary; sourced from store's accepted_currencies
   // Note: Running balances are calculated from journal entries (account 2200 - Salaries Payable)
   // Use entityBalanceService.getEmployeeBalance() to get current balance
   working_hours_start?: string | null; // Format: "HH:mm" (e.g., "09:00")

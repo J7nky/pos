@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- legacy offline context; narrow types incrementally */
-import { createContext, useContext, useState, useRef, useCallback, useMemo, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, useCallback, useMemo, ReactNode } from 'react';
 import type { CurrencyCode } from '@pos-platform/shared';
 import { useSupabaseAuth } from './SupabaseAuthContext';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
@@ -11,6 +11,7 @@ import {
 } from '../lib/db';
 import { syncService, type SyncResult } from '../services/syncOrchestrator';
 import { currencyService } from '../services/currencyService';
+import { salaryAccrualService } from '../services/salaryAccrualService';
 import { crudHelperService } from '../services/crudHelperService';
 // import { PAYMENT_CATEGORIES } from '../constants/paymentCategories'; // Unused
 import enLocale from '../i18n/locales/en';
@@ -786,6 +787,21 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   // Keep a ref so ensureDataReady polling always reads the latest value
   const isDataReadyRef = useRef(false);
   isDataReadyRef.current = isDataReady;
+
+  // Monthly salary accrual sweep — runs once per session after hydration.
+  // Idempotent: deterministic transaction ids dedupe across devices and re-launches.
+  const accrualRunRef = useRef(false);
+  useEffect(() => {
+    if (!isDataReady || !storeId || !currentBranchId || !userProfile?.id) return;
+    if (accrualRunRef.current) return;
+    accrualRunRef.current = true;
+    salaryAccrualService
+      .runDueAccruals(storeId, currentBranchId, userProfile.id)
+      .catch((err) => {
+        console.error('[salary-accrual] sweep failed', err);
+        accrualRunRef.current = false; // allow retry on next render cycle
+      });
+  }, [isDataReady, storeId, currentBranchId, userProfile?.id]);
 
   // ─── Misc utilities ────────────────────────────────────────────────────────
   const ensureDataReady = useCallback((): Promise<void> => {

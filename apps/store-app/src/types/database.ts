@@ -160,7 +160,8 @@ export interface Database {
           is_active?: boolean;
           phone?: string | null;
           address?: string | null;
-          monthly_salary?: string | null; // Monthly salary configuration (e.g., "500.00 USD" or "1000000 LBP")
+          monthly_salary?: string | null; // Numeric amount string (e.g., "500.00"); currency is in salary_currency
+          salary_currency?: string | null; // CurrencyCode (e.g., "USD", "LBP", "EUR") — sourced from store's accepted_currencies
           // Note: Running balances are calculated from journal entries (account 2200 - Salaries Payable)
           working_hours_start?: string | null;
           working_hours_end?: string | null;
@@ -172,6 +173,7 @@ export interface Database {
           phone?: string | null;
           address?: string | null;
           monthly_salary?: string | null;
+          salary_currency?: string | null;
           working_hours_start?: string | null;
           working_hours_end?: string | null;
           working_days?: string | null;
@@ -191,6 +193,7 @@ export interface Database {
           phone?: string | null;
           address?: string | null;
           monthly_salary?: string | null;
+          salary_currency?: string | null;
           working_hours_start?: string | null;
           working_hours_end?: string | null;
           working_days?: string | null;

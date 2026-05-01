@@ -56,17 +56,25 @@ export interface CreateTransactionParams {
   // Required fields
   category: TransactionCategory;
   amount: number;
-  currency: 'USD' | 'LBP';
+  currency: CurrencyCode;
   description: MultilingualString;
   context: TransactionContext;
-  
+
   // Optional fields
   reference?: string;
   entityId?: string | null; // Unified field for customer/supplier/employee
   metadata?: Record<string, any>;
   is_reversal?: boolean;
   reversal_of_transaction_id?: string | null;
-  
+  /**
+   * Optional caller-supplied id. Enables idempotent posting (e.g., monthly
+   * salary accruals use a deterministic id so two offline devices collide
+   * on sync rather than producing duplicates).
+   */
+  transactionId?: string;
+  /** Override the timestamp used for created_at / posted_date (e.g., backdated accruals). */
+  postedDate?: string;
+
   // Behavior flags
   updateBalances?: boolean;
   updateCashDrawer?: boolean;
@@ -195,10 +203,10 @@ export class TransactionService {
       }
 
       // 2. PREPARE TRANSACTION DATA (outside transaction)
-      const transactionId = this.generateTransactionId();
+      const transactionId = params.transactionId ?? this.generateTransactionId();
       const correlationId = params.context.correlationId || this.generateCorrelationId();
       const type = getTransactionType(params.category);
-      
+
       // Convert amount to USD for balance calculations
       const amountInUSD = currencyService.convert(
         params.amount,
@@ -211,9 +219,13 @@ export class TransactionService {
 
       // Get entity_id from params
       const entityId = params.entityId || null;
-      
-      // 3. GET BALANCE BEFORE (outside transaction - read-only)
-      const balanceBefore = await this.getEntityBalance(entityId, params.currency);
+
+      // 3. GET BALANCE BEFORE (outside transaction - read-only).
+      // entityBalanceService only supports USD/LBP — fall back to USD for non-USD/LBP
+      // transaction currencies; the value is informational (returned in result), not posted.
+      const balanceLookupCurrency: 'USD' | 'LBP' =
+        params.currency === 'USD' || params.currency === 'LBP' ? params.currency : 'USD';
+      const balanceBefore = await this.getEntityBalance(entityId, balanceLookupCurrency);
       // 4. PREPARE TRANSACTION RECORD
       const transaction: Transaction = {
         id: transactionId,
@@ -324,8 +336,9 @@ export class TransactionService {
       await getDB().transaction('rw', 
         [getDB().transactions, getDB().cash_drawer_sessions, getDB().journal_entries, getDB().entities, getDB().chart_of_accounts, getDB().cash_drawer_accounts], 
         async () => {
-          // Create timestamp inside transaction block for accurate commit time
-          const timestamp = new Date().toISOString();
+          // Create timestamp inside transaction block for accurate commit time.
+          // Caller may override (e.g., monthly salary accruals backdate to month-end).
+          const timestamp = params.postedDate ?? new Date().toISOString();
           transaction.created_at = timestamp;
           
           console.log(`[CREATE_TRANSACTION] Adding transaction record:`, {
@@ -1372,7 +1385,7 @@ export class TransactionService {
    */
   private async normalizePaymentCurrency(
     params: CreateTransactionParams
-  ): Promise<{ amount: number; currency: 'USD' | 'LBP' }> {
+  ): Promise<{ amount: number; currency: CurrencyCode }> {
     const { category, amount, currency, entityId } = params;
 
     const NORMALIZABLE: TransactionCategory[] = [
@@ -1382,7 +1395,8 @@ export class TransactionService {
       TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT_RECEIVED,
       TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT,
     ];
-    if (!NORMALIZABLE.includes(category) || !entityId) {
+    // Normalization currently only supports USD/LBP balances; bail for other currencies.
+    if (!NORMALIZABLE.includes(category) || !entityId || (currency !== 'USD' && currency !== 'LBP')) {
       return { amount, currency };
     }
 
@@ -1797,13 +1811,23 @@ export class TransactionService {
         branchId: transaction.branch_id
       });
 
-      // Create journal entry using the mapping
+      // For USD/LBP transactions preserve the legacy single-scalar journal write
+      // (legacy mode in journalService sets the unused currency to 0 — UI relies on this).
+      // For non-USD/LBP currencies (e.g., EUR), dual-convert so the legacy scalar columns
+      // are populated correctly; the Phase 11 amounts map carries the original.
+      const txnCurrency = transaction.currency as CurrencyCode;
+      const journalParams = txnCurrency === 'USD' || txnCurrency === 'LBP'
+        ? { amount: transaction.amount, currency: txnCurrency }
+        : {
+            amountUSD: currencyService.convert(transaction.amount, txnCurrency, 'USD'),
+            amountLBP: currencyService.convert(transaction.amount, txnCurrency, 'LBP'),
+          };
+
       await journalService.createJournalEntry({
         transactionId: transaction.id,
         debitAccount: accountMapping.debitAccount,
         creditAccount: accountMapping.creditAccount,
-        amount: transaction.amount,
-        currency: transaction.currency,
+        ...journalParams,
         entityId, // Now using actual UUID entity ID
         description,
         postedDate: getLocalDateString(transaction.created_at), // Extract local date part

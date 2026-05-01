@@ -170,6 +170,13 @@ export const TRANSACTION_ACCOUNT_MAPPING: Record<TransactionCategory, AccountMap
     description: 'Payment received from employee',
     requiresEntity: true
   },
+
+  [TRANSACTION_CATEGORIES.SALARY_ACCRUAL]: {
+    debitAccount: '5200', // Salaries Expense (increases — recognize obligation)
+    creditAccount: '2200', // Salaries Payable (increases — owed to employee)
+    description: 'Salary accrual',
+    requiresEntity: true
+  },
   
   // Accounting Transactions
   [TRANSACTION_CATEGORIES.ACCOUNTS_RECEIVABLE]: {

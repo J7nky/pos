@@ -739,6 +739,7 @@ export class DataValidationService {
       if (cleanRecord.phone === '') cleanRecord.phone = null;
       if (cleanRecord.address === '') cleanRecord.address = null;
       if (cleanRecord.monthly_salary === '') cleanRecord.monthly_salary = null;
+      if (cleanRecord.salary_currency === '') cleanRecord.salary_currency = null;
       if (cleanRecord.working_hours_start === '') cleanRecord.working_hours_start = null;
       if (cleanRecord.working_hours_end === '') cleanRecord.working_hours_end = null;
       if (cleanRecord.working_days === '') cleanRecord.working_days = null;

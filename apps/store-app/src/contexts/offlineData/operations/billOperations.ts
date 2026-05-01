@@ -10,7 +10,6 @@ import { getFiscalPeriodForDate } from '../../../utils/fiscalPeriod';
 import { TRANSACTION_CATEGORIES } from '../../../constants/transactionCategories';
 import { BranchAccessValidationService } from '../../../services/branchAccessValidationService';
 import { receivedBillMonitoringService } from '../../../services/receivedBillMonitoringService';
-import { journalService } from '../../../services/journalService';
 import { validateBillCreation } from '../../../services/businessValidationService';
 import type { CashDrawerAtomicResult } from './cashDrawerTransactionOperations';
 import type { MultilingualString } from '../../../utils/multilingual';
@@ -746,7 +745,7 @@ export async function createBill(
         cashDrawerResult = await createCashDrawerTransactionAtomic(
           totalCashAmount,
           billCurrency,
-          `Cash sale - Bill ${bill.bill_number}`,
+          `Cash Sale Bill`,
           bill.bill_number,
           undefined,
           bill.bill_number

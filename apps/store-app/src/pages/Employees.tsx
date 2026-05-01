@@ -9,6 +9,9 @@ import { ModuleAccessManager } from '../components/rbac/ModuleAccessManager';
 import { useI18n } from '../i18n';
 import { useErrorHandler } from '../hooks/useErrorHandler';
 import { normalizeNameForComparison } from '../utils/nameNormalization';
+import { useCurrency } from '../hooks/useCurrency';
+import type { CurrencyCode } from '@pos-platform/shared';
+import { currencyService } from '../services/currencyService';
 
 export default function Employees() {
   const { userProfile } = useSupabaseAuth();
@@ -24,6 +27,7 @@ export default function Employees() {
   });
   const { t } = useI18n();
   const { handleError } = useErrorHandler();
+  const { acceptedCurrencies, preferredCurrency } = useCurrency();
   const [formData, setFormData] = useState<Partial<Employee>>({
     name: '',
     email: '',
@@ -36,7 +40,7 @@ export default function Employees() {
     working_days: '',
   });
   const [password, setPassword] = useState<string>('');
-  const [salaryCurrency, setSalaryCurrency] = useState<'LBP' | 'USD'>('LBP');
+  const [salaryCurrency, setSalaryCurrency] = useState<CurrencyCode>(preferredCurrency);
   const [salaryValue, setSalaryValue] = useState<string>('');
   const [showWorkingDaysModal, setShowWorkingDaysModal] = useState(false);
 
@@ -161,12 +165,13 @@ export default function Employees() {
         }
       }
 
-      // Store monthly salary configuration (not running balance)
-      // Format: "500.00 USD" or "1000000 LBP"
+      // Store monthly salary amount and currency separately
       if (salaryValue && salaryValue.trim() !== '') {
-        cleanedFormData.monthly_salary = `${salaryValue} ${salaryCurrency}`;
+        cleanedFormData.monthly_salary = salaryValue.trim();
+        cleanedFormData.salary_currency = salaryCurrency;
       } else {
         cleanedFormData.monthly_salary = null;
+        cleanedFormData.salary_currency = null;
       }
 
       const employeeData = {
@@ -284,22 +289,28 @@ export default function Employees() {
     });
     setNameValidationError(null);
     
-    // Set currency and value based on monthly_salary field
-    // Format: "500.00 USD" or "1000000 LBP"
-    if (employee.monthly_salary) {
-      const parts = employee.monthly_salary.trim().split(' ');
-      if (parts.length >= 2) {
-        const value = parts.slice(0, -1).join(' '); // Handle values with spaces
-        const currency = parts[parts.length - 1].toUpperCase();
-        setSalaryValue(value);
-        setSalaryCurrency(currency === 'USD' ? 'USD' : 'LBP');
+    // Set currency and value: prefer the dedicated salary_currency column, fallback to legacy
+    // string format "500 USD" / "1000000 LBP" parsing for older records.
+    const acceptedSet = new Set<CurrencyCode>(acceptedCurrencies as CurrencyCode[]);
+    if (employee.salary_currency && employee.monthly_salary) {
+      setSalaryValue(employee.monthly_salary);
+      setSalaryCurrency(
+        acceptedSet.has(employee.salary_currency)
+          ? employee.salary_currency
+          : preferredCurrency,
+      );
+    } else if (employee.monthly_salary) {
+      const parts = employee.monthly_salary.trim().split(/\s+/);
+      const maybeCode = parts[parts.length - 1].toUpperCase() as CurrencyCode;
+      if (parts.length >= 2 && acceptedSet.has(maybeCode)) {
+        setSalaryValue(parts.slice(0, -1).join(' '));
+        setSalaryCurrency(maybeCode);
       } else {
-        // Fallback: try to parse as number, default to LBP
         setSalaryValue(employee.monthly_salary);
-        setSalaryCurrency('LBP');
+        setSalaryCurrency(preferredCurrency);
       }
     } else {
-      setSalaryCurrency('LBP');
+      setSalaryCurrency(preferredCurrency);
       setSalaryValue('');
     }
     
@@ -348,7 +359,7 @@ export default function Employees() {
       working_days: '',
     });
     setPassword('');
-    setSalaryCurrency('LBP');
+    setSalaryCurrency(preferredCurrency);
     setSalaryValue('');
     setEditingEmployee(null);
     setShowForm(false);
@@ -597,30 +608,27 @@ export default function Employees() {
                   />
                   {formErrors.monthly_salary && <p className="text-red-500 text-xs mt-1">{formErrors.monthly_salary}</p>}
                   
-                  {/* Currency Toggle Switch */}
-                  <div className="mt-3 flex items-center justify-center gap-3 bg-gray-50 p-2 rounded-lg border border-gray-200">
-                    <button
-                      type="button"
-                      onClick={() => setSalaryCurrency('LBP')}
-                      className={`flex-1 py-2 px-4 rounded-md font-medium text-sm transition-all duration-200 ${
-                        salaryCurrency === 'LBP'
-                          ? 'bg-blue-600 text-white shadow-md'
-                          : 'bg-white text-gray-600 hover:bg-gray-100'
-                      }`}
-                    >
-                      LBP
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSalaryCurrency('USD')}
-                      className={`flex-1 py-2 px-4 rounded-md font-medium text-sm transition-all duration-200 ${
-                        salaryCurrency === 'USD'
-                          ? 'bg-blue-600 text-white shadow-md'
-                          : 'bg-white text-gray-600 hover:bg-gray-100'
-                      }`}
-                    >
-                      USD
-                    </button>
+                  {/* Currency Selector — sourced from store's accepted currencies */}
+                  <div className="mt-3 flex flex-wrap items-center justify-center gap-2 bg-gray-50 p-2 rounded-lg border border-gray-200">
+                    {acceptedCurrencies.map((code) => {
+                      const meta = currencyService.getMeta(code);
+                      const active = salaryCurrency === code;
+                      return (
+                        <button
+                          key={code}
+                          type="button"
+                          onClick={() => setSalaryCurrency(code)}
+                          title={meta.name}
+                          className={`py-2 px-4 rounded-md font-medium text-sm transition-all duration-200 ${
+                            active
+                              ? 'bg-blue-600 text-white shadow-md'
+                              : 'bg-white text-gray-600 hover:bg-gray-100'
+                          }`}
+                        >
+                          {code}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -869,7 +877,9 @@ export default function Employees() {
                     {employee.monthly_salary ? (
                       <div className="flex items-center text-sm text-gray-900">
                         <DollarSign className="w-4 h-4  text-gray-400" />
-                        {employee.monthly_salary}
+                        {employee.salary_currency
+                          ? `${employee.monthly_salary} ${employee.salary_currency}`
+                          : employee.monthly_salary}
                       </div>
                     ) : (
                       <span className="text-sm text-gray-400">{t('employees.notSet')}</span>

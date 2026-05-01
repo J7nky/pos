@@ -144,6 +144,7 @@ export class EmployeeService {
       phone: employeeData.phone || null,
       address: employeeData.address || null,
       monthly_salary: employeeData.monthly_salary || null,
+      salary_currency: employeeData.salary_currency || null,
       // Note: Balance fields removed - balances are calculated from journal entries (account 2200)
       working_hours_start: employeeData.working_hours_start || null,
       working_hours_end: employeeData.working_hours_end || null,
