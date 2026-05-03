@@ -74,7 +74,9 @@
       "Bash(pnpm --filter @pos-platform/store-app test:run)",
       "Bash(echo \"exit=$?\")",
       "Bash(awk '/journal_entries: {$/,/^      };/' apps/store-app/src/types/database.ts)",
-      "Bash(grep -n \"const.*tableStart\\\\|upsert.*cleanedBatch\\\\|console.log.*\\\\`  📤\" /home/janky/Desktop/pos-1/apps/store-app/src/services/syncUpload.ts)"
+      "Bash(grep -n \"const.*tableStart\\\\|upsert.*cleanedBatch\\\\|console.log.*\\\\`  📤\" /home/janky/Desktop/pos-1/apps/store-app/src/services/syncUpload.ts)",
+      "PowerShell(pnpm *)",
+      "WebSearch"
     ]
   }
 }

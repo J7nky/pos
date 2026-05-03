@@ -20,6 +20,7 @@ import { transactionService } from './transactionService';
 import { TRANSACTION_CATEGORIES } from '../constants/transactionCategories';
 import { CURRENCY_META, type CurrencyCode } from '@pos-platform/shared';
 import type { Employee } from '../types';
+import type { SupportedLanguage } from '../utils/multilingual';
 
 // Stable namespace UUID for deterministic salary-accrual transaction ids.
 // Two devices that compute uuidv5 for the same (employee, period) produce the
@@ -78,6 +79,17 @@ function ymdLocal(d: Date): string {
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function buildSalaryAccrualDescription(
+  employee: Employee,
+  period: string,
+): Record<SupportedLanguage, string> {
+  return {
+    en: `Salary accrual for ${employee.name} — ${period}`,
+    ar: `استحقاق راتب ${employee.name} — ${period}`,
+    fr: `Provision salariale pour ${employee.name} — ${period}`,
+  };
 }
 
 /**
@@ -259,10 +271,7 @@ async function postAccrual(
       category: TRANSACTION_CATEGORIES.SALARY_ACCRUAL,
       amount,
       currency,
-      description: {
-        en: `Salary accrual for ${employee.name} — ${item.period}`,
-        ar: `استحقاق راتب ${employee.name} — ${item.period}`,
-      },
+      description: buildSalaryAccrualDescription(employee, item.period),
       context: {
         userId: context.userId,
         storeId: context.storeId,
