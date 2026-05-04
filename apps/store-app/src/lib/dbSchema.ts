@@ -2,7 +2,7 @@ import type { Transaction as DexieTransaction } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
 import type { SyncMetadata, PendingSync } from '../types';
 
-export const CURRENT_DB_VERSION = 59;
+export const CURRENT_DB_VERSION = 60;
 
 export const V54_STORES = {
   stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
@@ -98,6 +98,11 @@ export const V59_STORES = {
     'id, store_id, branch_id, transaction_id, entity_id, account_code, posted_date, bill_id, reversal_of_journal_entry_id, created_at, [store_id+branch_id], [store_id+account_code], [entity_id+account_code], [transaction_id], [bill_id], [reversal_of_journal_entry_id], _synced, _deleted',
   balance_snapshots:
     'id, store_id, branch_id, account_code, entity_id, balance_usd, balance_lbp, snapshot_date, snapshot_type, verified, created_at, [store_id+branch_id], [store_id+account_code+entity_id+snapshot_date], [store_id+account_code+entity_id], [store_id+snapshot_date+snapshot_type], [store_id+snapshot_date], _synced, _deleted',
+} as const;
+
+export const V60_STORES = {
+  journal_entries:
+    'id, store_id, branch_id, transaction_id, entity_id, account_code, posted_date, bill_id, reversal_of_journal_entry_id, transfer_group_id, created_at, [store_id+branch_id], [store_id+account_code], [store_id+transfer_group_id], [entity_id+account_code], [transaction_id], [bill_id], [reversal_of_journal_entry_id], _synced, _deleted',
 } as const;
 
 export async function upgradeV54(_tx: DexieTransaction): Promise<void> {
@@ -228,4 +233,9 @@ export async function upgradeV59(tx: DexieTransaction): Promise<void> {
     });
 
   console.log('   ✅ v59 migration complete');
+}
+
+export async function upgradeV60(_tx: DexieTransaction): Promise<void> {
+  console.log('🔧 Migrating database schema v59 → v60 (journal transfer_group_id index)');
+  console.log('   ✅ v60 migration complete');
 }

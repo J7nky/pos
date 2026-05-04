@@ -134,6 +134,7 @@ Strings are stored as `{ en: string, ar: string }` objects. Use `createMultiling
 - Supabase (PostgreSQL — remote); IndexedDB via Dexie v4 (local, primary) (010-incremental-sync-redesign)
 - Supabase (PostgreSQL — remote); IndexedDB via Dexie v4 (local, primary). Undo payload lives in browser storage (sessionStorage after this change). (011-undo-system-fixes)
 - Supabase (PostgreSQL — remote); IndexedDB via Dexie v4 (local, primary). No schema changes in this feature — consumes columns introduced by spec 014. (016-inventory-pos-currency)
+- Supabase (PostgreSQL — remote); IndexedDB via Dexie v4 (local, primary, schema bump 54 → 55) (018-balance-sheet)
 
 ## Recent Changes
 - 010-incremental-sync-redesign: Added TypeScript 5.x, React 18, Node.js ≥18 + Dexie v4, Supabase JS v2, React Router 7, Tailwind CSS 3, Vite 7, Electron 38

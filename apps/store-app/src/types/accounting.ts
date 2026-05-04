@@ -3,6 +3,14 @@
 
 import type { CurrencyCode } from '@pos-platform/shared';
 
+export type AssetSubClassification = 'current_asset' | 'non_current_asset';
+export type LiabilitySubClassification = 'current_liability' | 'non_current_liability';
+export type EquitySubClassification = 'equity';
+export type AccountSubClassification =
+  | AssetSubClassification
+  | LiabilitySubClassification
+  | EquitySubClassification;
+
 /**
  * Per-currency debit/credit map for a journal entry (Phase 11 generalization).
  * Each row is self-describing — the keys carry the currency identity, so
@@ -52,6 +60,7 @@ export interface JournalEntry {
   bill_id?: string | null;        // Direct link to bill - enables fast queries
   reversal_of_journal_entry_id?: string | null;  // Links reversal entry to original entry
   entry_type?: 'original' | 'reversal' | 'reactivation';  // Explicit type instead of parsing description
+  transfer_group_id?: string | null;
 }
 
 /**
@@ -110,6 +119,7 @@ export interface ChartOfAccounts {
   account_code: string;           // '1100'
   account_name: string;           // 'Cash'
   account_type: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
+  sub_classification: AccountSubClassification | null;
   requires_entity: boolean;       // Whether this account requires an entity_id
   is_active: boolean;
 }

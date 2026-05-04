@@ -1,16 +1,19 @@
 import { useState, useMemo } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useEntityBalances } from '../hooks/useEntityBalances';
-import { 
-  BarChart3, 
-  TrendingUp, 
-  DollarSign, 
+import {
+  BarChart3,
+  TrendingUp,
+  DollarSign,
   Users,
   Package,
+  Scale,
 } from 'lucide-react';
 import SalesOverviewCard from '../components/cards/SalesOverviewCard';
 import { MissedProductsHistory } from '../components/MissedProductsHistory';
 import ProfitLossReport from '../components/reports/ProfitLossReport';
+import TrialBalance from '../components/reports/TrialBalance';
+import BalanceSheet from '../components/reports/BalanceSheet';
 import { getLocalDateString, getTodayLocalDate } from '../utils/dateUtils';
 
 export default function Reports() {
@@ -40,7 +43,7 @@ export default function Reports() {
     startDate: getTodayLocalDate(),
     endDate: getTodayLocalDate(),
   });
-  const [reportType, setReportType] = useState<'sales' | 'inventory' | 'customers' | 'profit' | 'missed-products'>('sales');
+  const [reportType, setReportType] = useState<'sales' | 'inventory' | 'customers' | 'profit' | 'trial-balance' | 'balance-sheet' | 'missed-products'>('sales');
 
   const filteredSales = sales.filter(sale => {
     if (!sale.createdAt) return false;
@@ -109,6 +112,8 @@ export default function Reports() {
               { value: 'inventory', label: 'Inventory', icon: Package },
               { value: 'customers', label: 'Customers', icon: Users },
               { value: 'profit', label: 'Profit Analysis', icon: TrendingUp },
+              { value: 'trial-balance', label: 'Trial Balance', icon: Scale },
+              { value: 'balance-sheet', label: 'Balance Sheet', icon: Scale },
               { value: 'missed-products', label: 'Missed Products', icon: Package },
             ].map(({ value, label, icon: Icon }) => (
               <button
@@ -128,7 +133,7 @@ export default function Reports() {
         </div>
 
         {/* Date Range Filter - Only show for non-profit reports */}
-        {reportType !== 'profit' && (
+        {reportType !== 'profit' && reportType !== 'trial-balance' && reportType !== 'balance-sheet' && (
           <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
             <h2 className="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wide">Date Range</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -399,6 +404,14 @@ export default function Reports() {
 
       {reportType === 'profit' && (
         <ProfitLossReport storeId={raw.storeId} branchId={raw.currentBranchId || undefined} />
+      )}
+
+      {reportType === 'trial-balance' && raw.storeId && (
+        <TrialBalance storeId={raw.storeId} branchId={raw.currentBranchId || undefined} />
+      )}
+
+      {reportType === 'balance-sheet' && raw.storeId && (
+        <BalanceSheet storeId={raw.storeId} branchId={raw.currentBranchId || undefined} />
       )}
 
       {reportType === 'missed-products' && (
