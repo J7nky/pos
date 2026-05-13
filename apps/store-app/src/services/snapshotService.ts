@@ -8,6 +8,8 @@ import { getDB } from '../lib/db';
 import { BalanceSnapshot } from '../types/accounting';
 import { journalService } from './journalService';
 import { createId } from '../lib/db';
+import { amountsFromLegacyEntry, getDebit, getCredit } from './accountingCurrencyHelpers';
+import type { CurrencyCode } from '@pos-platform/shared';
 import { getLocalDateString } from '../utils/dateUtils';
 import { buildBalances } from './accountingCurrencyHelpers';
 
@@ -23,7 +25,11 @@ export interface SnapshotResult {
 export interface HistoricalBalance {
   accountCode: string;
   entityId: string | null;
+  /** Per-currency balance map (Phase 11 / Layer 8 — primary surface). */
+  byCurrency: Partial<Record<CurrencyCode, number>>;
+  /** Legacy USD shortcut, equal to `byCurrency.USD ?? 0`. */
   balanceUSD: number;
+  /** Legacy LBP shortcut, equal to `byCurrency.LBP ?? 0`. */
   balanceLBP: number;
   snapshotDate: string;
   isCalculated: boolean; // true if calculated from journal, false if from snapshot
@@ -34,9 +40,9 @@ export interface SnapshotVerificationResult {
   discrepancies: Array<{
     accountCode: string;
     entityId: string | null;
-    snapshotBalance: { USD: number; LBP: number };
-    calculatedBalance: { USD: number; LBP: number };
-    difference: { USD: number; LBP: number };
+    snapshotBalance: Partial<Record<CurrencyCode, number>>;
+    calculatedBalance: Partial<Record<CurrencyCode, number>>;
+    difference: Partial<Record<CurrencyCode, number>>;
   }>;
   verificationDate: string;
   totalSnapshots: number;
@@ -200,9 +206,6 @@ export class SnapshotService {
         branch_id: branchId,
         account_code: accountCode,
         entity_id: entityId,
-        balance_usd: balance.USD,
-        balance_lbp: balance.LBP,
-        // Phase 11 dual-write: also write the self-describing balances map.
         balances: buildBalances([
           { currency: 'USD', balance: balance.USD },
           { currency: 'LBP', balance: balance.LBP },
@@ -223,32 +226,35 @@ export class SnapshotService {
   }
   
   /**
-   * Calculate balance from journal entries up to a specific date
+   * Calculate balance from journal entries up to a specific date.
+   * Returns a per-currency map keyed by every currency that appears.
    */
   private async calculateBalanceFromJournal(
     storeId: string,
     accountCode: string,
     entityId: string | null,
     asOfDate: string
-  ): Promise<{ USD: number; LBP: number }> {
+  ): Promise<Partial<Record<CurrencyCode, number>>> {
     let query = getDB().journal_entries
       .where('[store_id+account_code]')
       .equals([storeId, accountCode])
       .filter(entry => entry.posted_date <= asOfDate);
-    
+
     if (entityId) {
       query = query.filter(entry => entry.entity_id === entityId);
     }
-    
+
     const entries = await query.toArray();
-    
-    const balance = { USD: 0, LBP: 0 };
-    
+
+    const balance: Partial<Record<CurrencyCode, number>> = {};
+
     for (const entry of entries) {
-      balance.USD += entry.debit_usd - entry.credit_usd;
-      balance.LBP += entry.debit_lbp - entry.credit_lbp;
+      const map = amountsFromLegacyEntry(entry as Parameters<typeof amountsFromLegacyEntry>[0]);
+      for (const code of Object.keys(map) as CurrencyCode[]) {
+        balance[code] = (balance[code] ?? 0) + getDebit(map, code) - getCredit(map, code);
+      }
     }
-    
+
     return balance;
   }
   
@@ -302,11 +308,13 @@ export class SnapshotService {
         .catch((error) => { throw error; });
 
       if (exact) {
+        const byCurrency = exact.balances ?? {};
         return {
           accountCode,
           entityId,
-          balanceUSD: exact.balance_usd,
-          balanceLBP: exact.balance_lbp,
+          byCurrency,
+          balanceUSD: byCurrency.USD ?? 0,
+          balanceLBP: byCurrency.LBP ?? 0,
           snapshotDate: exact.snapshot_date,
           isCalculated: false
         };
@@ -323,39 +331,40 @@ export class SnapshotService {
       .first();
     
     if (recentSnapshot) {
-      // Calculate balance from the snapshot date to the requested date
-      const snapshotBalance = {
-        USD: recentSnapshot.balance_usd,
-        LBP: recentSnapshot.balance_lbp
-      };
-      
+      // Calculate balance from the snapshot date to the requested date.
+      // Walk every currency present in the snapshot (no USD/LBP assumption).
+      const byCurrency: Partial<Record<CurrencyCode, number>> = { ...(recentSnapshot.balances ?? {}) };
+
       // Get journal entries from snapshot date to requested date
       const additionalEntries = await getDB().journal_entries
         .where('[store_id+account_code]')
         .equals([storeId, accountCode])
-        .filter(entry => 
-          entry.posted_date > recentSnapshot.snapshot_date && 
+        .filter(entry =>
+          entry.posted_date > recentSnapshot.snapshot_date &&
           entry.posted_date <= asOfDate &&
           (entityId ? entry.entity_id === entityId : true)
         )
         .toArray();
-      
-      // Add changes since snapshot using new base currency schema
+
+      // Add changes since snapshot from the JSONB amounts map.
       for (const entry of additionalEntries) {
-        snapshotBalance.USD += entry.debit_usd - entry.credit_usd;
-        snapshotBalance.LBP += entry.debit_lbp - entry.credit_lbp;
+        const map = amountsFromLegacyEntry(entry as Parameters<typeof amountsFromLegacyEntry>[0]);
+        for (const code of Object.keys(map) as CurrencyCode[]) {
+          byCurrency[code] = (byCurrency[code] ?? 0) + getDebit(map, code) - getCredit(map, code);
+        }
       }
-      
+
       return {
         accountCode,
         entityId,
-        balanceUSD: snapshotBalance.USD,
-        balanceLBP: snapshotBalance.LBP,
+        byCurrency,
+        balanceUSD: byCurrency.USD ?? 0,
+        balanceLBP: byCurrency.LBP ?? 0,
         snapshotDate: asOfDate,
         isCalculated: true
       };
     }
-    
+
     // Fallback: calculate from journal entries (O(n) operation)
     const calculatedBalance = await this.calculateBalanceFromJournal(
       storeId,
@@ -363,12 +372,13 @@ export class SnapshotService {
       entityId,
       asOfDate
     );
-    
+
     return {
       accountCode,
       entityId,
-      balanceUSD: calculatedBalance.USD,
-      balanceLBP: calculatedBalance.LBP,
+      byCurrency: calculatedBalance,
+      balanceUSD: calculatedBalance.USD ?? 0,
+      balanceLBP: calculatedBalance.LBP ?? 0,
       snapshotDate: asOfDate,
       isCalculated: true
     };
@@ -390,14 +400,18 @@ export class SnapshotService {
       .filter(s => s.snapshot_date >= startDate && s.snapshot_date <= endDate)
       .toArray();
     
-    return snapshots.map(snapshot => ({
-      accountCode,
-      entityId,
-      balanceUSD: snapshot.balance_usd,
-      balanceLBP: snapshot.balance_lbp,
-      snapshotDate: snapshot.snapshot_date,
-      isCalculated: false
-    }));
+    return snapshots.map(snapshot => {
+      const byCurrency = snapshot.balances ?? {};
+      return {
+        accountCode,
+        entityId,
+        byCurrency,
+        balanceUSD: byCurrency.USD ?? 0,
+        balanceLBP: byCurrency.LBP ?? 0,
+        snapshotDate: snapshot.snapshot_date,
+        isCalculated: false
+      };
+    });
   }
   
   /**
@@ -433,25 +447,29 @@ export class SnapshotService {
           snapshot.entity_id,
           snapshotDate
         );
-        
-        // Check for discrepancies
-        const usdDiff = Math.abs(snapshot.balance_usd - calculatedBalance.USD);
-        const lbpDiff = Math.abs(snapshot.balance_lbp - calculatedBalance.LBP);
-        
-        if (usdDiff > tolerance || lbpDiff > tolerance) {
+
+        // Check for discrepancies across every currency present in either map.
+        const snapBalances = snapshot.balances ?? {};
+        const codes = new Set<CurrencyCode>([
+          ...(Object.keys(snapBalances) as CurrencyCode[]),
+          ...(Object.keys(calculatedBalance) as CurrencyCode[]),
+        ]);
+        const difference: Partial<Record<CurrencyCode, number>> = {};
+        let hasDiscrepancy = false;
+        for (const code of codes) {
+          const diff = (snapBalances[code] ?? 0) - (calculatedBalance[code] ?? 0);
+          difference[code] = diff;
+          if (Math.abs(diff) > tolerance) hasDiscrepancy = true;
+        }
+
+        if (hasDiscrepancy) {
           result.isValid = false;
           result.discrepancies.push({
             accountCode: snapshot.account_code,
             entityId: snapshot.entity_id,
-            snapshotBalance: {
-              USD: snapshot.balance_usd,
-              LBP: snapshot.balance_lbp
-            },
-            calculatedBalance: calculatedBalance,
-            difference: {
-              USD: snapshot.balance_usd - calculatedBalance.USD,
-              LBP: snapshot.balance_lbp - calculatedBalance.LBP
-            }
+            snapshotBalance: snapBalances,
+            calculatedBalance,
+            difference
           });
         } else {
           result.validSnapshots++;

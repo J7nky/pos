@@ -9,6 +9,8 @@ import {
   V58_STORES,
   V59_STORES,
   V60_STORES,
+  V62_STORES,
+  V63_STORES,
   upgradeV54,
   upgradeV55,
   upgradeV56,
@@ -16,6 +18,9 @@ import {
   upgradeV58,
   upgradeV59,
   upgradeV60,
+  upgradeV61,
+  upgradeV62,
+  upgradeV63,
 } from './dbSchema';
 import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
 import { 
@@ -139,6 +144,14 @@ class POSDatabase extends Dexie {
   subscriptions!: Table<any, string>; // Will be properly typed when imported
   license_validations!: Table<any, string>;
   
+  // Local-only product image cache (never synced — see v63)
+  product_image_cache!: Table<{
+    product_id: string;
+    source_url: string;
+    data_uri: string;
+    cached_at: string;
+  }, string>;
+
   // Local authentication tables
   localPasswords!: Table<{ userId: string; passwordHash: string }, string>; // Legacy table for LocalAuthService
   localCredentials!: Table<{
@@ -169,6 +182,9 @@ class POSDatabase extends Dexie {
     this.version(58).stores(V58_STORES).upgrade(upgradeV58);
     this.version(59).stores(V59_STORES).upgrade(upgradeV59);
     this.version(60).stores(V60_STORES).upgrade(upgradeV60);
+    this.version(61).upgrade(upgradeV61);
+    this.version(62).stores(V62_STORES).upgrade(upgradeV62);
+    this.version(63).stores(V63_STORES).upgrade(upgradeV63);
 
     // Add hooks for cash drawer tables
     this.cash_drawer_accounts.hook('creating', this.addCreateFieldsWithUpdatedAt);

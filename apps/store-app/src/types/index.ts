@@ -169,12 +169,20 @@ export interface Supplier {
   id: string;
   name: string;
   phone: string;
-  email?: string ; // Updated to match database schema
+  email?: string;
   address: string;
-  lb_balance?: number ; // Updated to match database schema
-  usd_balance?: number ; // Updated to match database schema
-  advance_lb_balance?: number ; // Advance payments in LBP
-  advance_usd_balance?: number ; // Advance payments in USD
+  /** Per-currency balance map (primary surface). Derived from journal entries. */
+  balances?: Partial<Record<CurrencyCode, number>>;
+  /** Per-currency advance-payment map (lives inside supplier_data JSONB). */
+  advance_balances?: Partial<Record<CurrencyCode, number>>;
+  /** @deprecated Use `balances.LBP`. Kept for back-compat with older readers. */
+  lb_balance?: number;
+  /** @deprecated Use `balances.USD`. */
+  usd_balance?: number;
+  /** @deprecated Use `advance_balances.LBP`. */
+  advance_lb_balance?: number;
+  /** @deprecated Use `advance_balances.USD`. */
+  advance_usd_balance?: number;
   created_at: string;
   updated_at?: string;
   _synced?: boolean;
@@ -209,12 +217,20 @@ export interface Customer {
   id: string;
   name: string;
   phone: string;
-  email?: string ; // Updated to match database schema
-  address?: string ; // Updated to match database schema
-  lb_balance: number; // Changed from currentDebt to balance to match Supabase schema
-  usd_balance: number; // Changed from currentDebt to balance to match Supabase schema
-  lb_max_balance?: number; // Maximum allowed balance in LBP
-  usd_max_balance?: number; // Maximum allowed balance in USD
+  email?: string;
+  address?: string;
+  /** Per-currency balance map (primary surface). Derived from journal entries. */
+  balances?: Partial<Record<CurrencyCode, number>>;
+  /** Per-currency credit-limit map (lives inside customer_data JSONB). */
+  max_balances?: Partial<Record<CurrencyCode, number>>;
+  /** @deprecated Use `balances.LBP`. */
+  lb_balance: number;
+  /** @deprecated Use `balances.USD`. */
+  usd_balance: number;
+  /** @deprecated Use `max_balances.LBP`. */
+  lb_max_balance?: number;
+  /** @deprecated Use `max_balances.USD`. */
+  usd_max_balance?: number;
   is_active: boolean;
   created_at: string;
   updated_at?: string;
@@ -230,7 +246,7 @@ export interface inventory_bills {
   supplier_id: string;
   porterage_fee?: number | null;
   transfer_fee?: number | null;
-  currency?: 'USD' | 'LBP';
+  currency?: CurrencyCode;
   received_at: string;
   created_by: string;
   status?: string;
@@ -473,7 +489,7 @@ export interface Transaction {
   type: 'income' | 'expense' | 'sale' | 'payment' | 'credit_sale';
   category: string;
   amount: number;
-  currency: 'USD' | 'LBP';
+  currency: CurrencyCode;
   description: MultilingualString; // Supports both string (backwards compatible) and multilingual object
   reference: string | null;
   store_id: string;

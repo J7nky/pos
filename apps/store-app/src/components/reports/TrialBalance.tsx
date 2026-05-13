@@ -53,8 +53,20 @@ function shiftRange(startDate: string, endDate: string): { startDate: string; en
 }
 
 export default function TrialBalance({ storeId, branchId }: TrialBalanceProps) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
+  const isRTL = language === 'ar';
   const { formatAmount } = useCurrency();
+
+  const translateAccountName = (code: string, fallback: string) => {
+    const key = `reports.balanceSheet.accounts.${code}`;
+    const translated = t(key);
+    return translated === key ? fallback : translated;
+  };
+  const translateAccountType = (type: string) => {
+    const key = `reports.trialBalance.accountTypes.${type}`;
+    const translated = t(key);
+    return translated === key ? type : translated;
+  };
 
   const [dateRange, setDateRange] = useState(() => {
     const start = new Date();
@@ -173,7 +185,7 @@ export default function TrialBalance({ storeId, branchId }: TrialBalanceProps) {
       const credits = currencies.map((c) => (row.credits[c] ?? 0).toFixed(2));
       const balances = currencies.map((c) => (row.balance[c] ?? 0).toFixed(2));
       lines.push(
-        [row.account_code, row.account_name, row.account_type, ...debits, ...credits, ...balances]
+        [row.account_code, translateAccountName(row.account_code, row.account_name), translateAccountType(row.account_type), ...debits, ...credits, ...balances]
           .map(escape)
           .join(','),
       );
@@ -236,7 +248,7 @@ export default function TrialBalance({ storeId, branchId }: TrialBalanceProps) {
   const currencies = data?.currencies ?? [];
 
   return (
-    <div className="space-y-6 print:space-y-3">
+    <div className="space-y-6 print:space-y-3" dir={isRTL ? 'rtl' : 'ltr'}>
       {/* Header */}
       <div className="bg-white rounded-lg shadow-sm p-6 print:shadow-none print:p-2">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -519,14 +531,14 @@ export default function TrialBalance({ storeId, branchId }: TrialBalanceProps) {
                         key={row.account_code}
                         className="hover:bg-blue-50 cursor-pointer transition-colors"
                         onClick={() =>
-                          setDrillDown({ accountCode: row.account_code, accountName: row.account_name })
+                          setDrillDown({ accountCode: row.account_code, accountName: translateAccountName(row.account_code, row.account_name) })
                         }
                       >
                         <td className="px-4 py-3 font-mono text-sm text-gray-900">{row.account_code}</td>
-                        <td className="px-4 py-3 text-gray-900">{row.account_name}</td>
+                        <td className="px-4 py-3 text-gray-900">{translateAccountName(row.account_code, row.account_name)}</td>
                         <td className="px-4 py-3">
                           <span className={`px-2 py-1 rounded-full text-xs font-medium capitalize ${ACCOUNT_TYPE_BADGE[row.account_type] ?? 'bg-gray-100 text-gray-800'}`}>
-                            {row.account_type}
+                            {translateAccountType(row.account_type)}
                           </span>
                         </td>
                         {currencies.map((c) => (

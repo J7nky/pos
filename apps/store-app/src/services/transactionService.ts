@@ -36,6 +36,7 @@ import { getFiscalPeriodForDate } from '../utils/fiscalPeriod';
 import type { JournalEntry } from '../types/accounting';
 import { validateTransactionCreation } from './businessValidationService';
 import { reverseAmounts, amountsFromLegacyEntry } from './accountingCurrencyHelpers';
+import { calculateBothCurrencies } from '../utils/balanceCalculation';
 // ============================================================================
 // TYPES & INTERFACES
 // ============================================================================
@@ -103,7 +104,7 @@ export interface Transaction {
   type: TransactionType;
   category: TransactionCategory;
   amount: number;
-  currency: 'USD' | 'LBP';
+  currency: CurrencyCode;
   description: string;
   reference: string | null;
   entity_id?: string | null;
@@ -221,11 +222,9 @@ export class TransactionService {
       const entityId = params.entityId || null;
 
       // 3. GET BALANCE BEFORE (outside transaction - read-only).
-      // entityBalanceService only supports USD/LBP — fall back to USD for non-USD/LBP
-      // transaction currencies; the value is informational (returned in result), not posted.
-      const balanceLookupCurrency: 'USD' | 'LBP' =
-        params.currency === 'USD' || params.currency === 'LBP' ? params.currency : 'USD';
-      const balanceBefore = await this.getEntityBalance(entityId, balanceLookupCurrency);
+      // entityBalanceService now accepts any CurrencyCode, so the
+      // transaction's currency passes straight through.
+      const balanceBefore = await this.getEntityBalance(entityId, params.currency as CurrencyCode);
       // 4. PREPARE TRANSACTION RECORD
       const transaction: Transaction = {
         id: transactionId,
@@ -368,10 +367,7 @@ export class TransactionService {
             count: allJournalEntries.length,
             entries: allJournalEntries.map(e => ({
               account_code: e.account_code,
-              debit_usd: e.debit_usd,
-              credit_usd: e.credit_usd,
-              debit_lbp: e.debit_lbp,
-              credit_lbp: e.credit_lbp,
+              amounts: e.amounts,
               is_posted: e.is_posted
             }))
           });
@@ -415,10 +411,7 @@ export class TransactionService {
         entries: persistedEntries.map(e => ({
           id: e.id,
           account_code: e.account_code,
-          debit_usd: e.debit_usd,
-          credit_usd: e.credit_usd,
-          debit_lbp: e.debit_lbp,
-          credit_lbp: e.credit_lbp,
+          amounts: e.amounts,
           is_posted: e.is_posted
         }))
       });
@@ -507,7 +500,7 @@ export class TransactionService {
   public async createCustomerPayment(
     entityId: string,
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description: MultilingualString,
     context: TransactionContext,
     options: { reference?: string; updateCashDrawer?: boolean } = {}
@@ -530,7 +523,7 @@ export class TransactionService {
   public async createSupplierPayment(
     entityId: string,
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description: MultilingualString,
     context: TransactionContext,
     options: { reference?: string; updateCashDrawer?: boolean } = {}
@@ -553,7 +546,7 @@ export class TransactionService {
   public async createCustomerCreditSale(
     entityId: string,
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description: string,
     context: TransactionContext,
     options: { reference?: string } = {}
@@ -576,7 +569,7 @@ export class TransactionService {
   public async createEmployeePayment(
     entityId: string,
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description: string,
     context: TransactionContext,
     options: { reference?: string; updateCashDrawer?: boolean } = {}
@@ -598,7 +591,7 @@ export class TransactionService {
    */
   public async createCashDrawerSale(
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description: string | MultilingualString,
     context: TransactionContext,
     options: { reference?: string; entityId?: string } = {}
@@ -625,7 +618,7 @@ export class TransactionService {
    */
   public async createCashDrawerExpense(
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description: string,
     context: TransactionContext,
     options: { reference?: string; category?: string } = {}
@@ -648,7 +641,7 @@ export class TransactionService {
    */
   public async createInventoryCashPurchase(
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description: string,
     context: TransactionContext,
     options: { reference?: string; metadata?: Record<string, any> } = {}
@@ -671,7 +664,7 @@ export class TransactionService {
   public async createAccountsReceivable(
     entityId: string,
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description: string,
     context: TransactionContext
   ): Promise<TransactionResult> {
@@ -693,7 +686,7 @@ export class TransactionService {
   public async createAccountsPayable(
     entityId: string,
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description: string,
     context: TransactionContext
   ): Promise<TransactionResult> {
@@ -717,7 +710,7 @@ export class TransactionService {
   public async createSupplierCreditPurchase(
     entityId: string,
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description: string,
     context: TransactionContext,
     options: { reference?: string; metadata?: Record<string, any> } = {}
@@ -905,12 +898,8 @@ export class TransactionService {
         account_name: entry.account_name,
         entity_id: entry.entity_id,
         entity_type: entry.entity_type,
-        debit_usd: entry.credit_usd, // Swap: original credit becomes debit
-        credit_usd: entry.debit_usd, // Swap: original debit becomes credit
-        debit_lbp: entry.credit_lbp,
-        credit_lbp: entry.debit_lbp,
-        // Phase 11 dual-write: reversal mirrors the original amounts map with
-        // debit/credit swapped per currency (preserves currency identity).
+        // Reversal mirrors the original amounts map with debit/credit
+        // swapped per currency (preserves currency identity).
         amounts: reverseAmounts(amountsFromLegacyEntry(entry)),
         description: description,
         posted_date: postedDate,
@@ -1027,21 +1016,16 @@ export class TransactionService {
               // Get journal entries for the original transaction to calculate what it did
               const cashJournalEntries = originalJournalEntries.filter(e => e.account_code === '1100');
               
-              // Calculate original balance change: sum of (debit - credit) for cash account entries
-              // ✅ Journal entries use new schema: debit_usd, credit_usd, debit_lbp, credit_lbp
+              // Calculate original balance change from the JSONB amounts map.
               let originalBalanceChange = 0;
               for (const entry of cashJournalEntries) {
-                // Calculate net change for each currency
-                const usdChange = (entry.debit_usd || 0) - (entry.credit_usd || 0);
-                const lbpChange = (entry.debit_lbp || 0) - (entry.credit_lbp || 0);
-                
-                // Convert USD change to LBP and add to total
+                const map = amountsFromLegacyEntry(entry);
+                const usdChange = (map.USD?.debit ?? 0) - (map.USD?.credit ?? 0);
+                const lbpChange = (map.LBP?.debit ?? 0) - (map.LBP?.credit ?? 0);
+
                 if (usdChange !== 0) {
-                  const usdInLbp = currencyService.convert(usdChange, 'USD', 'LBP');
-                  originalBalanceChange += usdInLbp;
+                  originalBalanceChange += currencyService.safeConvert(usdChange, 'USD', 'LBP');
                 }
-                
-                // Add LBP change directly
                 originalBalanceChange += lbpChange;
               }
               
@@ -1395,8 +1379,8 @@ export class TransactionService {
       TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT_RECEIVED,
       TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT,
     ];
-    // Normalization currently only supports USD/LBP balances; bail for other currencies.
-    if (!NORMALIZABLE.includes(category) || !entityId || (currency !== 'USD' && currency !== 'LBP')) {
+    // Bail unless this is a normalize-eligible category with an entity to look up.
+    if (!NORMALIZABLE.includes(category) || !entityId) {
       return { amount, currency };
     }
 
@@ -1407,40 +1391,48 @@ export class TransactionService {
 
     const { entityBalanceService } = await import('./entityBalanceService');
 
-    let balances: { USD: number; LBP: number };
+    let balances: Partial<Record<CurrencyCode, number>>;
     try {
+      let entityBalance;
       if (entity.entity_type === 'customer') {
-        balances = await entityBalanceService.getEntityBalances(entityId, '1200');
+        entityBalance = await entityBalanceService.getEntityBalances(entityId, '1200');
       } else if (entity.entity_type === 'supplier') {
-        balances = await entityBalanceService.getEntityBalances(entityId, '2100');
+        entityBalance = await entityBalanceService.getEntityBalances(entityId, '2100');
       } else if (entity.entity_type === 'employee') {
-        balances = await entityBalanceService.getEmployeeBalances(entityId);
+        entityBalance = await entityBalanceService.getEmployeeBalances(entityId);
       } else {
         return { amount, currency };
       }
+      balances = entityBalance.byCurrency;
     } catch (error) {
       console.warn('[NORMALIZE_PAYMENT] Could not load entity balances; skipping normalization:', error);
       return { amount, currency };
     }
 
-    const other: 'USD' | 'LBP' = currency === 'USD' ? 'LBP' : 'USD';
-    const balanceInPayment = Math.abs(balances[currency] ?? 0);
+    // Pick "the other accepted currency" (assumes 2-currency dual-leg model).
+    // For single-currency stores there is no "other" — skip cross-currency normalization.
+    const accepted = currencyService.getAcceptedCurrencies();
+    const other = accepted.find(c => c !== currency);
+    if (!other) {
+      return { amount, currency };
+    }
+    const balanceInPayment = Math.abs(balances[currency as CurrencyCode] ?? 0);
     const balanceInOther = Math.abs(balances[other] ?? 0);
 
     if (balanceInPayment > 0.01) {
       return { amount, currency };
     }
 
-    if (balanceInOther > 0.01) {
-      const rawConverted = currencyService.convert(amount, currency as CurrencyCode, other as CurrencyCode);
-      const decimals = CURRENCY_META[other as CurrencyCode]?.decimals ?? 2;
+    if (balanceInOther > 0.01 && currencyService.canConvert(currency as CurrencyCode, other)) {
+      const rawConverted = currencyService.convert(amount, currency as CurrencyCode, other);
+      const decimals = CURRENCY_META[other as keyof typeof CURRENCY_META]?.decimals ?? 2;
       const factor = Math.pow(10, decimals);
       const convertedAmount = Math.round(rawConverted * factor) / factor;
 
       console.log(
         `[NORMALIZE_PAYMENT] Cross-currency payment for entity ${entityId}: ` +
         `${amount} ${currency} → ${convertedAmount} ${other} ` +
-        `(no ${currency} balance; existing ${other} balance: ${balances[other]})`
+        `(no ${currency} balance; existing ${other} balance: ${(balances as Record<string, number>)[other]})`
       );
 
       return { amount: convertedAmount, currency: other };
@@ -1456,7 +1448,7 @@ export class TransactionService {
    */
   private async getEntityBalance(
     entityId: string | null | undefined,
-    currency: 'USD' | 'LBP' = 'USD'
+    currency: CurrencyCode = 'USD'
   ): Promise<number> {
     try {
       if (!entityId) {
@@ -1557,34 +1549,27 @@ export class TransactionService {
         entries: cashJournalEntries.map(e => ({
           id: e.id,
           account_code: e.account_code,
-          debit_usd: e.debit_usd,
-          credit_usd: e.credit_usd,
-          debit_lbp: e.debit_lbp,
-          credit_lbp: e.credit_lbp,
+          amounts: e.amounts,
           is_posted: e.is_posted
         }))
       });
 
-      // Calculate balance change for each currency separately
-      // ✅ Journal entries use new schema: debit_usd, credit_usd, debit_lbp, credit_lbp
+      // Calculate balance change per currency from the JSONB amounts map.
       let usdBalanceChange = 0;
       let lbpBalanceChange = 0;
-      
+
       for (const entry of cashJournalEntries) {
-        // Calculate net change for each currency
-        const usdChange = (entry.debit_usd || 0) - (entry.credit_usd || 0);
-        const lbpChange = (entry.debit_lbp || 0) - (entry.credit_lbp || 0);
-        
+        const map = amountsFromLegacyEntry(entry);
+        const usdChange = (map.USD?.debit ?? 0) - (map.USD?.credit ?? 0);
+        const lbpChange = (map.LBP?.debit ?? 0) - (map.LBP?.credit ?? 0);
+
         console.log(`[CASH_DRAWER_UPDATE] Processing journal entry:`, {
           entryId: entry.id,
-          debit_usd: entry.debit_usd,
-          credit_usd: entry.credit_usd,
-          debit_lbp: entry.debit_lbp,
-          credit_lbp: entry.credit_lbp,
+          amounts: map,
           usdChange,
           lbpChange
         });
-        
+
         usdBalanceChange += usdChange;
         lbpBalanceChange += lbpChange;
       }
@@ -1616,7 +1601,6 @@ export class TransactionService {
       }
       
       // Calculate current balances for both currencies
-      const { calculateBothCurrencies } = await import('../utils/balanceCalculation');
       const currentBalances = calculateBothCurrencies(allCashEntries);
       
       // Calculate previous balances (before this transaction)
@@ -1811,23 +1795,16 @@ export class TransactionService {
         branchId: transaction.branch_id
       });
 
-      // For USD/LBP transactions preserve the legacy single-scalar journal write
-      // (legacy mode in journalService sets the unused currency to 0 — UI relies on this).
-      // For non-USD/LBP currencies (e.g., EUR), dual-convert so the legacy scalar columns
-      // are populated correctly; the Phase 11 amounts map carries the original.
+      // Single-currency journal write — `journalService` now accepts any
+      // CurrencyCode and routes it directly into the JSONB `amounts` map.
       const txnCurrency = transaction.currency as CurrencyCode;
-      const journalParams = txnCurrency === 'USD' || txnCurrency === 'LBP'
-        ? { amount: transaction.amount, currency: txnCurrency }
-        : {
-            amountUSD: currencyService.convert(transaction.amount, txnCurrency, 'USD'),
-            amountLBP: currencyService.convert(transaction.amount, txnCurrency, 'LBP'),
-          };
 
       await journalService.createJournalEntry({
         transactionId: transaction.id,
         debitAccount: accountMapping.debitAccount,
         creditAccount: accountMapping.creditAccount,
-        ...journalParams,
+        amount: transaction.amount,
+        currency: txnCurrency,
         entityId, // Now using actual UUID entity ID
         description,
         postedDate: getLocalDateString(transaction.created_at), // Extract local date part

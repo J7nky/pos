@@ -4,6 +4,7 @@ import { useI18n } from '../i18n';
 import { useErrorHandler } from '../hooks/useErrorHandler';
 import { crudHelperService } from '../services/crudHelperService';
 import { getDB } from '../lib/db';
+import { formatDateTime } from '../utils/numberFormat';
 import { 
   RefreshCw, 
   AlertCircle, 
@@ -139,7 +140,7 @@ export default function UnsyncedItems() {
   const formatDate = (dateString: string | undefined) => {
     if (!dateString) return 'N/A';
     try {
-      return new Date(dateString).toLocaleString();
+      return formatDateTime(dateString);
     } catch {
       return 'N/A';
     }

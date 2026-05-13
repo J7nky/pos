@@ -27,6 +27,7 @@ import { auditLogService, AuditLogEntry, AuditQuery } from '../services/auditLog
 import { useCurrency } from '../hooks/useCurrency';
 import ActivityFeed from './ActivityFeed';
 import { getLocalDateString, getTodayLocalDate } from '../utils/dateUtils';
+import { formatNumber, formatDateTime } from '../utils/numberFormat';
 
 interface AuditDashboardProps {
   showHeader?: boolean;
@@ -210,7 +211,7 @@ export default function AuditDashboard({
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-gray-600">Total Activities</p>
-                  <p className="text-2xl font-bold text-gray-900">{auditSummary.totalEntries.toLocaleString()}</p>
+                  <p className="text-2xl font-bold text-gray-900">{formatNumber(auditSummary.totalEntries)}</p>
                 </div>
                 <div className="p-3 bg-blue-100 rounded-full">
                   <Activity className="w-6 h-6 text-blue-600" />
@@ -297,7 +298,7 @@ export default function AuditDashboard({
                         <p className="font-medium text-red-900">{event.action.replace(/_/g, ' ').toUpperCase()}</p>
                         <p className="text-sm text-red-700 mt-1">{event.description}</p>
                         <p className="text-xs text-red-600 mt-1">
-                          {new Date(event.timestamp).toLocaleString()} • {event.userName || event.userEmail || event.userId}
+                          {formatDateTime(event.timestamp)} • {event.userName || event.userEmail || event.userId}
                         </p>
                       </div>
                       <span className="px-2 py-1 bg-red-100 text-red-800 text-xs rounded-full">

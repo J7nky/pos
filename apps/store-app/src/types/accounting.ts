@@ -37,15 +37,7 @@ export interface JournalEntry {
   transaction_id: string;         // Groups debit + credit entries
   account_code: string;           // '1100', '1200', etc.
   account_name: string;
-  /** @deprecated Phase 11 — use `amounts` map. Kept during dual-write. */
-  debit_usd: number;
-  /** @deprecated Phase 11 — use `amounts` map. */
-  credit_usd: number;
-  /** @deprecated Phase 11 — use `amounts` map. */
-  debit_lbp: number;
-  /** @deprecated Phase 11 — use `amounts` map. */
-  credit_lbp: number;
-  /** Self-describing per-currency map (Phase 11). Immutable once written. */
+  /** Self-describing per-currency map. Immutable once written. */
   amounts: JournalEntryAmounts;
   entity_id: string;              // NEVER NULL - references entities table
   entity_type: 'customer' | 'supplier' | 'employee' | 'cash' | 'internal';
@@ -76,11 +68,7 @@ export interface BalanceSnapshot {
   branch_id: string | null;
   account_code: string;
   entity_id: string | null;
-  /** @deprecated Phase 11 — use `balances` map. */
-  balance_usd: number;
-  /** @deprecated Phase 11 — use `balances` map. */
-  balance_lbp: number;
-  /** Self-describing per-currency map (Phase 11). */
+  /** Self-describing per-currency map. */
   balances: BalanceSnapshotMap;
   snapshot_date: string;
   snapshot_type: 'hourly' | 'daily' | 'end_of_day';
@@ -128,6 +116,9 @@ export interface ChartOfAccounts {
  * Customer-specific data structure for entity.customer_data
  */
 export interface CustomerData {
+  /** Per-currency credit-limit map (primary surface). */
+  max_balances?: Partial<Record<CurrencyCode, number>>;
+  /** @deprecated Use `max_balances.LBP`. Kept as a back-compat mirror. */
   lb_max_balance?: number;
   credit_limit?: number;
   payment_terms?: string;
@@ -141,7 +132,11 @@ export interface SupplierData {
   type: 'commission' | 'direct';
   commission_rate?: number;
   payment_terms?: string;
+  /** Per-currency advance-payment map (primary surface). */
+  advance_balances?: Partial<Record<CurrencyCode, number>>;
+  /** @deprecated Use `advance_balances.LBP`. */
   advance_lb_balance?: number;
+  /** @deprecated Use `advance_balances.USD`. */
   advance_usd_balance?: number;
 }
 
@@ -182,18 +177,22 @@ export interface CreateJournalEntryParams {
   postedDate?: string;
   createdBy?: string | null;  // User ID (UUID) - null for system-generated
   branchId: string;  // Branch ID - required, must match transaction.branch_id
-  // Legacy support - if currency/amount provided, will be converted
-  amount?: number;                 // Legacy: single amount
-  currency?: 'USD' | 'LBP';       // Legacy: single currency
+  // Legacy single-currency entry shape (kept for backward callers).
+  amount?: number;
+  currency?: CurrencyCode;
   skipVerification?: boolean;      // Skip verification queries when called within a transaction (prevents PrematureCommitError)
 }
 
 /**
- * Balance calculation result
+ * Balance calculation result.
+ *
+ * USD/LBP fields preserved for legacy callers; new code should use
+ * `byCurrency` directly.
  */
 export interface BalanceResult {
   USD: number;
   LBP: number;
+  byCurrency?: Partial<Record<CurrencyCode, number>>;
   lastCalculated: string;
 }
 

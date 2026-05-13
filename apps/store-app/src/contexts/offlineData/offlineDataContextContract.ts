@@ -130,6 +130,8 @@ type CashDrawerViewState = {
   currentBalance: number;
   currency: CurrencyCode;
   lastUpdated: string;
+  openedAt: string;
+  openingAmount: number;
 };
 
 type CashDrawerBalanceReportSession = {
@@ -271,6 +273,10 @@ export interface OfflineDataContextType {
   currency: CurrencyCode;
   preferredCurrency: CurrencyCode;
   acceptedCurrencies: CurrencyCode[];
+  /** True iff `code` is in this store's acceptedCurrencies list. */
+  isCurrencyAccepted: (code: CurrencyCode) => boolean;
+  /** True iff this store accepts more than one currency (drives selector visibility). */
+  isMultiCurrency: boolean;
   formatAmount: (amount: number, currency: CurrencyCode) => string;
   exchangeRate: number;
   language: 'en' | 'ar' | 'fr';

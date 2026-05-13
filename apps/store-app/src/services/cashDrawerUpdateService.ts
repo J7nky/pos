@@ -4,6 +4,7 @@ import { QueryHelpers, DateFilters } from '../utils/queryHelpers';
 import { CacheManager, CacheKeys } from '../utils/cacheManager';
 import { PerformanceMonitor } from '../utils/performanceMonitor';
 import { BranchAccessValidationService } from './branchAccessValidationService';
+import { formatDateTime } from '../utils/numberFormat';
 
 /**
  * CASH DRAWER UPDATE SERVICE
@@ -106,7 +107,7 @@ export class CashDrawerUpdateService {
         if (existingSession && existingSession.status === 'open') {
           return {
             success: false,
-            error: `Cash drawer session already open (opened by ${existingSession.opened_by} at ${new Date(existingSession.opened_at).toLocaleString()})`
+            error: `Cash drawer session already open (opened by ${existingSession.opened_by} at ${formatDateTime(existingSession.opened_at)})`
           };
         }
 
@@ -368,6 +369,60 @@ export class CashDrawerUpdateService {
   }
 
   /**
+   * Return the set of transaction IDs that posted a journal entry on the
+   * cash account (1100) within the currently open session's time window.
+   *
+   * This is the canonical "cash-affecting transactions" signal — it's
+   * derived from the same source (account 1100 journal entries, scoped to
+   * the active session) as `getCurrentCashDrawerBalances`, so any UI that
+   * filters transactions by membership in this set will sum to exactly the
+   * `balance − opening` delta of the drawer.
+   *
+   * Returns an empty set when no session is open.
+   */
+  public async getCurrentSessionCashTransactionIds(
+    storeId: string,
+    branchId: string
+  ): Promise<Set<string>> {
+    try {
+      const session = await getDB().getCurrentCashDrawerSession(storeId, branchId);
+      if (!session || session.status !== 'open') return new Set();
+
+      const openedAt = new Date(session.opened_at);
+      const closedAt = session.closed_at ? new Date(session.closed_at) : new Date();
+
+      let entries;
+      try {
+        entries = await getDB().journal_entries
+          .where('[store_id+account_code]')
+          .equals([storeId, '1100'])
+          .and(e => {
+            if (e.is_posted !== true || e.branch_id !== branchId) return false;
+            const d = new Date(e.created_at);
+            return d >= openedAt && d <= closedAt;
+          })
+          .toArray();
+      } catch (error) {
+        console.warn('Compound index [store_id+account_code] not available, using fallback:', error);
+        entries = await getDB().journal_entries
+          .where('[store_id+branch_id]')
+          .equals([storeId, branchId])
+          .and(e => {
+            if (e.account_code !== '1100' || e.is_posted !== true) return false;
+            const d = new Date(e.created_at);
+            return d >= openedAt && d <= closedAt;
+          })
+          .toArray();
+      }
+
+      return new Set(entries.map(e => e.transaction_id));
+    } catch (error) {
+      console.error('Error getting current session cash transaction IDs:', error);
+      return new Set();
+    }
+  }
+
+  /**
    * Reconcile cash drawer balance from journal entries - READ-ONLY VERIFICATION
    * 
    * ✅ Calculates TRUE balance from journal entries (account_code = 1100) - single source of truth
@@ -494,16 +549,38 @@ export class CashDrawerUpdateService {
           CacheManager.TTL.MEDIUM, // 5 seconds
           async () => {
             try {
-              // Get cash drawer transactions using optimized query
+              // Identify cash-affecting transactions by their journal-entry
+              // footprint on account 1100 (Cash) — the same source of truth
+              // the cash drawer balance uses. The previous category-prefix
+              // filter ('Cash Drawer ') missed SUPPLIER_PAYMENT,
+              // EMPLOYEE_PAYMENT, INVENTORY_CASH_PURCHASE, etc.
+              let cashEntries;
+              try {
+                cashEntries = await getDB().journal_entries
+                  .where('[store_id+account_code]')
+                  .equals([storeId, '1100'])
+                  .and(e => e.is_posted === true)
+                  .toArray();
+              } catch (error) {
+                console.warn('Compound index [store_id+account_code] not available, using fallback:', error);
+                cashEntries = await getDB().journal_entries
+                  .where('store_id')
+                  .equals(storeId)
+                  .and(e => e.account_code === '1100' && e.is_posted === true)
+                  .toArray();
+              }
+              const txIds = new Set(cashEntries.map(e => e.transaction_id));
+              if (txIds.size === 0) return [];
+
               const transactions = await QueryHelpers.byStore(getDB().transactions, storeId)
-                .filter(trans => typeof trans.category === 'string' && trans.category.startsWith('Cash Drawer '))
+                .filter(trans => txIds.has(trans.id))
                 .toArray();
 
               // Apply date filtering using utility
               const filtered = DateFilters.filterByDateRange(transactions, startDate, endDate);
 
               // Sort by date descending
-              const sorted = filtered.sort((a, b) => 
+              const sorted = filtered.sort((a, b) =>
                 new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
               );
 

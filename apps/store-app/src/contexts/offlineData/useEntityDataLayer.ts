@@ -11,6 +11,106 @@ import { journalService } from '../../services/journalService';
 import { emitEntityEvent, buildEventOptions } from '../../services/eventEmissionHelper';
 import { getLocalDateString } from '../../utils/dateUtils';
 import type { EntityDataLayerAdapter, EntityDataLayerResult, Tables } from './types';
+import type { CurrencyCode } from '@pos-platform/shared';
+
+/**
+ * Coerce an incoming entity-create payload into a per-currency initial
+ * balance map. Accepts the new `balances: { USD: 50, LBP: 12000, ... }`
+ * shape and falls back to legacy `lb_balance`/`usd_balance` scalars.
+ */
+function coerceInitialBalanceMap(
+  data: Record<string, unknown>
+): Partial<Record<CurrencyCode, number>> {
+  const map: Partial<Record<CurrencyCode, number>> = {};
+
+  const nested = data.balances as Partial<Record<CurrencyCode, number>> | undefined;
+  if (nested && typeof nested === 'object') {
+    for (const [code, value] of Object.entries(nested)) {
+      if (typeof value === 'number' && value !== 0) {
+        map[code as CurrencyCode] = value;
+      }
+    }
+    if (Object.keys(map).length > 0) return map;
+  }
+
+  const lb = Number(data.lb_balance ?? 0) || 0;
+  const usd = Number(data.usd_balance ?? 0) || 0;
+  if (lb !== 0) map.LBP = lb;
+  if (usd !== 0) map.USD = usd;
+  return map;
+}
+
+/**
+ * Coerce an incoming supplier-create payload into a per-currency
+ * advance-balance map (JSON blob inside `supplier_data`).
+ */
+function coerceAdvanceBalanceMap(
+  data: Record<string, unknown>
+): Partial<Record<CurrencyCode, number>> {
+  const map: Partial<Record<CurrencyCode, number>> = {};
+
+  const nested = data.advance_balances as Partial<Record<CurrencyCode, number>> | undefined;
+  if (nested && typeof nested === 'object') {
+    for (const [code, value] of Object.entries(nested)) {
+      if (typeof value === 'number') {
+        map[code as CurrencyCode] = value;
+      }
+    }
+    return map;
+  }
+
+  const lb = Number(data.advance_lb_balance ?? 0) || 0;
+  const usd = Number(data.advance_usd_balance ?? 0) || 0;
+  if (lb !== 0) map.LBP = lb;
+  if (usd !== 0) map.USD = usd;
+  return map;
+}
+
+/**
+ * Post one journal entry per non-zero currency in the balance map. The
+ * direction (Debit AR vs Credit AR for customers; Debit AP vs Credit AP
+ * for suppliers) is determined per-currency by the sign of the amount.
+ */
+async function postInitialBalanceEntries(
+  entityId: string,
+  entityType: 'customer' | 'supplier',
+  initialBalances: Partial<Record<CurrencyCode, number>>,
+  branchId: string,
+  userProfileId: string | undefined,
+  now: string
+): Promise<void> {
+  const codes = (Object.keys(initialBalances) as CurrencyCode[])
+    .filter(code => (initialBalances[code] ?? 0) !== 0);
+  if (codes.length === 0) return;
+
+  const transactionId = createId();
+  const postedDate = getLocalDateString(now);
+  const arOrAp = entityType === 'customer' ? '1200' : '2100';
+
+  for (const code of codes) {
+    const amount = initialBalances[code] ?? 0;
+    const isPositive = amount >= 0;
+    const debitAccount = entityType === 'customer'
+      ? (isPositive ? arOrAp : '3100')
+      : (isPositive ? '3100' : arOrAp);
+    const creditAccount = entityType === 'customer'
+      ? (isPositive ? '3100' : arOrAp)
+      : (isPositive ? arOrAp : '3100');
+
+    await journalService.createJournalEntry({
+      transactionId,
+      debitAccount,
+      creditAccount,
+      amount: Math.abs(amount),
+      currency: code,
+      entityId,
+      description: `customers.initialBalance`,
+      postedDate,
+      createdBy: userProfileId || null,
+      branchId,
+    });
+  }
+}
 
 export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataLayerResult {
   const { storeId, currentBranchId, userProfileId, pushUndo, resetAutoSyncTimer, refreshData } = adapter;
@@ -25,8 +125,8 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
       const supplierId = supplierData.id || createId();
       const now = new Date().toISOString();
 
-      const initialLBPBalance = (supplierData as any).lb_balance || 0;
-      const initialUSDBalance = (supplierData as any).usd_balance || 0;
+      const initialBalances = coerceInitialBalanceMap(supplierData as Record<string, unknown>);
+      const advanceBalances = coerceAdvanceBalanceMap(supplierData as Record<string, unknown>);
 
       const entity = {
         id: supplierId,
@@ -41,8 +141,10 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
         customer_data: null,
         supplier_data: {
           type: (supplierData as any).type || 'standard',
-          advance_lb_balance: (supplierData as any).advance_lb_balance || 0,
-          advance_usd_balance: (supplierData as any).advance_usd_balance || 0,
+          advance_balances: advanceBalances,
+          // Legacy scalar mirrors so existing readers keep working.
+          advance_lb_balance: advanceBalances.LBP ?? 0,
+          advance_usd_balance: advanceBalances.USD ?? 0,
           email: (supplierData as any).email || null,
           address: (supplierData as any).address || null,
         },
@@ -54,65 +156,16 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
 
       await getDB().entities.add(entity);
 
-      if ((initialLBPBalance !== 0 || initialUSDBalance !== 0) && currentBranchId) {
-        const transactionId = createId();
-        const postedDate = getLocalDateString(now);
+      if (Object.keys(initialBalances).length > 0 && currentBranchId) {
         try {
-          const primaryAmount = initialUSDBalance !== 0 ? initialUSDBalance : initialLBPBalance;
-          const isPositive = primaryAmount >= 0;
-          const debitAccount = isPositive ? '3100' : '2100';
-          const creditAccount = isPositive ? '2100' : '3100';
-          const sameSign =
-            (initialUSDBalance >= 0 && initialLBPBalance >= 0) ||
-            (initialUSDBalance <= 0 && initialLBPBalance <= 0) ||
-            initialUSDBalance === 0 ||
-            initialLBPBalance === 0;
-
-          if (sameSign) {
-            await journalService.createJournalEntry({
-              transactionId,
-              debitAccount,
-              creditAccount,
-              amountUSD: Math.abs(initialUSDBalance),
-              amountLBP: Math.abs(initialLBPBalance),
-              entityId: supplierId,
-              description: `customers.initialBalance`,
-              postedDate,
-              createdBy: userProfileId || null,
-              branchId: currentBranchId,
-            });
-          } else {
-            if (initialUSDBalance !== 0) {
-              const usdIsPositive = initialUSDBalance >= 0;
-              await journalService.createJournalEntry({
-                transactionId,
-                debitAccount: usdIsPositive ? '3100' : '2100',
-                creditAccount: usdIsPositive ? '2100' : '3100',
-                amountUSD: Math.abs(initialUSDBalance),
-                amountLBP: 0,
-                entityId: supplierId,
-                description: `customers.initialUSDBalance`,
-                postedDate,
-                createdBy: userProfileId || null,
-                branchId: currentBranchId,
-              });
-            }
-            if (initialLBPBalance !== 0) {
-              const lbpIsPositive = initialLBPBalance >= 0;
-              await journalService.createJournalEntry({
-                transactionId,
-                debitAccount: lbpIsPositive ? '3100' : '2100',
-                creditAccount: lbpIsPositive ? '2100' : '3100',
-                amountUSD: 0,
-                amountLBP: Math.abs(initialLBPBalance),
-                entityId: supplierId,
-                description: `customers.initialLBPBalance`,
-                postedDate,
-                createdBy: userProfileId || null,
-                branchId: currentBranchId,
-              });
-            }
-          }
+          await postInitialBalanceEntries(
+            supplierId,
+            'supplier',
+            initialBalances,
+            currentBranchId,
+            userProfileId,
+            now,
+          );
         } catch (error) {
           console.error('Failed to create initial balance journal entries for supplier:', error);
         }
@@ -140,8 +193,13 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
       const customerId = customerData.id || createId();
       const now = new Date().toISOString();
 
-      const initialLBPBalance = (customerData as any).lb_balance || 0;
-      const initialUSDBalance = (customerData as any).usd_balance || 0;
+      const initialBalances = coerceInitialBalanceMap(customerData as Record<string, unknown>);
+
+      // Per-currency credit-limit map (kept inside customer_data JSONB).
+      const maxBalances = ((customerData as any).max_balances ?? {}) as Partial<Record<CurrencyCode, number>>;
+      const lbMaxBalance = Number(
+        maxBalances.LBP ?? (customerData as any).lb_max_balance ?? 0
+      ) || 0;
 
       const entity = {
         id: customerId,
@@ -154,8 +212,9 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
         is_system_entity: false,
         is_active: customerData.is_active ?? true,
         customer_data: {
-          lb_max_balance: customerData.lb_max_balance || 0,
-          credit_limit: customerData.lb_max_balance || 0,
+          max_balances: maxBalances,
+          lb_max_balance: lbMaxBalance,
+          credit_limit: lbMaxBalance,
           email: (customerData as any).email || null,
           address: (customerData as any).address || null,
         },
@@ -168,65 +227,16 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
 
       await getDB().entities.add(entity);
 
-      if ((initialLBPBalance !== 0 || initialUSDBalance !== 0) && currentBranchId) {
-        const transactionId = createId();
-        const postedDate = getLocalDateString(now);
+      if (Object.keys(initialBalances).length > 0 && currentBranchId) {
         try {
-          const primaryAmount = initialUSDBalance !== 0 ? initialUSDBalance : initialLBPBalance;
-          const isPositive = primaryAmount >= 0;
-          const debitAccount = isPositive ? '1200' : '3100';
-          const creditAccount = isPositive ? '3100' : '1200';
-          const sameSign =
-            (initialUSDBalance >= 0 && initialLBPBalance >= 0) ||
-            (initialUSDBalance <= 0 && initialLBPBalance <= 0) ||
-            initialUSDBalance === 0 ||
-            initialLBPBalance === 0;
-
-          if (sameSign) {
-            await journalService.createJournalEntry({
-              transactionId,
-              debitAccount,
-              creditAccount,
-              amountUSD: Math.abs(initialUSDBalance),
-              amountLBP: Math.abs(initialLBPBalance),
-              entityId: customerId,
-              description: `customers.initialBalance`,
-              postedDate,
-              createdBy: userProfileId || null,
-              branchId: currentBranchId,
-            });
-          } else {
-            if (initialUSDBalance !== 0) {
-              const usdIsPositive = initialUSDBalance >= 0;
-              await journalService.createJournalEntry({
-                transactionId,
-                debitAccount: usdIsPositive ? '1200' : '3100',
-                creditAccount: usdIsPositive ? '3100' : '1200',
-                amountUSD: Math.abs(initialUSDBalance),
-                amountLBP: 0,
-                entityId: customerId,
-                description: `customers.initialUSDBalance`,
-                postedDate,
-                createdBy: userProfileId || null,
-                branchId: currentBranchId,
-              });
-            }
-            if (initialLBPBalance !== 0) {
-              const lbpIsPositive = initialLBPBalance >= 0;
-              await journalService.createJournalEntry({
-                transactionId,
-                debitAccount: lbpIsPositive ? '1200' : '3100',
-                creditAccount: lbpIsPositive ? '3100' : '1200',
-                amountUSD: 0,
-                amountLBP: Math.abs(initialLBPBalance),
-                entityId: customerId,
-                description: `customers.initialLBPBalance`,
-                postedDate,
-                createdBy: userProfileId || null,
-                branchId: currentBranchId,
-              });
-            }
-          }
+          await postInitialBalanceEntries(
+            customerId,
+            'customer',
+            initialBalances,
+            currentBranchId,
+            userProfileId,
+            now,
+          );
         } catch (error) {
           console.error('Failed to create initial balance journal entries for customer:', error);
         }
@@ -264,18 +274,33 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
         _synced: false,
       };
 
-      if (
-        updates.lb_max_balance !== undefined ||
-        (updates as any).email !== undefined ||
-        (updates as any).address !== undefined
-      ) {
-        const customerData = originalEntity.customer_data || {};
+      const u = updates as Record<string, unknown>;
+      const touchesNested =
+        u.max_balances !== undefined ||
+        u.lb_max_balance !== undefined ||
+        u.email !== undefined ||
+        u.address !== undefined;
+
+      if (touchesNested) {
+        const customerData = (originalEntity.customer_data || {}) as Record<string, unknown>;
+        const existingMaxBalances = (customerData.max_balances ?? {}) as Partial<Record<CurrencyCode, number>>;
+        const incomingMaxBalances = (u.max_balances ?? {}) as Partial<Record<CurrencyCode, number>>;
+        const mergedMaxBalances = { ...existingMaxBalances, ...incomingMaxBalances };
+
+        const lbMax = Number(
+          mergedMaxBalances.LBP
+            ?? (u.lb_max_balance as number | undefined)
+            ?? customerData.lb_max_balance
+            ?? 0
+        ) || 0;
+
         entityUpdates.customer_data = {
           ...customerData,
-          lb_max_balance: updates.lb_max_balance ?? (customerData as any).lb_max_balance ?? 0,
-          credit_limit: updates.lb_max_balance ?? (customerData as any).credit_limit ?? 0,
-          email: (updates as any).email ?? (customerData as any).email ?? null,
-          address: (updates as any).address ?? (customerData as any).address ?? null,
+          max_balances: mergedMaxBalances,
+          lb_max_balance: lbMax,
+          credit_limit: lbMax,
+          email: u.email ?? customerData.email ?? null,
+          address: u.address ?? customerData.address ?? null,
         };
       }
 
@@ -319,21 +344,36 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
         _synced: false,
       };
 
-      if (
-        (updates as any).type !== undefined ||
-        (updates as any).advance_lb_balance !== undefined ||
-        (updates as any).advance_usd_balance !== undefined ||
-        (updates as any).email !== undefined ||
-        (updates as any).address !== undefined
-      ) {
-        const supplierData = originalEntity.supplier_data || {};
+      const u = updates as Record<string, unknown>;
+      const touchesNested =
+        u.type !== undefined ||
+        u.advance_balances !== undefined ||
+        u.advance_lb_balance !== undefined ||
+        u.advance_usd_balance !== undefined ||
+        u.email !== undefined ||
+        u.address !== undefined;
+
+      if (touchesNested) {
+        const supplierData = (originalEntity.supplier_data || {}) as Record<string, unknown>;
+        const existingAdvances = (supplierData.advance_balances ?? {}) as Partial<Record<CurrencyCode, number>>;
+        const incomingAdvances = (u.advance_balances ?? {}) as Partial<Record<CurrencyCode, number>>;
+        const mergedAdvances: Partial<Record<CurrencyCode, number>> = { ...existingAdvances, ...incomingAdvances };
+
+        if (u.advance_lb_balance !== undefined) {
+          mergedAdvances.LBP = Number(u.advance_lb_balance) || 0;
+        }
+        if (u.advance_usd_balance !== undefined) {
+          mergedAdvances.USD = Number(u.advance_usd_balance) || 0;
+        }
+
         entityUpdates.supplier_data = {
           ...supplierData,
-          type: (updates as any).type ?? (supplierData as any).type ?? 'standard',
-          advance_lb_balance: (updates as any).advance_lb_balance ?? (supplierData as any).advance_lb_balance ?? 0,
-          advance_usd_balance: (updates as any).advance_usd_balance ?? (supplierData as any).advance_usd_balance ?? 0,
-          email: (updates as any).email ?? (supplierData as any).email ?? null,
-          address: (updates as any).address ?? (supplierData as any).address ?? null,
+          type: u.type ?? supplierData.type ?? 'standard',
+          advance_balances: mergedAdvances,
+          advance_lb_balance: mergedAdvances.LBP ?? 0,
+          advance_usd_balance: mergedAdvances.USD ?? 0,
+          email: u.email ?? supplierData.email ?? null,
+          address: u.address ?? supplierData.address ?? null,
         };
       }
 

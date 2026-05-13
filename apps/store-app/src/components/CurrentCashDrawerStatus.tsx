@@ -9,6 +9,9 @@ import { useI18n } from '../i18n';
 import { EmployeeService } from '../services/employeeService';
 import { Employee } from '../types';
 import CashDrawerOpeningModal from './common/CashDrawerOpeningModal';
+import { currencyService } from '../services/currencyService';
+import type { CurrencyCode } from '@pos-platform/shared';
+import { formatDateTime } from '../utils/numberFormat';
 
 interface CurrentCashDrawerStatusProps {
   storeId: string;
@@ -24,7 +27,7 @@ const CashBalanceModal: React.FC<{
   expectedAmount: number;
   loading: boolean;
   error?: string;
-  storePreferredCurrency?: 'USD' | 'LBP';
+  storePreferredCurrency?: CurrencyCode;
 }> = ({ isOpen, onClose, onConfirm, expectedAmount, loading, error, storePreferredCurrency = 'USD' }) => {
   const { t } = useI18n();
   const [actualAmount, setActualAmount] = useState(expectedAmount);
@@ -35,13 +38,9 @@ const CashBalanceModal: React.FC<{
     }
   }, [isOpen, expectedAmount]);
 
-  const formatCurrency = (amount: number) => {
-    if (storePreferredCurrency === 'LBP') {
-      return `${Math.round(amount).toLocaleString()} ل.ل`;
-    }
-    // For USD, show 2 decimal places
-    return `$${amount.toFixed(2)}`;
-  };
+  const formatCurrency = (amount: number) =>
+    currencyService.format(amount, storePreferredCurrency);
+  const decimals = currencyService.getMeta(storePreferredCurrency).decimals;
 
   if (!isOpen) return null;
 
@@ -84,7 +83,7 @@ const CashBalanceModal: React.FC<{
             <input
               type="number"
               step="0.01"
-              value={actualAmount.toFixed(storePreferredCurrency === 'USD' ? 2 : 0)}
+              value={actualAmount.toFixed(decimals)}
               onChange={(e) => setActualAmount(parseFloat(e.target.value) || 0)}
               className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
                 actualAmount <= 0 ? 'border-red-300' : 'border-gray-300'
@@ -342,13 +341,8 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
     }
   }, [cashDrawerBalances, storePreferredCurrency, exchangeRate, status?.currentBalance]);
 
-  const formatCurrency = (amount: number) => {
-    if (storePreferredCurrency === 'LBP') {
-      return `${Math.round(amount).toLocaleString()} ل.ل`;
-    }
-    // For USD, show 2 decimal places
-    return `$${amount.toFixed(2)}`;
-  };
+  const formatCurrency = (amount: number) =>
+    currencyService.format(amount, storePreferredCurrency);
 
   const formatDuration = (milliseconds: number) => {
     const hours = Math.floor(milliseconds / (1000 * 60 * 60));
@@ -430,7 +424,7 @@ export const CurrentCashDrawerStatus: React.FC<CurrentCashDrawerStatusProps> = (
                 <div className="rtl:text-right">
                   <span className="text-sm font-medium text-gray-600">{t('cashDrawer.openedAt')}:</span>
                   <span className="rtl:mr-2 ltr:ml-2 text-sm text-gray-900">
-                    {new Date(status.openedAt).toLocaleString()}
+                    {formatDateTime(status.openedAt)}
                   </span>
                 </div>
                 <div className="rtl:text-right">

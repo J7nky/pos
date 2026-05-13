@@ -325,10 +325,18 @@ export interface Database {
           store_id: string;
           created_at: string;
           updated_at: string;
-          lb_balance: number | null;
-          usd_balance: number | null;
-          advance_lb_balance: number | null;
-          advance_usd_balance: number | null;
+          /** Per-currency balance map (primary surface). Derived from journal entries. */
+          balances?: Partial<Record<CurrencyCode, number>>;
+          /** Per-currency advance-payment map. */
+          advance_balances?: Partial<Record<CurrencyCode, number>>;
+          /** @deprecated Use `balances.LBP`. Kept as a back-compat mirror. */
+          lb_balance?: number | null;
+          /** @deprecated Use `balances.USD`. */
+          usd_balance?: number | null;
+          /** @deprecated Use `advance_balances.LBP`. */
+          advance_lb_balance?: number | null;
+          /** @deprecated Use `advance_balances.USD`. */
+          advance_usd_balance?: number | null;
         };
         Insert: {
           id?: string;
@@ -339,9 +347,15 @@ export interface Database {
           store_id: string;
           created_at?: string;
           updated_at?: string;
+          balances?: Partial<Record<CurrencyCode, number>>;
+          advance_balances?: Partial<Record<CurrencyCode, number>>;
+          /** @deprecated Use `balances.LBP`. */
           lb_balance?: number | null;
+          /** @deprecated Use `balances.USD`. */
           usd_balance?: number | null;
+          /** @deprecated Use `advance_balances.LBP`. */
           advance_lb_balance?: number | null;
+          /** @deprecated Use `advance_balances.USD`. */
           advance_usd_balance?: number | null;
         };
         Update: {
@@ -350,9 +364,15 @@ export interface Database {
           phone?: string;
           email?: string | null;
           address?: string;
+          balances?: Partial<Record<CurrencyCode, number>>;
+          advance_balances?: Partial<Record<CurrencyCode, number>>;
+          /** @deprecated Use `balances.LBP`. */
           lb_balance?: number | null;
+          /** @deprecated Use `balances.USD`. */
           usd_balance?: number | null;
+          /** @deprecated Use `advance_balances.LBP`. */
           advance_lb_balance?: number | null;
+          /** @deprecated Use `advance_balances.USD`. */
           advance_usd_balance?: number | null;
           updated_at?: string;
         };
@@ -364,10 +384,18 @@ export interface Database {
           phone: string;
           email: string | null;
           address: string | null;
+          /** Per-currency balance map (primary surface). Derived from journal entries. */
+          balances?: Partial<Record<CurrencyCode, number>>;
+          /** Per-currency credit-limit map. */
+          max_balances?: Partial<Record<CurrencyCode, number>>;
+          /** @deprecated Use `balances.LBP`. */
           lb_balance: number;
+          /** @deprecated Use `balances.USD`. */
           usd_balance: number;
-          lb_max_balance?: number | null; // Maximum allowed balance in LBP
-          usd_max_balance?: number | null; // Maximum allowed balance in USD
+          /** @deprecated Use `max_balances.LBP`. */
+          lb_max_balance?: number | null;
+          /** @deprecated Use `max_balances.USD`. */
+          usd_max_balance?: number | null;
           is_active: boolean;
           store_id: string;
           created_at: string;
@@ -379,10 +407,16 @@ export interface Database {
           phone: string;
           email?: string | null;
           address?: string | null;
+          balances?: Partial<Record<CurrencyCode, number>>;
+          max_balances?: Partial<Record<CurrencyCode, number>>;
+          /** @deprecated Use `balances.LBP`. */
           lb_balance?: number;
+          /** @deprecated Use `balances.USD`. */
           usd_balance?: number;
-          lb_max_balance?: number | null; // Maximum allowed balance in LBP
-          usd_max_balance?: number | null; // Maximum allowed balance in USD
+          /** @deprecated Use `max_balances.LBP`. */
+          lb_max_balance?: number | null;
+          /** @deprecated Use `max_balances.USD`. */
+          usd_max_balance?: number | null;
           is_active?: boolean;
           store_id: string;
           created_at?: string;
@@ -394,10 +428,16 @@ export interface Database {
           phone?: string;
           email?: string | null;
           address?: string | null;
+          balances?: Partial<Record<CurrencyCode, number>>;
+          max_balances?: Partial<Record<CurrencyCode, number>>;
+          /** @deprecated Use `balances.LBP`. */
           lb_balance?: number;
+          /** @deprecated Use `balances.USD`. */
           usd_balance?: number;
-          lb_max_balance?: number | null; // Maximum allowed balance in LBP
-          usd_max_balance?: number | null; // Maximum allowed balance in USD
+          /** @deprecated Use `max_balances.LBP`. */
+          lb_max_balance?: number | null;
+          /** @deprecated Use `max_balances.USD`. */
+          usd_max_balance?: number | null;
           is_active?: boolean;
           updated_at?: string;
         };
@@ -938,14 +978,6 @@ export interface Database {
           transaction_id: string;
           account_code: string;
           account_name: string;
-          /** @deprecated Phase 11 — use `amounts` map. Kept during dual-write transition. */
-          debit_usd: number;
-          /** @deprecated Phase 11 — use `amounts` map. */
-          credit_usd: number;
-          /** @deprecated Phase 11 — use `amounts` map. */
-          debit_lbp: number;
-          /** @deprecated Phase 11 — use `amounts` map. */
-          credit_lbp: number;
           /** Self-describing per-currency debit/credit map. Immutable once written. */
           amounts: JournalEntryAmounts;
           entity_id: string;
@@ -968,10 +1000,6 @@ export interface Database {
           transaction_id: string;
           account_code: string;
           account_name: string;
-          debit_usd?: number;
-          credit_usd?: number;
-          debit_lbp?: number;
-          credit_lbp?: number;
           amounts?: JournalEntryAmounts;
           entity_id: string;
           entity_type: 'customer' | 'supplier' | 'employee' | 'cash' | 'internal';
@@ -993,10 +1021,6 @@ export interface Database {
           transaction_id?: string;
           account_code?: string;
           account_name?: string;
-          debit_usd?: number;
-          credit_usd?: number;
-          debit_lbp?: number;
-          credit_lbp?: number;
           amounts?: JournalEntryAmounts;
           entity_id?: string;
           entity_type?: 'customer' | 'supplier' | 'employee' | 'cash' | 'internal';
@@ -1019,10 +1043,6 @@ export interface Database {
           branch_id: string | null;
           account_code: string;
           entity_id: string | null;
-          /** @deprecated Phase 11 — use `balances` map. */
-          balance_usd: number;
-          /** @deprecated Phase 11 — use `balances` map. */
-          balance_lbp: number;
           /** Self-describing per-currency running balance map. */
           balances: BalanceSnapshotMap;
           snapshot_date: string;
@@ -1037,8 +1057,6 @@ export interface Database {
           branch_id: string | null;
           account_code: string;
           entity_id: string | null;
-          balance_usd?: number;
-          balance_lbp?: number;
           balances?: BalanceSnapshotMap;
           snapshot_date: string;
           snapshot_type: 'hourly' | 'daily' | 'end_of_day';
@@ -1052,8 +1070,6 @@ export interface Database {
           branch_id?: string | null;
           account_code?: string;
           entity_id?: string | null;
-          balance_usd?: number;
-          balance_lbp?: number;
           balances?: BalanceSnapshotMap;
           snapshot_date?: string;
           snapshot_type?: 'hourly' | 'daily' | 'end_of_day';

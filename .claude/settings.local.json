@@ -78,7 +78,17 @@
       "PowerShell(pnpm *)",
       "WebSearch",
       "Bash(grep -E \"\\\\.tsx?$\")",
-      "Bash(xargs -I {} basename {})"
+      "Bash(xargs -I {} basename {})",
+      "Bash(grep -E \"\\\\.\\(tsx|ts\\)$\")",
+      "Read(//home/janky/.claude/plans/**)",
+      "Read(//home/janky/.claude/**)",
+      "Bash(tee /tmp/tsc-output.log)",
+      "Bash(sort -t: -k2 -nr)",
+      "Bash(awk -F: '{sum+=$2} END {print \"Total hits remaining:\", sum}')",
+      "Bash(grep -rn \"initial\\\\${code}Balance\\\\|max\\\\${code}Balance\\\\|advance\\\\${code}\\\\|totalAdvances\\\\${code}\" /home/janky/Desktop/pos-1/apps/store-app/src --include=\"*.ts\" --include=\"*.tsx\")",
+      "Bash(grep -nE \"interpolation|\\\\\\\\{\\\\\\\\{|t\\\\\\\\\\(.+,\\\\\\\\s*\\\\\\\\{\" /home/janky/Desktop/pos-1/apps/store-app/src/i18n/index.tsx)",
+      "Bash(pnpm test:run src/services/__tests__/journalAmounts.test.ts)",
+      "Bash(pnpm tsc *)"
     ]
   }
 }

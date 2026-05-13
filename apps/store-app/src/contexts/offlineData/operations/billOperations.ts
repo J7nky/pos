@@ -15,6 +15,7 @@ import type { CashDrawerAtomicResult } from './cashDrawerTransactionOperations';
 import type { MultilingualString } from '../../../utils/multilingual';
 import type { CurrencyCode } from '@pos-platform/shared';
 import { currencyService } from '../../../services/currencyService';
+import { formatNumber } from '../../../utils/numberFormat';
 import { assertValidCurrency } from '../../../utils/currencyValidation';
 import {
   reverseAmounts,
@@ -135,8 +136,8 @@ export async function updateBill(
             field === 'tax_amount' ||
             field === 'discount_amount'
           ) {
-            if (oldValue != null) oldValueDisplay = Number(oldValue).toLocaleString();
-            if (newValue != null) newValueDisplay = Number(newValue).toLocaleString();
+            if (oldValue != null) oldValueDisplay = formatNumber(Number(oldValue));
+            if (newValue != null) newValueDisplay = formatNumber(Number(newValue));
           }
 
           const fieldLabel = field.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
@@ -289,12 +290,8 @@ export async function deleteBill(
             account_name: entry.account_name,
             entity_id: entry.entity_id,
             entity_type: entry.entity_type,
-            debit_usd: entry.credit_usd,
-            credit_usd: entry.debit_usd,
-            debit_lbp: entry.credit_lbp,
-            credit_lbp: entry.debit_lbp,
-            // Phase 11 dual-write: per-currency reversal preserves the
-            // original entry's currency identity (e.g. AED stays AED).
+            // Per-currency reversal preserves the original entry's currency
+            // identity (e.g. AED stays AED).
             amounts: reverseAmounts(amountsFromLegacyEntry(entry)),
             description: `payments.billCancellation`,
             posted_date: postedDate,
@@ -674,10 +671,9 @@ export async function createBill(
       const debitAccountCode = (entityType === 'customer' || entityType === 'employee') ? '1200' : '2100';
       const creditAccountCode = '4100';
 
-      const isUSD = billCurrency === 'USD';
-      // Phase 11 dual-write: build a self-describing amounts map keyed by
-      // the actual bill currency so non-USD/LBP stores (AED, EUR, …)
-      // also produce correct journal data.
+      // Build a self-describing amounts map keyed by the actual bill
+      // currency so non-USD/LBP stores (AED, EUR, …) also produce
+      // correct journal data.
       const debitAmounts = buildEntryAmounts([
         { currency: billCurrency, debit: customerBalanceUpdate.amountDue, credit: 0 },
       ]);
@@ -694,10 +690,6 @@ export async function createBill(
         account_name: debitAccountInfo!.account_name,
         entity_id: customerBalanceUpdate.customerId,
         entity_type: entityType,
-        debit_usd: isUSD ? customerBalanceUpdate.amountDue : 0,
-        credit_usd: 0,
-        debit_lbp: !isUSD ? customerBalanceUpdate.amountDue : 0,
-        credit_lbp: 0,
         amounts: debitAmounts,
         description: 'payments.creditSaleBill',
         posted_date: postedDate,
@@ -719,10 +711,6 @@ export async function createBill(
         account_name: creditAccountInfo!.account_name,
         entity_id: customerBalanceUpdate.customerId,
         entity_type: entityType,
-        debit_usd: 0,
-        credit_usd: isUSD ? customerBalanceUpdate.amountDue : 0,
-        debit_lbp: 0,
-        credit_lbp: !isUSD ? customerBalanceUpdate.amountDue : 0,
         amounts: creditAmounts,
         description: 'payments.creditSaleBill',
         posted_date: postedDate,
@@ -924,12 +912,8 @@ export async function reactivateBill(
           account_name: reversalEntry.account_name,
           entity_id: reversalEntry.entity_id,
           entity_type: reversalEntry.entity_type,
-          debit_usd: reversalEntry.credit_usd,
-          credit_usd: reversalEntry.debit_usd,
-          debit_lbp: reversalEntry.credit_lbp,
-          credit_lbp: reversalEntry.debit_lbp,
-          // Phase 11 dual-write: re-reverse the reversal entry's per-currency
-          // map to recover the original entry's currency identity.
+          // Re-reverse the reversal entry's per-currency map to recover
+          // the original entry's currency identity.
           amounts: reverseAmounts(amountsFromLegacyEntry(reversalEntry)),
           description: 'payments.billReactivation',
           posted_date: postedDate,

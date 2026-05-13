@@ -22,6 +22,9 @@ export interface FormalBillPrintPayload {
   entity?: {
     name: string;
     phone?: string;
+    /** Per-currency balance map (primary surface, used by the formal-bill renderer). */
+    balances?: Record<string, number>;
+    /** @deprecated Use `balances.LBP`. Kept for older renderers. */
     lb_balance?: number;
   } | null;
   receiptSettings: {

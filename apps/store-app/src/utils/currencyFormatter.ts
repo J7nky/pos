@@ -33,7 +33,7 @@ export function formatCurrency(
   } else {
     // LBP - round to nearest integer and add thousand separators
     const rounded = Math.round(amount);
-    const formatted = rounded.toLocaleString(locale);
+    const formatted = new Intl.NumberFormat(locale, { numberingSystem: 'latn' }).format(rounded);
     return includeSymbol ? `${formatted} ل.ل` : formatted;
   }
 }

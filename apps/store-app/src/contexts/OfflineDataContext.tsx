@@ -237,6 +237,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     [preferredCurrency]
   );
 
+  const isCurrencyAccepted = useCallback(
+    (code: CurrencyCode) => acceptedCurrencies.includes(code),
+    [acceptedCurrencies]
+  );
+  const isMultiCurrency = acceptedCurrencies.length > 1;
+
   const settingsHydrateWithCurrency = useCallback(
     async (storeData: Tables['stores']['Row'] | null) => {
       if (storeData && storeId) await reloadCurrencyState(storeId);
@@ -955,11 +961,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         lowStockAlertsEnabled: false,
         lowStockThreshold: 10,
         defaultCommissionRate: 10,
-        currency: 'LBP',
-        preferredCurrency: 'LBP',
-        acceptedCurrencies: ['LBP', 'USD'],
+        currency: 'USD',
+        preferredCurrency: 'USD',
+        acceptedCurrencies: ['USD'],
+        isCurrencyAccepted: () => false,
+        isMultiCurrency: false,
         formatAmount: () => '$0.00',
-        exchangeRate: 89500,
+        exchangeRate: 1,
         language: 'ar',
         cashDrawer: null,
         openCashDrawer: async () => {},
@@ -1103,6 +1111,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       currency: preferredCurrency,
       preferredCurrency,
       acceptedCurrencies,
+      isCurrencyAccepted,
+      isMultiCurrency,
       formatAmount,
       exchangeRate: settingsLayer.exchangeRate,
       language: settingsLayer.language,

@@ -1,5 +1,7 @@
 // Entity Query Service - Phase 4 of Accounting Foundation Migration
-// Unified query layer using entities table and journal-based balance queries
+// Unified query layer using entities table and journal-based balance queries.
+// Currency-agnostic: every per-currency total is exposed as a `byCurrency`
+// map; legacy `*_usd` / `*_lbp` fields are kept as shortcuts.
 
 import { getDB } from '../lib/db';
 import { Entity } from '../types/accounting';
@@ -7,12 +9,20 @@ import { snapshotService } from './snapshotService';
 import { QueryHelpers } from '../utils/queryHelpers';
 import { entityBalanceService } from './entityBalanceService';
 import { getTodayLocalDate } from '../utils/dateUtils';
+import type { CurrencyCode } from '@pos-platform/shared';
+
+type CurrencyTotals = Partial<Record<CurrencyCode, number>>;
 
 export interface EntityWithBalance extends Entity {
+  /** Per-currency current balance map (primary surface). */
+  current_balance_by_currency: CurrencyTotals;
+  /** Legacy USD shortcut. */
   current_balance_usd: number;
+  /** Legacy LBP shortcut. */
   current_balance_lbp: number;
   historical_balance?: {
     date: string;
+    by_currency: CurrencyTotals;
     balance_usd: number;
     balance_lbp: number;
   };
@@ -36,15 +46,34 @@ export interface EntityBalanceReport {
   entityId: string;
   entityName: string;
   entityType: 'customer' | 'supplier' | 'employee' | 'cash' | 'internal';
+  /** Per-currency total across all accounts (primary surface). */
+  currentBalanceByCurrency: CurrencyTotals;
+  /** Legacy USD shortcut. */
   currentBalanceUSD: number;
+  /** Legacy LBP shortcut. */
   currentBalanceLBP: number;
   accountBalances: Array<{
     accountCode: string;
     accountName: string;
+    byCurrency: CurrencyTotals;
     balanceUSD: number;
     balanceLBP: number;
   }>;
   lastTransactionDate: string | null;
+}
+
+function addInto(target: CurrencyTotals, source: CurrencyTotals): void {
+  for (const code of Object.keys(source) as CurrencyCode[]) {
+    target[code] = (target[code] ?? 0) + (source[code] ?? 0);
+  }
+}
+
+function maxAbs(map: CurrencyTotals): number {
+  let max = 0;
+  for (const v of Object.values(map)) {
+    if (typeof v === 'number') max = Math.max(max, Math.abs(v));
+  }
+  return max;
 }
 
 /**
@@ -122,35 +151,33 @@ export class EntityQueryService {
       
       for (const entity of entities) {
         // Calculate balances from journal entries (source of truth)
-        let currentBalanceUSD = 0;
-        let currentBalanceLBP = 0;
-        
+        let byCurrency: CurrencyTotals = {};
+
         if (options.includeCurrentBalance !== false) {
-          // Default to including balance unless explicitly disabled
           try {
-            const accountCode = entityType === 'supplier' ? '2100' : 
+            const accountCode = entityType === 'supplier' ? '2100' :
                               entityType === 'customer' ? '1200' : '1200';
-            
+
             if (entityType === 'customer' || entityType === 'supplier') {
               const balances = await entityBalanceService.getEntityBalances(
                 entity.id,
                 accountCode as '1200' | '2100',
                 true // Use snapshot optimization
               );
-              currentBalanceUSD = balances.USD;
-              currentBalanceLBP = balances.LBP;
+              byCurrency = { ...balances.byCurrency };
             }
           } catch (error) {
             console.warn(`Failed to calculate balance for entity ${entity.id}:`, error);
           }
         }
-        
+
         const entityWithBalance: EntityWithBalance = {
           ...entity,
-          current_balance_usd: currentBalanceUSD,
-          current_balance_lbp: currentBalanceLBP
+          current_balance_by_currency: byCurrency,
+          current_balance_usd: byCurrency.USD ?? 0,
+          current_balance_lbp: byCurrency.LBP ?? 0
         };
-        
+
         // Add historical balance using snapshots
         if (options.includeHistoricalBalance) {
           try {
@@ -161,17 +188,18 @@ export class EntityQueryService {
               entity.id,
               options.includeHistoricalBalance.asOfDate
             );
-            
+
             entityWithBalance.historical_balance = {
               date: historicalBalance.snapshotDate,
-              balance_usd: historicalBalance.balanceUSD,
-              balance_lbp: historicalBalance.balanceLBP
+              by_currency: { ...historicalBalance.byCurrency },
+              balance_usd: historicalBalance.byCurrency.USD ?? 0,
+              balance_lbp: historicalBalance.byCurrency.LBP ?? 0
             };
           } catch (error) {
             console.warn(`Failed to get historical balance for entity ${entity.id}:`, error);
           }
         }
-        
+
         entitiesWithBalance.push(entityWithBalance);
       }
       
@@ -202,9 +230,8 @@ export class EntityQueryService {
       }
       
       // Calculate current balance from journal entries
-      let currentBalanceUSD = 0;
-      let currentBalanceLBP = 0;
-      
+      let byCurrency: CurrencyTotals = {};
+
       if (entity.entity_type === 'customer' || entity.entity_type === 'supplier') {
         try {
           const accountCode = entity.entity_type === 'supplier' ? '2100' : '1200';
@@ -213,42 +240,43 @@ export class EntityQueryService {
             accountCode as '1200' | '2100',
             true // Use snapshot optimization
           );
-          currentBalanceUSD = balances.USD;
-          currentBalanceLBP = balances.LBP;
+          byCurrency = { ...balances.byCurrency };
         } catch (error) {
           console.warn(`Failed to calculate balance for entity ${entity.id}:`, error);
         }
       }
-      
+
       const entityWithBalance: EntityWithBalance = {
         ...entity,
-        current_balance_usd: currentBalanceUSD,
-        current_balance_lbp: currentBalanceLBP
+        current_balance_by_currency: byCurrency,
+        current_balance_usd: byCurrency.USD ?? 0,
+        current_balance_lbp: byCurrency.LBP ?? 0
       };
-      
+
       // Add historical balance if requested
       if (options.includeHistoricalBalance) {
         try {
-          const accountCode = options.includeHistoricalBalance.accountCode || 
+          const accountCode = options.includeHistoricalBalance.accountCode ||
             (entity.entity_type === 'customer' ? '1200' : '2100'); // AR for customers, AP for suppliers
-          
+
           const historicalBalance = await snapshotService.getHistoricalBalance(
             storeId,
             accountCode,
             entity.id,
             options.includeHistoricalBalance.asOfDate
           );
-          
+
           entityWithBalance.historical_balance = {
             date: historicalBalance.snapshotDate,
-            balance_usd: historicalBalance.balanceUSD,
-            balance_lbp: historicalBalance.balanceLBP
+            by_currency: { ...historicalBalance.byCurrency },
+            balance_usd: historicalBalance.byCurrency.USD ?? 0,
+            balance_lbp: historicalBalance.byCurrency.LBP ?? 0
           };
         } catch (error) {
           console.warn(`Failed to get historical balance for entity ${entity.id}:`, error);
         }
       }
-      
+
       return entityWithBalance;
       
     } catch (error) {
@@ -300,9 +328,8 @@ export class EntityQueryService {
       const entitiesWithBalance: EntityWithBalance[] = [];
       
       for (const entity of entities) {
-        let currentBalanceUSD = 0;
-        let currentBalanceLBP = 0;
-        
+        let byCurrency: CurrencyTotals = {};
+
         if (entity.entity_type === 'customer' || entity.entity_type === 'supplier') {
           try {
             const accountCode = entity.entity_type === 'supplier' ? '2100' : '1200';
@@ -311,22 +338,22 @@ export class EntityQueryService {
               accountCode as '1200' | '2100',
               true // Use snapshot optimization
             );
-            currentBalanceUSD = balances.USD;
-            currentBalanceLBP = balances.LBP;
+            byCurrency = { ...balances.byCurrency };
           } catch (error) {
             console.warn(`Failed to calculate balance for entity ${entity.id}:`, error);
           }
         }
-        
+
         entitiesWithBalance.push({
           ...entity,
-          current_balance_usd: currentBalanceUSD,
-          current_balance_lbp: currentBalanceLBP
+          current_balance_by_currency: byCurrency,
+          current_balance_usd: byCurrency.USD ?? 0,
+          current_balance_lbp: byCurrency.LBP ?? 0
         });
       }
-      
+
       return entitiesWithBalance;
-      
+
     } catch (error) {
       console.error('Failed to search entities:', error);
       throw error;
@@ -361,9 +388,8 @@ export class EntityQueryService {
         .toArray();
       
       const accountBalances: EntityBalanceReport['accountBalances'] = [];
-      let totalUSD = 0;
-      let totalLBP = 0;
-      
+      const total: CurrencyTotals = {};
+
       // Get balance for each relevant account
       for (const account of relevantAccounts) {
         try {
@@ -373,36 +399,37 @@ export class EntityQueryService {
             entityId,
             targetDate
           );
-          
-          if (balance.balanceUSD !== 0 || balance.balanceLBP !== 0) {
+
+          if (maxAbs(balance.byCurrency) > 0) {
             accountBalances.push({
               accountCode: account.account_code,
               accountName: account.account_name,
-              balanceUSD: balance.balanceUSD,
-              balanceLBP: balance.balanceLBP
+              byCurrency: { ...balance.byCurrency },
+              balanceUSD: balance.byCurrency.USD ?? 0,
+              balanceLBP: balance.byCurrency.LBP ?? 0
             });
-            
-            totalUSD += balance.balanceUSD;
-            totalLBP += balance.balanceLBP;
+
+            addInto(total, balance.byCurrency);
           }
         } catch (error) {
           console.warn(`Failed to get balance for account ${account.account_code}:`, error);
         }
       }
-      
+
       // Get last transaction date
       const lastTransaction = await getDB().journal_entries
         .where('[store_id+entity_id]')
         .equals([storeId, entityId])
         .reverse()
         .first();
-      
+
       return {
         entityId: entity.id,
         entityName: entity.name,
         entityType: entity.entity_type,
-        currentBalanceUSD: totalUSD,
-        currentBalanceLBP: totalLBP,
+        currentBalanceByCurrency: total,
+        currentBalanceUSD: total.USD ?? 0,
+        currentBalanceLBP: total.LBP ?? 0,
         accountBalances,
         lastTransactionDate: lastTransaction?.posted_date || null
       };
@@ -421,30 +448,28 @@ export class EntityQueryService {
     entityType?: 'customer' | 'supplier' | 'employee',
     options: {
       minimumBalance?: number;
-      currency?: 'USD' | 'LBP';
+      currency?: CurrencyCode;
       asOfDate?: string;
     } = {}
   ): Promise<EntityWithBalance[]> {
     try {
       let query = getDB().entities.where('store_id').equals(storeId);
-      
+
       if (entityType) {
         query = query.filter(entity => entity.entity_type === entityType);
       }
-      
+
       query = query.filter(entity => entity.is_active && !entity.is_system_entity);
-      
+
       const entities = await query.toArray();
       const entitiesWithBalances: EntityWithBalance[] = [];
-      
+
       const minimumBalance = options.minimumBalance || 0.01;
-      const currency = options.currency || 'USD';
-      
+      const currency: CurrencyCode = options.currency || 'USD';
+
       for (const entity of entities) {
-        // Calculate balance from journal entries
-        let currentBalanceUSD = 0;
-        let currentBalanceLBP = 0;
-        
+        let byCurrency: CurrencyTotals = {};
+
         if (entity.entity_type === 'customer' || entity.entity_type === 'supplier') {
           try {
             const accountCode = entity.entity_type === 'supplier' ? '2100' : '1200';
@@ -453,33 +478,33 @@ export class EntityQueryService {
               accountCode as '1200' | '2100',
               true // Use snapshot optimization
             );
-            currentBalanceUSD = balances.USD;
-            currentBalanceLBP = balances.LBP;
+            byCurrency = { ...balances.byCurrency };
           } catch (error) {
             console.warn(`Failed to calculate balance for entity ${entity.id}:`, error);
           }
         }
-        
-        const currentBalance = currency === 'USD' ? currentBalanceUSD : currentBalanceLBP;
-        
+
+        const currentBalance = byCurrency[currency] ?? 0;
+
         if (Math.abs(currentBalance) >= minimumBalance) {
           entitiesWithBalances.push({
             ...entity,
-            current_balance_usd: currentBalanceUSD,
-            current_balance_lbp: currentBalanceLBP
+            current_balance_by_currency: byCurrency,
+            current_balance_usd: byCurrency.USD ?? 0,
+            current_balance_lbp: byCurrency.LBP ?? 0
           });
         }
       }
-      
-      // Sort by balance descending
+
+      // Sort by balance descending in the requested currency.
       entitiesWithBalances.sort((a, b) => {
-        const balanceA = currency === 'USD' ? a.current_balance_usd : a.current_balance_lbp;
-        const balanceB = currency === 'USD' ? b.current_balance_usd : b.current_balance_lbp;
+        const balanceA = a.current_balance_by_currency[currency] ?? 0;
+        const balanceB = b.current_balance_by_currency[currency] ?? 0;
         return Math.abs(balanceB) - Math.abs(balanceA);
       });
-      
+
       return entitiesWithBalances;
-      
+
     } catch (error) {
       console.error('Failed to get entities with balances:', error);
       throw error;

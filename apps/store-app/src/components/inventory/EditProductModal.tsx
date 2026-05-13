@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { X, Package } from 'lucide-react';
 import { PRODUCT_PLACEHOLDER_IMAGE } from '../../constants/productImages';
+import { ProductImage } from '../common/ProductImage';
 
 interface EditProductModalProps {
   open: boolean;
@@ -127,7 +128,12 @@ const EditProductModal: React.FC<EditProductModalProps> = ({ open, onClose, onSu
                 className="w-full border border-gray-300 dark:border-slate-700 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
               />
               {form.image && (
-                <img src={form.image} alt="Preview" className="w-24 h-24 object-cover rounded mt-2" />
+                <ProductImage
+                  productId={form.id}
+                  src={form.image}
+                  alt="Preview"
+                  className="w-24 h-24 object-cover rounded mt-2"
+                />
               )}
             </div>
           </div>

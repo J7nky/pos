@@ -367,10 +367,7 @@ export class InventoryPurchaseService {
           entries: journalEntries.map(e => ({
             account_code: e.account_code,
             account_name: e.account_name,
-            debit_usd: e.debit_usd,
-            credit_usd: e.credit_usd,
-            debit_lbp: e.debit_lbp,
-            credit_lbp: e.credit_lbp,
+            amounts: e.amounts,
             is_posted: e.is_posted
           }))
         });
@@ -573,10 +570,7 @@ export class InventoryPurchaseService {
             entries: journalEntries.map(e => ({
               account_code: e.account_code,
               account_name: e.account_name,
-              debit_usd: e.debit_usd,
-              credit_usd: e.credit_usd,
-              debit_lbp: e.debit_lbp,
-              credit_lbp: e.credit_lbp,
+              amounts: e.amounts,
               is_posted: e.is_posted
             }))
           });

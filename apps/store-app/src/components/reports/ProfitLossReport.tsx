@@ -2,7 +2,9 @@ import React, { useState, useMemo } from 'react';
 import { useOfflineData } from '../../contexts/OfflineDataContext';
 import { useProfitLoss } from '../../hooks/useProfitLoss';
 import { useCurrency } from '../../hooks/useCurrency';
+import { currencyService } from '../../services/currencyService';
 import type { PLReportFilters } from '../../types/profitLoss';
+import type { CurrencyCode } from '@pos-platform/shared';
 import { DollarSign, TrendingUp, TrendingDown, Package, Download, Filter, ChevronDown, ChevronUp, Calendar, X, CreditCard, Wallet, Tag, Layers } from 'lucide-react';
 import { getLocalDateString, getTodayLocalDate } from '../../utils/dateUtils';
 
@@ -18,16 +20,16 @@ export default function ProfitLossReport({ storeId, branchId }: ProfitLossReport
   
   // Format currency based on store's preferred currency
   // Converts from bill's original currency to display currency
-  const formatAmount = (amount: number, billCurrency: 'USD' | 'LBP' = 'USD'): string => {
+  const formatAmount = (amount: number, billCurrency: CurrencyCode = 'USD'): string => {
     if (amount == null || isNaN(amount)) {
-      return currency === 'LBP' ? '0 ل.ل' : '$0.00';
+      return currencyService.format(0, currency);
     }
     // Convert from bill's currency to display currency and format
     return formatCurrency(amount, billCurrency);
   };
-  
+
   // Convert amount from bill currency to display currency (for CSV export and aggregates)
-  const convertToDisplayCurrency = (amount: number, billCurrency: 'USD' | 'LBP' = 'USD'): number => {
+  const convertToDisplayCurrency = (amount: number, billCurrency: CurrencyCode = 'USD'): number => {
     return convertCurrency(amount, billCurrency, currency);
   };
   
@@ -177,7 +179,7 @@ export default function ProfitLossReport({ storeId, branchId }: ProfitLossReport
   const exportToCSV = () => {
     if (!data?.lines) return;
 
-    const currencyLabel = currency === 'LBP' ? 'LBP' : 'USD';
+    const currencyLabel = currency;
     const headers = [
       'Bill ID',
       'Bill Type',
@@ -194,12 +196,12 @@ export default function ProfitLossReport({ storeId, branchId }: ProfitLossReport
 
     // Convert and format numbers for CSV based on currency
     // Data is stored in bill's original currency, convert to display currency
-    const formatForCSV = (amount: number, billCurrency: 'USD' | 'LBP'): string => {
+    const formatForCSV = (amount: number, billCurrency: CurrencyCode): string => {
       const convertedAmount = convertToDisplayCurrency(amount, billCurrency);
-      if (currency === 'LBP') {
-        return Math.round(convertedAmount).toString();
-      }
-      return convertedAmount.toFixed(2);
+      const decimals = currencyService.getMeta(currency).decimals;
+      return decimals > 0
+        ? convertedAmount.toFixed(decimals)
+        : Math.round(convertedAmount).toString();
     };
 
     const rows = data.lines.map(line => [

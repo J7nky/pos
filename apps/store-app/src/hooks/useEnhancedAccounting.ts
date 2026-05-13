@@ -5,6 +5,7 @@ import { useCurrency } from '../hooks/useCurrency';
 import { enhancedTransactionService, EnhancedTransactionResult, TransactionContext } from '../services/enhancedTransactionService';
 import { auditLogService, AuditLogEntry, AuditQuery } from '../services/auditLogService';
 import { currencyService } from '../services/currencyService';
+import type { CurrencyCode } from '@pos-platform/shared';
 import { Customer, Supplier, Transaction, AccountsReceivable, AccountsPayable, SaleItem } from '../types';
 import { 
   TransactionTransformer, 
@@ -57,7 +58,7 @@ export interface EnhancedAccountingActions {
   processCustomerPayment: (params: {
     customerId: string;
     amount: number;
-    currency: 'USD' | 'LBP';
+    currency: CurrencyCode;
     description: string;
     paymentMethod?: 'cash' | 'card' | 'transfer';
     reference?: string;
@@ -66,7 +67,7 @@ export interface EnhancedAccountingActions {
   processSupplierPayment: (params: {
     supplierId: string;
     amount: number;
-    currency: 'USD' | 'LBP';
+    currency: CurrencyCode;
     description: string;
     paymentMethod?: 'cash' | 'card' | 'transfer';
     reference?: string;
@@ -320,7 +321,7 @@ export function useEnhancedAccounting(storeId: string): [EnhancedAccountingState
   const processCustomerPayment = useCallback(async (params: {
     customerId: string;
     amount: number;
-    currency: 'USD' | 'LBP';
+    currency: CurrencyCode;
     description: string;
     paymentMethod?: 'cash' | 'card' | 'transfer';
     reference?: string;
@@ -352,7 +353,7 @@ export function useEnhancedAccounting(storeId: string): [EnhancedAccountingState
   const processSupplierPayment = useCallback(async (params: {
     supplierId: string;
     amount: number;
-    currency: 'USD' | 'LBP';
+    currency: CurrencyCode;
     description: string;
     paymentMethod?: 'cash' | 'card' | 'transfer';
     reference?: string;

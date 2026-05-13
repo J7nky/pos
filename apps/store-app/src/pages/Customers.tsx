@@ -17,6 +17,9 @@ import { useCurrency } from '../hooks/useCurrency';
 import { Pagination } from '../components/common/Pagination';
 import { useEntityBalances } from '../hooks/useEntityBalances';
 import { UnifiedPaymentModal } from '../components/common/UnifiedPaymentModal';
+import { CURRENCY_LEGACY_FIELD_MAP, getLegacyBalance } from '../utils/currencyFieldMap';
+import { currencyService } from '../services/currencyService';
+import type { CurrencyCode } from '@pos-platform/shared';
 
 export default function Customers() {
   const raw = useOfflineData();
@@ -41,13 +44,15 @@ export default function Customers() {
     const mappedCustomers = customerEntities.map(c => {
       const customerData = (c.customer_data as any) || {};
       // Get calculated balances from journal entries
-      const balances = customerBalances.getBalances(c.id) || { USD: 0, LBP: 0 };
+      const byCurrency = customerBalances.getBalances(c.id) || {};
       return {
         ...c,
         is_active: c.is_active ?? true,
         createdAt: c.created_at,
-        lb_balance: balances.LBP,  // From journal entries
-        usd_balance: balances.USD,  // From journal entries
+        balances: byCurrency,  // Per-currency map (primary).
+        // Legacy shortcuts for older readers.
+        lb_balance: byCurrency.LBP ?? 0,
+        usd_balance: byCurrency.USD ?? 0,
         email: customerData.email || '',
         address: customerData.address || '',
         lb_max_balance: customerData.lb_max_balance ?? undefined,
@@ -71,18 +76,25 @@ export default function Customers() {
   const suppliers = useMemo(() => {
     const mappedSuppliers = supplierEntities.map(s => {
       const supplierData = (s.supplier_data as any) || {};
-      // Get calculated balances from journal entries
-      const balances = supplierBalances.getBalances(s.id) || { USD: 0, LBP: 0 };
+      const byCurrency = supplierBalances.getBalances(s.id) || {};
+      const advanceBalances: Partial<Record<CurrencyCode, number>> =
+        (supplierData.advance_balances as Partial<Record<CurrencyCode, number>>) ?? {
+          ...(supplierData.advance_lb_balance ? { LBP: supplierData.advance_lb_balance } : {}),
+          ...(supplierData.advance_usd_balance ? { USD: supplierData.advance_usd_balance } : {}),
+        };
       return {
         ...s,
         createdAt: s.created_at || 'commission',
         email: supplierData.email || '',
         address: supplierData.address || '',
-        lb_balance: balances.LBP,  // From journal entries
-        usd_balance: balances.USD,  // From journal entries
+        balances: byCurrency,
+        // Legacy shortcuts.
+        lb_balance: byCurrency.LBP ?? 0,
+        usd_balance: byCurrency.USD ?? 0,
         type: supplierData.type || 'standard',
-        advance_lb_balance: supplierData.advance_lb_balance || 0,
-        advance_usd_balance: supplierData.advance_usd_balance || 0
+        advance_balances: advanceBalances,
+        advance_lb_balance: advanceBalances.LBP ?? 0,
+        advance_usd_balance: advanceBalances.USD ?? 0
       };
     });
     // Sort alphabetically (A-Z or ا-ي)
@@ -99,12 +111,10 @@ export default function Customers() {
   const { formatCurrency, formatCurrencyWithSymbol } = useCurrency();
 
   // Helper function to format balance display
-  const formatBalanceDisplay = (balance: number, currency: 'USD' | 'LBP') => {
+  const formatBalanceDisplay = (balance: number, currency: CurrencyCode) => {
     if (balance > 0) {
       // They owe us (DEBT) - show with + sign
-      const amountText = currency === 'USD'
-        ? `$${balance.toFixed(2)}`
-        : `${Math.round(balance).toLocaleString()} ل.ل`;
+      const amountText = currencyService.format(balance, currency);
       return {
         text: `+${amountText}`,
         label: t('customers.owes') || 'Owes',
@@ -116,9 +126,7 @@ export default function Customers() {
       };
     } else if (balance < 0) {
       // We owe them (CREDIT) - show with - sign
-      const amountText = currency === 'USD'
-        ? `$${Math.abs(balance).toFixed(2)}`
-        : `${Math.round(Math.abs(balance)).toLocaleString()} ل.ل`;
+      const amountText = currencyService.format(Math.abs(balance), currency);
       return {
         text: `-${amountText}`,
         label: t('customers.credit') || 'Credit',
@@ -131,7 +139,7 @@ export default function Customers() {
     } else {
       // Paid off - show 0 without sign
       return {
-        text: currency === 'USD' ? '$0.00' : '0 ل.ل',
+        text: currencyService.format(0, currency),
         label: t('customers.paid') || 'Paid',
         color: 'text-green-700',
         bgColor: 'bg-green-50',
@@ -173,7 +181,7 @@ export default function Customers() {
   const [paymentDirection, setPaymentDirection] = useState<'receive' | 'pay'>('receive');
   const [paymentForm, setPaymentForm] = useState({
     amount: '',
-    currency: 'USD' as 'USD' | 'LBP',
+    currency: raw.preferredCurrency as CurrencyCode,
     description: '',
     reference: ''
   });
@@ -193,11 +201,11 @@ export default function Customers() {
   // Helper function for payment suggestions
   // Shows suggestions only when entity owes us money (positive balance > 0)
   // Works for both USD and LBP currencies
-  const getSuggestedPayments = (entity: Customer | Supplier | undefined, currency: 'USD' | 'LBP') => {
+  const getSuggestedPayments = (entity: Customer | Supplier | undefined, currency: CurrencyCode) => {
     if (!entity) return [];
 
     // Get balance for the selected currency
-    const balance = currency === 'LBP' ? (entity.lb_balance || 0) : (entity.usd_balance || 0);
+    const balance = getLegacyBalance(entity as unknown as Record<string, unknown>, currency, 'initial');
 
     // Only show suggestions if they owe us money (positive balance = debt)
     // If balance is 0 or negative (credit), don't show suggestions
@@ -259,7 +267,7 @@ export default function Customers() {
   const resetPaymentForm = () => {
     setPaymentForm({
       amount: '',
-      currency: 'LBP',
+      currency: raw.preferredCurrency,
       description: '',
       reference: ''
     });
@@ -275,7 +283,7 @@ export default function Customers() {
     entityType: 'customer' | 'supplier',
     entityId: string,
     amount: string,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description: string,
     reference: string,
     direction: 'receive' | 'pay'
@@ -348,10 +356,12 @@ export default function Customers() {
 
   // Open payment modal for any entity
   const handleOpenPaymentForm = (entity: Customer | Supplier, entityType: 'customer' | 'supplier') => {
-    // Determine default direction based on entity balance
-    const usdBalance = entity.usd_balance || 0;
-    const lbBalance = entity.lb_balance || 0;
-    const defaultDirection: 'receive' | 'pay' = (usdBalance > 0 || lbBalance > 0) ? 'receive' : 'pay';
+    // Determine default direction by checking whether any currency has a positive balance
+    const balanceMap = ((entity as any).balances ?? {}) as Partial<Record<CurrencyCode, number>>;
+    const hasPositive = Object.values(balanceMap).some(v => (v ?? 0) > 0)
+      || (entity.usd_balance ?? 0) > 0
+      || (entity.lb_balance ?? 0) > 0;
+    const defaultDirection: 'receive' | 'pay' = hasPositive ? 'receive' : 'pay';
 
     setPaymentDirection(defaultDirection);
     setPaymentForm(prev => ({ ...prev, amount: '', description: '' }));
@@ -687,34 +697,20 @@ export default function Customers() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm rtl:text-right ltr:text-left">
                         <div className="space-y-1">
-                          {(() => {
-                            const lbpBalance = formatBalanceDisplay(customer.lb_balance || 0, 'LBP');
+                          {raw.acceptedCurrencies.map(code => {
+                            const display = formatBalanceDisplay(customer.balances[code] ?? 0, code);
                             return (
-                              <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border ${lbpBalance.bgColor} ${lbpBalance.borderColor}`}>
-                                <span className="text-base">{lbpBalance.icon}</span>
-                                <span className={`text-xs font-semibold ${lbpBalance.color}`}>
-                                  {lbpBalance.label}:
+                              <div key={code} className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border ${display.bgColor} ${display.borderColor}`}>
+                                <span className="text-base">{display.icon}</span>
+                                <span className={`text-xs font-semibold ${display.color}`}>
+                                  {display.label}:
                                 </span>
-                                <span className={`text-sm font-bold ${lbpBalance.color}`}>
-                                  {lbpBalance.text}
+                                <span className={`text-sm font-bold ${display.color}`}>
+                                  {display.text}
                                 </span>
                               </div>
                             );
-                          })()}
-                          {(() => {
-                            const usdBalance = formatBalanceDisplay(customer.usd_balance || 0, 'USD');
-                            return (
-                              <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border ${usdBalance.bgColor} ${usdBalance.borderColor}`}>
-                                <span className="text-base">{usdBalance.icon}</span>
-                                <span className={`text-xs font-semibold ${usdBalance.color}`}>
-                                  {usdBalance.label}:
-                                </span>
-                                <span className={`text-sm font-bold ${usdBalance.color}`}>
-                                  {usdBalance.text}
-                                </span>
-                              </div>
-                            );
-                          })()}
+                          })}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap rtl:text-right ltr:text-left">
@@ -803,34 +799,20 @@ export default function Customers() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm rtl:text-right ltr:text-left">
                         <div className="space-y-2">
-                          {(() => {
-                            const lbpBalance = formatBalanceDisplay(supplier.lb_balance || 0, 'LBP');
+                          {raw.acceptedCurrencies.map(code => {
+                            const display = formatBalanceDisplay(supplier.balances[code] ?? 0, code);
                             return (
-                              <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border ${lbpBalance.bgColor} ${lbpBalance.borderColor}`}>
-                                <span className="text-base">{lbpBalance.icon}</span>
-                                <span className={`text-xs font-semibold ${lbpBalance.color}`}>
-                                  {lbpBalance.label}:
+                              <div key={code} className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border ${display.bgColor} ${display.borderColor}`}>
+                                <span className="text-base">{display.icon}</span>
+                                <span className={`text-xs font-semibold ${display.color}`}>
+                                  {display.label}:
                                 </span>
-                                <span className={`text-sm font-bold ${lbpBalance.color}`}>
-                                  {lbpBalance.text}
+                                <span className={`text-sm font-bold ${display.color}`}>
+                                  {display.text}
                                 </span>
                               </div>
                             );
-                          })()}
-                          {(() => {
-                            const usdBalance = formatBalanceDisplay(supplier.usd_balance || 0, 'USD');
-                            return (
-                              <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border ${usdBalance.bgColor} ${usdBalance.borderColor}`}>
-                                <span className="text-base">{usdBalance.icon}</span>
-                                <span className={`text-xs font-semibold ${usdBalance.color}`}>
-                                  {usdBalance.label}:
-                                </span>
-                                <span className={`text-sm font-bold ${usdBalance.color}`}>
-                                  {usdBalance.text}
-                                </span>
-                              </div>
-                            );
-                          })()}
+                          })}
                         </div>
                       </td>
 
@@ -959,68 +941,53 @@ export default function Customers() {
                 <h3 className="md:col-span-2 text-lg font-semibold text-gray-900">{t('customers.balanceSettings')}</h3>
 
                 {/* Initial Balance Fields - Only show when adding new customer */}
-                {!editingCustomer && (
-                  <>
-                    <div>
-                      <label htmlFor="lb_balance" className="block text-sm font-medium text-gray-700">{t('customers.initialLBPBalance')}</label>
+                {!editingCustomer && raw.acceptedCurrencies.map(code => {
+                  const fields = CURRENCY_LEGACY_FIELD_MAP[code];
+                  if (!fields) return null;
+                  const decimals = currencyService.getMeta(code).decimals;
+                  return (
+                    <div key={`initial-${code}`}>
+                      <label htmlFor={fields.initial} className="block text-sm font-medium text-gray-700">
+                        {t('customers.initialBalanceFor', { currency: code }) || `Initial ${code} Balance`}
+                      </label>
                       <input
                         type="number"
-                        id="lb_balance"
-                        name="lb_balance"
-                        value={customerForm.lb_balance || 0}
+                        id={fields.initial}
+                        name={fields.initial}
+                        value={(customerForm[fields.initial as keyof typeof customerForm] as number | undefined) ?? 0}
                         onChange={handleCustomerFormChange}
                         className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                        step="0.01"
+                        step={decimals > 0 ? '0.01' : '1'}
                         min="0"
                       />
                     </div>
-
-                    <div>
-                      <label htmlFor="usd_balance" className="block text-sm font-medium text-gray-700">{t('customers.initialUSDBalance')}</label>
-                      <input
-                        type="number"
-                        id="usd_balance"
-                        name="usd_balance"
-                        value={customerForm.usd_balance || 0}
-                        onChange={handleCustomerFormChange}
-                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                        step="0.01"
-                        min="0"
-                      />
-                    </div>
-                  </>
-                )}
+                  );
+                })}
 
                 {/* Max Balance Fields - Always show */}
-                <div>
-                  <label htmlFor="lb_max_balance" className="block text-sm font-medium text-gray-700">{t('customers.maxLBPBalance')}</label>
-                  <input
-                    type="number"
-                    id="lb_max_balance"
-                    name="lb_max_balance"
-                    value={customerForm.lb_max_balance || ''}
-                    onChange={handleCustomerFormChange}
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    step="0.01"
-                    min="0"
-                    placeholder={t('customers.noLimit')}
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="usd_max_balance" className="block text-sm font-medium text-gray-700">{t('customers.maxUSDBalance')}</label>
-                  <input
-                    type="number"
-                    id="usd_max_balance"
-                    name="usd_max_balance"
-                    value={customerForm.usd_max_balance || ''}
-                    onChange={handleCustomerFormChange}
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    step="0.01"
-                    min="0"
-                    placeholder={t('customers.noLimit')}
-                  />
-                </div>
+                {raw.acceptedCurrencies.map(code => {
+                  const fields = CURRENCY_LEGACY_FIELD_MAP[code];
+                  if (!fields) return null;
+                  const decimals = currencyService.getMeta(code).decimals;
+                  return (
+                    <div key={`max-${code}`}>
+                      <label htmlFor={fields.max} className="block text-sm font-medium text-gray-700">
+                        {t('customers.maxBalanceFor', { currency: code }) || `Max ${code} Balance`}
+                      </label>
+                      <input
+                        type="number"
+                        id={fields.max}
+                        name={fields.max}
+                        value={(customerForm[fields.max as keyof typeof customerForm] as number | undefined) ?? ''}
+                        onChange={handleCustomerFormChange}
+                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                        step={decimals > 0 ? '0.01' : '1'}
+                        min="0"
+                        placeholder={t('customers.noLimit')}
+                      />
+                    </div>
+                  );
+                })}
               </div>
               {customerFormError && <div className="text-red-600 text-sm font-medium pt-2">{customerFormError}</div>}
               <div className="flex justify-end space-x-3 pt-4">

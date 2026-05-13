@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   FileText,
   X,
@@ -14,6 +14,7 @@ import { Pagination } from "../../../components/common/Pagination";
 
 interface NonPricedItem {
   id: string;
+  itemType?: "sale" | "inventory";
   status: "ready" | "incomplete";
   customerName: string;
   productName: string;
@@ -25,9 +26,10 @@ interface NonPricedItem {
   created_at?: string;
 }
 
+type SubTab = "all" | "sold" | "received";
+
 interface NonPricedItemsProps {
   filteredNonPricedItems: NonPricedItem[];
-  pagedNonPricedItems: NonPricedItem[];
   stagedNonPricedChanges: Record<string, Record<string, any>>;
   selectedNonPriced: string[];
   showBulkActions: boolean;
@@ -35,10 +37,8 @@ interface NonPricedItemsProps {
   nonPricedSort: string;
   nonPricedSortDir: "asc" | "desc";
   nonPricedPage: number;
-  nonPricedTotalPages: number;
   NON_PRICED_PAGE_SIZE: number;
 
-  // Callbacks
   setShowBulkActions: (value: boolean) => void;
   setSelectedNonPriced: React.Dispatch<React.SetStateAction<string[]>>;
   setStagedNonPricedChanges: React.Dispatch<
@@ -63,7 +63,6 @@ interface NonPricedItemsProps {
 
 export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
   filteredNonPricedItems,
-  pagedNonPricedItems,
   stagedNonPricedChanges,
   selectedNonPriced,
   showBulkActions,
@@ -71,7 +70,6 @@ export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
   nonPricedSort,
   nonPricedSortDir,
   nonPricedPage,
-  nonPricedTotalPages,
   NON_PRICED_PAGE_SIZE,
 
   setShowBulkActions,
@@ -94,6 +92,54 @@ export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
   currency,
 }) => {
   const { t } = useI18n();
+  const [activeSubTab, setActiveSubTab] = useState<SubTab>("all");
+
+  const { soldItems, receivedItems } = useMemo(() => {
+    const sold: NonPricedItem[] = [];
+    const received: NonPricedItem[] = [];
+    for (const item of filteredNonPricedItems) {
+      if (item.itemType === "inventory") received.push(item);
+      else sold.push(item);
+    }
+    return { soldItems: sold, receivedItems: received };
+  }, [filteredNonPricedItems]);
+
+  const subTabItems =
+    activeSubTab === "all"
+      ? filteredNonPricedItems
+      : activeSubTab === "sold"
+        ? soldItems
+        : receivedItems;
+  const subTabTotalPages = Math.max(1, Math.ceil(subTabItems.length / NON_PRICED_PAGE_SIZE));
+  const pagedSubTabItems = subTabItems.slice(
+    (nonPricedPage - 1) * NON_PRICED_PAGE_SIZE,
+    nonPricedPage * NON_PRICED_PAGE_SIZE
+  );
+
+  // When switching tabs, reset page and clear selection so bulk actions don't leak across lists.
+  useEffect(() => {
+    setNonPricedPage(1);
+    setSelectedNonPriced([]);
+    setShowBulkActions(false);
+  }, [activeSubTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const isSold = activeSubTab === "sold";
+  const isReceived = activeSubTab === "received";
+  const isAll = activeSubTab === "all";
+  const priceHeader = isReceived ? t('nonPriced.unitCost') : t('nonPriced.unitPrice');
+  const totalHeader = isReceived ? t('nonPriced.totalCost') : t('nonPriced.totalValue');
+  const searchPlaceholder = isAll
+    ? t('nonPriced.searchPlaceholder')
+    : isSold
+      ? t('nonPriced.searchPlaceholderSold')
+      : t('nonPriced.searchPlaceholderReceived');
+  const emptyText = isAll
+    ? t('nonPriced.noItemsFound')
+    : isSold
+      ? t('nonPriced.noSoldItems')
+      : t('nonPriced.noReceivedItems');
+  const columnCount = isAll ? 11 : 10;
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -139,6 +185,35 @@ export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
         </div>
       </div>
 
+      {/* Sub-tabs */}
+      <div className="flex gap-2 border-b border-gray-200">
+        {([
+          { key: 'all' as const, label: t('nonPriced.allTab'), count: filteredNonPricedItems.length },
+          { key: 'sold' as const, label: t('nonPriced.soldBillsTab'), count: soldItems.length },
+          { key: 'received' as const, label: t('nonPriced.receivedBillsTab'), count: receivedItems.length },
+        ]).map(({ key, label, count }) => {
+          const active = activeSubTab === key;
+          return (
+            <button
+              key={key}
+              onClick={() => setActiveSubTab(key)}
+              className={`px-4 py-2 -mb-px border-b-2 text-sm font-medium transition-colors flex items-center gap-2 ${
+                active
+                  ? 'border-blue-600 text-blue-700'
+                  : 'border-transparent text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <span>{label}</span>
+              <span className={`text-xs rounded-full px-2 py-0.5 ${
+                active ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-700'
+              }`}>
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
       {/* Bulk Actions */}
       {showBulkActions && selectedNonPriced.length > 0 && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
@@ -153,12 +228,14 @@ export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
               >
                 {t('nonPriced.markAsPriced')}
               </button>
-              <button
-                onClick={handleBulkDelete}
-                className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700"
-              >
-                {t('nonPriced.delete')}
-              </button>
+              {!isReceived && (
+                <button
+                  onClick={handleBulkDelete}
+                  className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700"
+                >
+                  {t('nonPriced.delete')}
+                </button>
+              )}
               <button
                 onClick={() => setSelectedNonPriced([])}
                 className="bg-gray-600 text-white px-3 py-1 rounded text-sm hover:bg-gray-700"
@@ -193,7 +270,7 @@ export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
             type="text"
             value={nonPricedSearch}
             onChange={(e) => setNonPricedSearch(e.target.value)}
-            placeholder={t('nonPriced.searchPlaceholder')}
+            placeholder={searchPlaceholder}
             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 rtl:pl-4 rtl:pr-10"
           />
         </div>
@@ -201,12 +278,21 @@ export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
 
       {/* Sort Controls */}
       <div className="flex flex-wrap gap-2 mb-4">
-        {[
-          { key: "date", label: t('nonPriced.sortByDate') },
-          { key: "customer", label: t('nonPriced.sortByCustomer') },
-          { key: "product", label: t('nonPriced.sortByProduct') },
-          { key: "value", label: t('nonPriced.sortByValue') }
-        ].map(({ key, label }) => (
+        {(isAll
+          ? [
+              { key: "date", label: t('nonPriced.sortByDate') },
+              { key: "customer", label: t('nonPriced.sortByCustomer') },
+              { key: "supplier", label: t('nonPriced.sortBySupplier') },
+              { key: "product", label: t('nonPriced.sortByProduct') },
+              { key: "value", label: t('nonPriced.sortByValue') },
+            ]
+          : [
+              { key: "date", label: t('nonPriced.sortByDate') },
+              { key: isSold ? "customer" : "supplier", label: isSold ? t('nonPriced.sortByCustomer') : t('nonPriced.sortBySupplier') },
+              { key: "product", label: t('nonPriced.sortByProduct') },
+              { key: "value", label: t('nonPriced.sortByValue') },
+            ]
+        ).map(({ key, label }) => (
           <button
             key={key}
             onClick={() => {
@@ -243,12 +329,12 @@ export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
                   <input
                     type="checkbox"
                     checked={
-                      selectedNonPriced.length === pagedNonPricedItems.length &&
-                      pagedNonPricedItems.length > 0
+                      selectedNonPriced.length === pagedSubTabItems.length &&
+                      pagedSubTabItems.length > 0
                     }
                     onChange={(e) => {
                       if (e.target.checked) {
-                        setSelectedNonPriced(pagedNonPricedItems.map((i) => i.id));
+                        setSelectedNonPriced(pagedSubTabItems.map((i) => i.id));
                       } else {
                         setSelectedNonPriced([]);
                       }
@@ -259,15 +345,19 @@ export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">
                   {t('nonPriced.status')}
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">
-                  {t('nonPriced.customer')}
-                </th>
+                {(isAll || isSold) && (
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">
+                    {t('nonPriced.customer')}
+                  </th>
+                )}
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">
                   {t('nonPriced.product')}
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">
-                  {t('nonPriced.supplier')}
-                </th>
+                {(isAll || isReceived) && (
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">
+                    {t('nonPriced.supplier')}
+                  </th>
+                )}
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">
                   {t('nonPriced.quantity')}
                 </th>
@@ -275,10 +365,10 @@ export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
                   {t('nonPriced.weight')}
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">
-                  {t('nonPriced.unitPrice')}
+                  {priceHeader}
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">
-                  {t('nonPriced.totalValue')}
+                  {totalHeader}
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase rtl:text-right">
                   {t('nonPriced.dateAdded')}
@@ -289,13 +379,13 @@ export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {pagedNonPricedItems.length === 0 ? (
+              {pagedSubTabItems.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="text-center text-gray-500 py-8">
+                  <td colSpan={columnCount} className="text-center text-gray-500 py-8">
                     <div className="flex flex-col items-center">
                       <AlertCircle className="w-8 h-8 text-gray-400 mb-2" />
                       <span className="font-semibold rtl:text-right">
-                        {t('nonPriced.noItemsFound')}
+                        {emptyText}
                       </span>
                       <span className="text-sm text-gray-400 rtl:text-right">
                         {t('nonPriced.noItemsMessage')}
@@ -304,7 +394,7 @@ export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
                   </td>
                 </tr>
               ) : (
-                pagedNonPricedItems.map((item) => {
+                pagedSubTabItems.map((item) => {
                   const hasStagedChanges =
                     stagedNonPricedChanges[item.id] &&
                     Object.keys(stagedNonPricedChanges[item.id]).length > 0;
@@ -349,15 +439,19 @@ export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-gray-900">
-                        {item.customerName}
-                      </td>
+                      {(isAll || isSold) && (
+                        <td className="px-4 py-3 text-gray-900">
+                          {item.itemType === "inventory" ? "—" : item.customerName}
+                        </td>
+                      )}
                       <td className="px-4 py-3 text-gray-900 font-medium">
                         {item.productName}
                       </td>
-                      <td className="px-4 py-3 text-gray-900">
-                        {item.supplierName}
-                      </td>
+                      {(isAll || isReceived) && (
+                        <td className="px-4 py-3 text-gray-900">
+                          {item.itemType === "inventory" ? item.supplierName : "—"}
+                        </td>
+                      )}
                       <td className="px-4 py-3">
                         <input
                           type="number"
@@ -433,13 +527,15 @@ export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
                               <CheckCircle className="w-5 h-5" />
                           </button>
                           )}
-                          <button
-                            onClick={() => handleDeleteNonPriced(item)}
-                            className="px-2.5 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors"
-                            title={t('nonPriced.deleteItem')}
-                          >
-                            <Trash2 className="w-5 h-5" />
-                          </button>
+                          {item.itemType !== "inventory" && (
+                            <button
+                              onClick={() => handleDeleteNonPriced(item)}
+                              className="px-2.5 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors"
+                              title={t('nonPriced.deleteItem')}
+                            >
+                              <Trash2 className="w-5 h-5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -451,13 +547,13 @@ export const NonPricedItems: React.FC<NonPricedItemsProps> = ({
         </div>
 
         {/* Pagination */}
-        {nonPricedTotalPages > 1 && (
+        {subTabTotalPages > 1 && (
           <Pagination
             currentPage={nonPricedPage}
-            totalPages={nonPricedTotalPages}
+            totalPages={subTabTotalPages}
             onPageChange={setNonPricedPage}
             itemsPerPage={NON_PRICED_PAGE_SIZE}
-            totalItems={filteredNonPricedItems.length}
+            totalItems={subTabItems.length}
           />
         )}
       </div>

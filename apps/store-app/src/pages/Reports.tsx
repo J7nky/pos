@@ -1,6 +1,7 @@
-import { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useEntityBalances } from '../hooks/useEntityBalances';
+import type { CurrencyCode } from '@pos-platform/shared';
 import {
   BarChart3,
   TrendingUp,
@@ -15,6 +16,7 @@ import ProfitLossReport from '../components/reports/ProfitLossReport';
 import TrialBalance from '../components/reports/TrialBalance';
 import BalanceSheet from '../components/reports/BalanceSheet';
 import { getLocalDateString, getTodayLocalDate } from '../utils/dateUtils';
+import { formatNumber } from '../utils/numberFormat';
 
 export default function Reports() {
   const raw = useOfflineData();
@@ -26,15 +28,17 @@ export default function Reports() {
   const customerIds = useMemo(() => customerEntities.map(c => c.id), [customerEntities]);
   const customerBalances = useEntityBalances(customerIds, 'customer', true);
   const customers = customerEntities.map(c => {
-    const balances = customerBalances.getBalances(c.id) || { USD: 0, LBP: 0 };
+    const byCurrency = customerBalances.getBalances(c.id) || {};
     return {
-      ...c, 
-      isActive: c.is_active, 
-      createdAt: c.created_at, 
-      lb_balance: balances.LBP,  // From journal entries
-      usd_balance: balances.USD  // From journal entries
+      ...c,
+      isActive: c.is_active,
+      createdAt: c.created_at,
+      balances: byCurrency,
+      // Legacy shortcuts.
+      lb_balance: byCurrency.LBP ?? 0,
+      usd_balance: byCurrency.USD ?? 0
     };
-  }) as Array<{id: string, name: string, isActive: boolean, createdAt: string, lb_balance: number, usd_balance: number, phone: string, email?: string, address?: string}>;
+  }) as Array<{id: string, name: string, isActive: boolean, createdAt: string, balances: Partial<Record<CurrencyCode, number>>, lb_balance: number, usd_balance: number, phone: string, email?: string, address?: string}>;
   const sales = raw.sales.map(s => ({...s, createdAt: s.created_at})) as Array<any>;
   const stockLevels = raw.stockLevels as Array<any>;
   const lowStockAlertsEnabled = raw.lowStockAlertsEnabled;
@@ -80,7 +84,11 @@ export default function Reports() {
     .slice(0, 5);
 
   const customerDebtSummary = customers.reduce((acc, customer) => {
-    const totalDebt = (customer.lb_balance || 0) + (customer.usd_balance || 0);
+    // Sum positive balances across every accepted currency.
+    const totalDebt = raw.acceptedCurrencies.reduce(
+      (sum, code) => sum + Math.max(0, customer.balances[code] ?? 0),
+      0,
+    );
     if (totalDebt > 0) {
       acc.totalDebt += totalDebt;
       acc.customersWithDebt += 1;
@@ -174,7 +182,7 @@ export default function Reports() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <SalesOverviewCard
               title="Total Revenue"
-              value={`$${totalRevenue.toLocaleString()}`}
+              value={`$${formatNumber(totalRevenue)}`}
               icon={<DollarSign className="w-8 h-8" />}
               iconColor="text-green-500"
             />
@@ -192,7 +200,7 @@ export default function Reports() {
             />
             <SalesOverviewCard
               title="Customer Debt"
-              value={`$${customerDebtSummary.totalDebt.toLocaleString()}`}
+              value={`$${formatNumber(customerDebtSummary.totalDebt)}`}
               icon={<Users className="w-8 h-8" />}
               iconColor="text-amber-500"
             />
@@ -347,7 +355,7 @@ export default function Reports() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-gray-600">Total Customer Debt</p>
-                  <p className="text-2xl font-bold text-gray-900">${customerDebtSummary.totalDebt.toLocaleString()}</p>
+                  <p className="text-2xl font-bold text-gray-900">${formatNumber(customerDebtSummary.totalDebt)}</p>
                 </div>
                 <DollarSign className="w-8 h-8 text-red-500" />
               </div>
@@ -379,17 +387,19 @@ export default function Reports() {
                       <td className="px-4 py-4 text-gray-900">{customer.phone}</td>
                       <td className="px-4 py-4">
                         <div>
-                          <span className={`font-medium ${
-                            (customer.lb_balance || 0) > 0 ? 'text-red-600' : 'text-green-600'
-                          }`}>
-                            LBP: {(customer.lb_balance || 0).toLocaleString()}
-                          </span>
-                          <br />
-                          <span className={`font-medium ${
-                            (customer.usd_balance || 0) > 0 ? 'text-red-600' : 'text-green-600'
-                          }`}>
-                            USD: {(customer.usd_balance || 0).toLocaleString()}
-                          </span>
+                          {raw.acceptedCurrencies.map((code, idx) => {
+                            const value = customer.balances[code] ?? 0;
+                            return (
+                              <React.Fragment key={code}>
+                                {idx > 0 && <br />}
+                                <span className={`font-medium ${
+                                  value > 0 ? 'text-red-600' : 'text-green-600'
+                                }`}>
+                                  {code}: {formatNumber(value)}
+                                </span>
+                              </React.Fragment>
+                            );
+                          })}
                         </div>
                       </td>
                      

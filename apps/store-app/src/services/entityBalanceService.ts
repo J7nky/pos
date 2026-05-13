@@ -11,9 +11,15 @@ import { getDB } from '../lib/db';
 import { calculateEntityBalance, calculateBothCurrencies, calculateEmployeeBalance } from '../utils/balanceCalculation';
 import { snapshotService } from './snapshotService';
 import { getLocalDateString } from '../utils/dateUtils';
+import { amountsFromLegacyEntry, getDebit, getCredit } from './accountingCurrencyHelpers';
+import type { CurrencyCode } from '@pos-platform/shared';
 
 export interface EntityBalance {
+  /** Per-currency balance map (primary surface). */
+  byCurrency: Partial<Record<CurrencyCode, number>>;
+  /** Legacy USD shortcut, equal to `byCurrency.USD ?? 0`. */
   USD: number;
+  /** Legacy LBP shortcut, equal to `byCurrency.LBP ?? 0`. */
   LBP: number;
   lastCalculated: string;
   source: 'journal' | 'snapshot';
@@ -45,7 +51,7 @@ export class EntityBalanceService {
    */
   async getEntityBalance(
     entityId: string,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     accountCode: '1200' | '2100' = '1200',
     useSnapshot: boolean = true
   ): Promise<number> {
@@ -102,10 +108,13 @@ export class EntityBalanceService {
       .and(e => e.is_posted === true)
       .toArray();
 
-    const balances = calculateBothCurrencies(entries);
+    const { calculateAllCurrencies } = await import('../utils/balanceCalculation');
+    const byCurrency = calculateAllCurrencies(entries);
 
     return {
-      ...balances,
+      byCurrency,
+      USD: byCurrency.USD ?? 0,
+      LBP: byCurrency.LBP ?? 0,
       lastCalculated: new Date().toISOString(),
       source: 'journal'
     };
@@ -122,7 +131,7 @@ export class EntityBalanceService {
    */
   private async getBalanceWithSnapshot(
     entityId: string,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     accountCode: '1200' | '2100'
   ): Promise<number> {
     // Get entity to determine store_id
@@ -159,13 +168,10 @@ export class EntityBalanceService {
         })
         .toArray();
 
-      const openingBalance = currency === 'USD' ? snapshot.balanceUSD : snapshot.balanceLBP;
+      const openingBalance = snapshot.byCurrency[currency] ?? 0;
       const incrementalBalance = incrementalEntries.reduce((sum, e) => {
-        if (currency === 'USD') {
-          return sum + (e.debit_usd - e.credit_usd);
-        } else {
-          return sum + (e.debit_lbp - e.credit_lbp);
-        }
+        const map = amountsFromLegacyEntry(e as Parameters<typeof amountsFromLegacyEntry>[0]);
+        return sum + getDebit(map, currency) - getCredit(map, currency);
       }, 0);
 
       return openingBalance + incrementalBalance;
@@ -185,7 +191,12 @@ export class EntityBalanceService {
   private async getBalancesWithSnapshot(
     entityId: string,
     accountCode: '1200' | '2100'
-  ): Promise<{ USD: number; LBP: number; lastCalculated: string }> {
+  ): Promise<{
+    byCurrency: Partial<Record<CurrencyCode, number>>;
+    USD: number;
+    LBP: number;
+    lastCalculated: string;
+  }> {
     // Get entity to determine store_id
     const entity = await getDB().entities.get(entityId);
     if (!entity) {
@@ -193,7 +204,7 @@ export class EntityBalanceService {
     }
 
     const today = getLocalDateString(new Date().toISOString());
-    
+
     // Try to get most recent snapshot
     const snapshot = await snapshotService.getHistoricalBalance(
       entity.store_id,
@@ -202,12 +213,9 @@ export class EntityBalanceService {
       today
     );
 
+    const { calculateAllCurrencies } = await import('../utils/balanceCalculation');
+
     // If snapshot is from a prior day, get incremental entries since the snapshot.
-    // Note: snapshotService now always returns a snapshot dated *strictly before
-    // today* when asOfDate is today (so post-snapshot entries from today are
-    // included via the journal-entry sum below). The old "snapshotDate === today"
-    // short-circuit was a stale-balance bug — payments arriving after the
-    // snapshot was taken were not reflected until full page reload.
     if (snapshot) {
       const snapshotDate = new Date(snapshot.snapshotDate);
       snapshotDate.setHours(23, 59, 59, 999); // End of snapshot day
@@ -221,11 +229,17 @@ export class EntityBalanceService {
         })
         .toArray();
 
-      const incremental = calculateBothCurrencies(incrementalEntries);
+      const incremental = calculateAllCurrencies(incrementalEntries);
+
+      const byCurrency: Partial<Record<CurrencyCode, number>> = { ...snapshot.byCurrency };
+      for (const code of Object.keys(incremental) as CurrencyCode[]) {
+        byCurrency[code] = (byCurrency[code] ?? 0) + (incremental[code] ?? 0);
+      }
 
       return {
-        USD: snapshot.balanceUSD + incremental.USD,
-        LBP: snapshot.balanceLBP + incremental.LBP,
+        byCurrency,
+        USD: byCurrency.USD ?? 0,
+        LBP: byCurrency.LBP ?? 0,
         lastCalculated: new Date().toISOString()
       };
     }
@@ -237,10 +251,12 @@ export class EntityBalanceService {
       .and(e => e.is_posted === true)
       .toArray();
 
-    const balances = calculateBothCurrencies(entries);
+    const byCurrency = calculateAllCurrencies(entries);
 
     return {
-      ...balances,
+      byCurrency,
+      USD: byCurrency.USD ?? 0,
+      LBP: byCurrency.LBP ?? 0,
       lastCalculated: new Date().toISOString()
     };
   }
@@ -256,7 +272,7 @@ export class EntityBalanceService {
    */
   async calculateBalanceFromJournals(
     entityId: string,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     accountCode: '1200' | '2100' = '1200'
   ): Promise<number> {
     return await calculateEntityBalance(entityId, currency, accountCode);
@@ -277,7 +293,7 @@ export class EntityBalanceService {
    */
   async getEmployeeBalance(
     employeeId: string,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     useSnapshot: boolean = true
   ): Promise<number> {
     if (useSnapshot) {
@@ -357,31 +373,31 @@ export class EntityBalanceService {
     console.log(`[ENTITY_BALANCE_SERVICE] Found ${entries1200.length} journal entries for employee ${employeeId}, account 1200`);
     console.log(`[ENTITY_BALANCE_SERVICE] Found ${entries2200.length} journal entries for employee ${employeeId}, account 2200`);
 
-    // Calculate balances for each account
-    // Account 1200 (AR - asset): balance = debit - credit (positive = they owe us)
-    const { calculateBothCurrencies } = await import('../utils/balanceCalculation');
-    const balance1200 = calculateBothCurrencies(entries1200);
-    
-    // Account 2200 (Salaries Payable - liability): balance = credit - debit (positive = we owe them)
-    const { calculateBothCurrenciesLiability } = await import('../utils/balanceCalculation');
-    const balance2200 = calculateBothCurrenciesLiability(entries2200);
+    // Calculate balances per currency for each account.
+    const { calculateAllCurrencies, calculateAllCurrenciesLiability } = await import('../utils/balanceCalculation');
+    const balance1200 = calculateAllCurrencies(entries1200);          // Asset: debit - credit
+    const balance2200 = calculateAllCurrenciesLiability(entries2200); // Liability: credit - debit
 
-    // Combine balances: Net = AR balance - Salaries Payable balance
-    // Positive = they owe us more than we owe them (net receivable)
-    // Negative = we owe them more than they owe us (net payable)
-    const combinedBalances = {
-      USD: balance1200.USD - balance2200.USD,
-      LBP: balance1200.LBP - balance2200.LBP
-    };
+    // Combine balances per currency: Net = AR - Salaries Payable.
+    const codes = new Set<CurrencyCode>([
+      ...(Object.keys(balance1200) as CurrencyCode[]),
+      ...(Object.keys(balance2200) as CurrencyCode[]),
+    ]);
+    const byCurrency: Partial<Record<CurrencyCode, number>> = {};
+    for (const code of codes) {
+      byCurrency[code] = (balance1200[code] ?? 0) - (balance2200[code] ?? 0);
+    }
 
     console.log(`[ENTITY_BALANCE_SERVICE] Combined balances for employee ${employeeId}:`, {
       account1200: balance1200,
       account2200: balance2200,
-      combined: combinedBalances
+      combined: byCurrency
     });
 
     return {
-      ...combinedBalances,
+      byCurrency,
+      USD: byCurrency.USD ?? 0,
+      LBP: byCurrency.LBP ?? 0,
       lastCalculated: new Date().toISOString(),
       source: 'journal'
     };
@@ -396,12 +412,12 @@ export class EntityBalanceService {
    */
   private async getEmployeeBalanceWithSnapshot(
     employeeId: string,
-    currency: 'USD' | 'LBP'
+    currency: CurrencyCode
   ): Promise<number> {
-    // Employees have entries in TWO accounts (1200 and 2200)
-    // Use the combined balances method and extract the requested currency
+    // Employees have entries in TWO accounts (1200 and 2200).
+    // Use the combined balances method and extract the requested currency.
     const balances = await this.getEmployeeBalancesWithSnapshot(employeeId);
-    return currency === 'USD' ? balances.USD : balances.LBP;
+    return balances.byCurrency[currency] ?? 0;
   }
 
   /**
@@ -412,61 +428,64 @@ export class EntityBalanceService {
    */
   private async getEmployeeBalancesWithSnapshot(
     employeeId: string
-  ): Promise<{ USD: number; LBP: number; lastCalculated: string }> {
-    // Employees have entries in TWO accounts (1200 and 2200)
-    // Snapshots are account-specific, so combining them is complex
-    // For now, fall back to direct calculation which handles both accounts correctly
-    // TODO: Optimize with snapshots for both accounts if performance becomes an issue
-    
-    // Get employee entity to determine store_id
+  ): Promise<{
+    byCurrency: Partial<Record<CurrencyCode, number>>;
+    USD: number;
+    LBP: number;
+    lastCalculated: string;
+  }> {
+    // Employees have entries in TWO accounts (1200 and 2200) — snapshots are
+    // account-specific, so we just compute directly. TODO: optimize with
+    // snapshots for both accounts if performance becomes an issue.
+
     const entity = await getDB().entities.get(employeeId);
     if (!entity) {
-      // Fall back to direct calculation if entity doesn't exist
-      // This will be handled by the main getEmployeeBalances method
       throw new Error(`Entity not found: ${employeeId}`);
     }
 
-    // Fetch both accounts directly (same logic as getEmployeeBalances)
     let entries1200: any[] = [];
     let entries2200: any[] = [];
-    
+
     try {
       entries1200 = await getDB().journal_entries
         .where('[entity_id+account_code]')
         .equals([employeeId, '1200'])
         .and(e => e.is_posted === true)
         .toArray();
-      
+
       entries2200 = await getDB().journal_entries
         .where('[entity_id+account_code]')
         .equals([employeeId, '2200'])
         .and(e => e.is_posted === true)
         .toArray();
     } catch (error) {
-      // Fallback: If compound index doesn't exist, filter manually
       const allEntries = await getDB().journal_entries
         .where('entity_id')
         .equals(employeeId)
         .and(e => e.is_posted === true)
         .toArray();
-      
+
       entries1200 = allEntries.filter(e => e.account_code === '1200');
       entries2200 = allEntries.filter(e => e.account_code === '2200');
     }
 
-    // Calculate balances for each account
-    const { calculateBothCurrencies, calculateBothCurrenciesLiability } = await import('../utils/balanceCalculation');
-    const balance1200 = calculateBothCurrencies(entries1200); // Asset: debit - credit
-    const balance2200 = calculateBothCurrenciesLiability(entries2200); // Liability: credit - debit
+    const { calculateAllCurrencies, calculateAllCurrenciesLiability } = await import('../utils/balanceCalculation');
+    const balance1200 = calculateAllCurrencies(entries1200);
+    const balance2200 = calculateAllCurrenciesLiability(entries2200);
 
-    // Combine balances: Net = AR balance - Salaries Payable balance
-    const combinedBalances = {
-      USD: balance1200.USD - balance2200.USD,
-      LBP: balance1200.LBP - balance2200.LBP
-    };
+    const codes = new Set<CurrencyCode>([
+      ...(Object.keys(balance1200) as CurrencyCode[]),
+      ...(Object.keys(balance2200) as CurrencyCode[]),
+    ]);
+    const byCurrency: Partial<Record<CurrencyCode, number>> = {};
+    for (const code of codes) {
+      byCurrency[code] = (balance1200[code] ?? 0) - (balance2200[code] ?? 0);
+    }
 
     return {
-      ...combinedBalances,
+      byCurrency,
+      USD: byCurrency.USD ?? 0,
+      LBP: byCurrency.LBP ?? 0,
       lastCalculated: new Date().toISOString()
     };
   }

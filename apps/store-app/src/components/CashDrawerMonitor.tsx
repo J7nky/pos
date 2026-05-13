@@ -5,6 +5,7 @@ import { useCurrency } from '../hooks/useCurrency';
 import { useI18n } from '../i18n';
 import { useMultilingual } from '../hooks/useMultilingual';
 import { parseMultilingualString } from '../utils/multilingual';
+import { formatDateTime } from '../utils/numberFormat';
 import {
   TrendingUp,
   TrendingDown,
@@ -137,7 +138,7 @@ export default function CashDrawerMonitor() {
     }
   })();
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString();
+    return formatDateTime(dateString);
   };
 
   const getTransactionIcon = (type: string) => {
@@ -195,26 +196,26 @@ export default function CashDrawerMonitor() {
             
           </div>
           {filteredTransactions.length > 0 ? (
-            <div className="space-y-2 max-h-64 overflow-y-auto">
+            // Parent grid defines three shared column tracks (icon, description,
+            // right block). Each row uses `grid-cols-subgrid` so its cells sit
+            // in those same tracks — guaranteeing the icon/description/amount
+            // columns line up across rows regardless of category-label width.
+            <div className="grid grid-cols-[auto_1fr_auto] gap-y-2 max-h-64 overflow-y-auto">
               {filteredTransactions.map(transaction => (
-                <div key={transaction.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
-                 <div
+                <div
                   key={transaction.id}
+                  className="col-span-3 grid grid-cols-subgrid items-center gap-x-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
                 >
-                  <div className="flex items-center gap-3">
-                    {getTransactionIcon(transaction.category)}
-                    <div>
-                      <p className={`text-sm font-medium ${getTransactionColor(transaction.category)}`}>
-                        {getText(parseMultilingualString(transaction.description) as any) || ''}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {formatDate(transaction.created_at)}
-                      </p>
-                    </div>
+                  {getTransactionIcon(transaction.category)}
+                  <div>
+                    <p className={`text-sm font-medium ${getTransactionColor(transaction.category)}`}>
+                      {getText(parseMultilingualString(transaction.description) as any) || ''}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {formatDate(transaction.created_at)}
+                    </p>
                   </div>
-                  
-                </div>
-                <div className="text-right">
+                  <div className="text-right">
                     <p className={`font-medium ${getTransactionColor(transaction.category)}`}>
                       {transaction.type === 'expense' ? '-' : '+'}
                       {formatCurrency(transaction.amount)}

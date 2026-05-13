@@ -3,6 +3,9 @@ import { X } from 'lucide-react';
 import { Supplier } from '../../types';
 import { useI18n } from '../../i18n';
 import { normalizeNameForComparison } from '../../utils/nameNormalization';
+import { useOfflineData } from '../../contexts/OfflineDataContext';
+import { CURRENCY_LEGACY_FIELD_MAP } from '../../utils/currencyFieldMap';
+import { currencyService } from '../../services/currencyService';
 
 
 interface SupplierFormModalProps {
@@ -21,6 +24,7 @@ export default function SupplierFormModal({
   existingSuppliers = []
 }: SupplierFormModalProps) {
   const { t } = useI18n();
+  const { acceptedCurrencies } = useOfflineData();
   const [supplierForm, setSupplierForm] = useState<Partial<Supplier>>({
     name: '',
     phone: '',
@@ -224,72 +228,57 @@ export default function SupplierFormModal({
             <h3 className="md:col-span-2 text-lg font-semibold text-gray-900">{t('customers.balanceSettings')}</h3>
             
             {/* Initial Balance Fields - Only show when adding new supplier */}
-            {!editingSupplier && (
-              <>
-                <div>
-                  <label htmlFor="lb_balance" className="block text-sm font-medium text-gray-700">{t('customers.initialLBPBalance')}</label>
+            {!editingSupplier && acceptedCurrencies.map(code => {
+              const fields = CURRENCY_LEGACY_FIELD_MAP[code];
+              if (!fields) return null;
+              const decimals = currencyService.getMeta(code).decimals;
+              return (
+                <div key={`initial-${code}`}>
+                  <label htmlFor={fields.initial} className="block text-sm font-medium text-gray-700">
+                    {t('customers.initialBalanceFor', { currency: code }) || `Initial ${code} Balance`}
+                  </label>
                   <input
                     type="number"
-                    id="lb_balance"
-                    name="lb_balance"
-                    value={supplierForm.lb_balance || 0}
+                    id={fields.initial}
+                    name={fields.initial}
+                    value={(supplierForm[fields.initial] as number | undefined) ?? 0}
                     onChange={handleSupplierFormChange}
                     className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    step="0.01"
+                    step={decimals > 0 ? '0.01' : '1'}
                     min="0"
                   />
                 </div>
-                
-                <div>
-                  <label htmlFor="usd_balance" className="block text-sm font-medium text-gray-700">{t('customers.initialUSDBalance')}</label>
-                  <input
-                    type="number"
-                    id="usd_balance"
-                    name="usd_balance"
-                    value={supplierForm.usd_balance || 0}
-                    onChange={handleSupplierFormChange}
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    step="0.01"
-                    min="0"
-                  />
-                </div>
-              </>
-            )}
+              );
+            })}
 
             {/* Advance Payment Section - Optional for new suppliers */}
             <div className="md:col-span-2 pt-4 mt-4">
               <h3 className="text-sm font-medium text-gray-700 mb-3">{t('customers.initialAdvancePaymentOptional')}</h3>
               <p className="text-xs text-gray-500 mb-3">{t('customers.youCanAlsoManageAdvancesLaterFromTheSupplierAdvancesTabInAccounting')}</p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="advance-usd" className="block text-sm font-medium text-gray-700">{t('customers.advanceUSD')}</label>
-                  <input
-                    type="number"
-                    id="advance-usd"
-                    name="advance_usd_balance"
-                    min="0"
-                    step="0.01"
-                    value={supplierForm.advance_usd_balance || 0}
-                    onChange={handleSupplierFormChange}
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="0.00"
-                  />
-                </div>
-                
-                <div>
-                  <label htmlFor="advance-lbp" className="block text-sm font-medium text-gray-700">{t('customers.advanceLBP')}</label>
-                  <input
-                    type="number"
-                    id="advance-lbp"
-                    name="advance_lb_balance"
-                    min="0"
-                    step="1"
-                    value={supplierForm.advance_lb_balance || 0}
-                    onChange={handleSupplierFormChange}
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="0"
-                  />
-                </div>
+                {acceptedCurrencies.map(code => {
+                  const fields = CURRENCY_LEGACY_FIELD_MAP[code];
+                  if (!fields) return null;
+                  const decimals = currencyService.getMeta(code).decimals;
+                  return (
+                    <div key={`advance-${code}`}>
+                      <label htmlFor={`advance-${code.toLowerCase()}`} className="block text-sm font-medium text-gray-700">
+                        {t('customers.advanceFor', { currency: code }) || `Advance ${code}`}
+                      </label>
+                      <input
+                        type="number"
+                        id={`advance-${code.toLowerCase()}`}
+                        name={fields.advance}
+                        min="0"
+                        step={decimals > 0 ? '0.01' : '1'}
+                        value={(supplierForm[fields.advance] as number | undefined) ?? 0}
+                        onChange={handleSupplierFormChange}
+                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                        placeholder={decimals > 0 ? '0.00' : '0'}
+                      />
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>

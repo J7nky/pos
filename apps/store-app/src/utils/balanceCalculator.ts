@@ -1,30 +1,21 @@
 /**
  * BALANCE CALCULATOR UTILITY
- * 
- * Single source of truth for all balance calculations across the application.
- * This consolidates duplicate balance calculation logic that was scattered across:
- * - accountBalanceService
- * - balanceVerificationService  
- * - cashDrawerUpdateService
- * - journalService
- * 
- * Usage:
- * - Use for customer/supplier balance calculations
- * - Use for cash drawer balance calculations
- * - Use for journal entry balance calculations
+ *
+ * Single source of truth for transaction-side balance arithmetic.
+ * Currency-agnostic: every balance result is a `Partial<Record<CurrencyCode, number>>`
+ * keyed by whatever currencies appear in the input.
  */
+
+import type { CurrencyCode } from '@pos-platform/shared';
 
 export interface Transaction {
   type: string; // Can be: income, expense, sale, payment, credit_sale, etc.
   amount: number;
-  currency: 'USD' | 'LBP';
+  currency: CurrencyCode;
   created_at: string;
 }
 
-export interface BalanceResult {
-  USD: number;
-  LBP: number;
-}
+export type BalanceResult = Partial<Record<CurrencyCode, number>>;
 
 export interface RunningBalanceResult {
   balance: number;
@@ -34,42 +25,40 @@ export interface RunningBalanceResult {
 
 export class BalanceCalculator {
   /**
-   * Calculate balance from transactions for customers/suppliers
-   * 
+   * Calculate balance from transactions for customers/suppliers.
+   *
    * Rules:
-   * - For customers: income (payments) reduces balance, expenses (credit sales) increase it
-   * - For suppliers: expenses (payments to them) reduce balance, income increases it
+   *   - For customers: income (payments) reduces balance; expenses (credit sales) increase it.
+   *   - For suppliers: expenses (payments to them) reduce balance; income increases it.
    */
   static calculateFromTransactions(
     transactions: Transaction[],
     entityType: 'customer' | 'supplier'
   ): BalanceResult {
-    const balances: BalanceResult = { USD: 0, LBP: 0 };
+    const balances: BalanceResult = {};
 
     for (const txn of transactions) {
       const amount = txn.amount;
       const currency = txn.currency;
+      let multiplier = 0;
 
       if (entityType === 'customer') {
-        // For customers: income (payments) reduces balance, expenses (credit sales) increase it
-        const multiplier = txn.type === 'income' ? -1 : 1;
-        balances[currency] += amount * multiplier;
+        multiplier = txn.type === 'income' ? -1 : 1;
       } else if (entityType === 'supplier') {
-        // For suppliers: expenses (payments to them) reduce balance, income increases it
-        const multiplier = txn.type === 'expense' ? -1 : 1;
-        balances[currency] += amount * multiplier;
+        multiplier = txn.type === 'expense' ? -1 : 1;
+      } else {
+        continue;
       }
+
+      balances[currency] = (balances[currency] ?? 0) + amount * multiplier;
     }
 
     return balances;
   }
 
   /**
-   * Calculate running balance from transactions (e.g., for cash drawer)
-   * 
-   * @param transactions - Array of transactions
-   * @param openingBalance - Starting balance
-   * @returns Final balance after all transactions
+   * Calculate single-currency running balance (e.g. for cash drawer where
+   * all entries are already normalized to one currency).
    */
   static calculateRunningBalance(
     transactions: Transaction[],
@@ -80,15 +69,12 @@ export class BalanceCalculator {
     let lastTransactionDate: string | undefined;
 
     for (const trans of transactions) {
-      // Income types increase balance
       if (trans.type === 'income' || trans.type === 'sale' || trans.type === 'payment') {
         balance += trans.amount;
-      } 
-      // Expense types decrease balance
-      else if (trans.type === 'expense' || trans.type === 'refund' || trans.type === 'credit_sale') {
+      } else if (trans.type === 'expense' || trans.type === 'refund' || trans.type === 'credit_sale') {
         balance -= trans.amount;
       }
-      
+
       transactionCount++;
       lastTransactionDate = trans.created_at;
     }
@@ -101,32 +87,31 @@ export class BalanceCalculator {
   }
 
   /**
-   * Calculate balance by currency from transactions
+   * Calculate balance by currency from transactions.
    */
   static calculateByCurrency(
     transactions: Transaction[],
     entityType: 'customer' | 'supplier' | 'cash_drawer'
   ): BalanceResult {
     if (entityType === 'cash_drawer') {
-      // For cash drawer, just sum income - expense
       return this.calculateCashDrawerBalance(transactions);
     }
-    
+
     return this.calculateFromTransactions(transactions, entityType);
   }
 
   /**
-   * Calculate cash drawer balance (income - expense)
+   * Calculate cash drawer balance per currency (income - expense).
    */
   private static calculateCashDrawerBalance(transactions: Transaction[]): BalanceResult {
-    const balances: BalanceResult = { USD: 0, LBP: 0 };
+    const balances: BalanceResult = {};
 
     for (const txn of transactions) {
       const currency = txn.currency;
       if (txn.type === 'income') {
-        balances[currency] += txn.amount;
+        balances[currency] = (balances[currency] ?? 0) + txn.amount;
       } else if (txn.type === 'expense') {
-        balances[currency] -= txn.amount;
+        balances[currency] = (balances[currency] ?? 0) - txn.amount;
       }
     }
 
@@ -134,7 +119,7 @@ export class BalanceCalculator {
   }
 
   /**
-   * Calculate balance with opening balance
+   * Calculate balance starting from an opening balance map.
    */
   static calculateWithOpening(
     transactions: Transaction[],
@@ -142,15 +127,15 @@ export class BalanceCalculator {
     entityType: 'customer' | 'supplier'
   ): BalanceResult {
     const periodBalance = this.calculateFromTransactions(transactions, entityType);
-    
-    return {
-      USD: openingBalance.USD + periodBalance.USD,
-      LBP: openingBalance.LBP + periodBalance.LBP
-    };
+    const out: BalanceResult = { ...openingBalance };
+    for (const code of Object.keys(periodBalance) as CurrencyCode[]) {
+      out[code] = (out[code] ?? 0) + (periodBalance[code] ?? 0);
+    }
+    return out;
   }
 
   /**
-   * Verify balance matches expected value (within tolerance)
+   * Verify a calculated balance matches an expected stored value (within tolerance).
    */
   static verifyBalance(
     calculated: number,
@@ -166,20 +151,4 @@ export class BalanceCalculator {
       discrepancy
     };
   }
-
-  /**
-   * Get total balance across currencies (converted to single currency)
-   */
-  static getTotalBalance(
-    balance: BalanceResult,
-    exchangeRate: number,
-    targetCurrency: 'USD' | 'LBP' = 'USD'
-  ): number {
-    if (targetCurrency === 'USD') {
-      return balance.USD + (balance.LBP / exchangeRate);
-    } else {
-      return (balance.USD * exchangeRate) + balance.LBP;
-    }
-  }
 }
-

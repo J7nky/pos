@@ -582,6 +582,13 @@ const ar = {
         description: 'الوصف',
         transactionId: 'العملية',
         billId: 'الفاتورة'
+      },
+      accountTypes: {
+        asset: 'أصول',
+        liability: 'خصوم',
+        equity: 'حقوق الملكية',
+        revenue: 'إيرادات',
+        expense: 'مصاريف'
       }
     },
     balanceSheet: {
@@ -589,6 +596,7 @@ const ar = {
       loading: 'جاري تحميل الميزانية العمومية...',
       retry: 'إعادة المحاولة',
       showZeroBalances: 'إظهار الأرصدة الصفرية',
+      allAccounts: 'كل الحسابات',
       account: 'الحساب',
       amount: 'المبلغ',
       equation: 'الأصول = الخصوم + حقوق الملكية',
@@ -599,6 +607,31 @@ const ar = {
         current_liability: 'الخصوم المتداولة',
         non_current_liability: 'الخصوم غير المتداولة',
         equity: 'حقوق الملكية'
+      },
+      accounts: {
+        '1100': 'النقدية',
+        '1200': 'الذمم المدينة',
+        '1300': 'المخزون',
+        '1400': 'المصاريف المدفوعة مقدماً',
+        '1500': 'المعدات',
+        '2100': 'الذمم الدائنة',
+        '2200': 'الرواتب المستحقة',
+        '2300': 'قروض قصيرة الأجل',
+        '3100': 'حقوق الملكية',
+        '3200': 'الأرباح المحتجزة',
+        '4100': 'إيرادات المبيعات',
+        '4200': 'إيرادات الخدمات',
+        '4300': 'إيرادات أخرى',
+        '5100': 'تكلفة البضاعة المباعة',
+        '5200': 'مصاريف الرواتب',
+        '5300': 'مصاريف الإيجار',
+        '5400': 'مصاريف المرافق',
+        '5500': 'اللوازم المكتبية',
+        '5600': 'مصاريف التسويق',
+        '5700': 'الأتعاب المهنية',
+        '5800': 'الرسوم البنكية',
+        '5900': 'مصاريف متنوعة',
+        CYE: 'أرباح السنة الحالية'
       }
     }
   },
@@ -651,7 +684,11 @@ const ar = {
   },
   customers: {
     initialBalance: 'الرصيد الافتتاحي',
+    /** Parametric — pass `{ currency }`. Replaces initial{USD,LBP}Balance. */
+    initialBalanceFor: 'الرصيد الافتتاحي بـ{{currency}}',
+    /** @deprecated Use `initialBalanceFor`. */
     initialUSDBalance: 'الرصيد الافتتاحي بالدولار',
+    /** @deprecated Use `initialBalanceFor`. */
     initialLBPBalance: 'الرصيد الافتتاحي بالليرة اللبنانية',
     paymentDescriptionPlaceholder: 'مثال: دفعة للمنتجات, دفعة للعمولة, etc.',
     tryAdjustingTheDateRangeOrCheckingBackLater: 'حاول ضبط الفترة الزمنية أو التحقق مرة أخرى لاحقا',
@@ -695,7 +732,11 @@ const ar = {
     totalProfit: 'إجمالي الربح',
     noActiveAdvances: 'لا توجد سلفات مدفوعة للموردين',
     balanceSettings: 'إعدادات الرصيد',
+    /** Parametric — pass `{ currency }`. Replaces max{LBP,USD}Balance. */
+    maxBalanceFor: 'الحد الأقصى للرصيد بـ{{currency}} (اختياري)',
+    /** @deprecated Use `maxBalanceFor`. */
     maxLBPBalance: 'الحد الأقصى لرصيد بالليرة اللبنانية',
+    /** @deprecated Use `maxBalanceFor`. */
     maxUSDBalance: 'الحد الأقصى للرصيد بالدولار',
     noLimit: 'لا حدود',
     reviewDate: 'تاريخ المراجعة',
@@ -715,11 +756,19 @@ const ar = {
     supplierAdvancesTitle: 'الموردين المسلفين',
     initialAdvancePaymentOptional: 'سلفة اولية (اختياري)',
     youCanAlsoManageAdvancesLaterFromTheSupplierAdvancesTabInAccounting: 'يمكنك أيضا التعامل مع السلفات لاحقا من علامة التبويب المسلفات في المحاسبة.',
+    /** Parametric — pass `{ currency }`. Replaces advance{USD,LBP}. */
+    advanceFor: 'سلفة بـ{{currency}}',
+    /** @deprecated Use `advanceFor`. */
     advanceUSD: 'سلفة بالدولار',
+    /** @deprecated Use `advanceFor`. */
     advanceLBP: 'سلفة بالليرة اللبنانية',
     giveAdvance: 'إعطاء سلفة',
     deductAdvance: 'خصم سلفة',
+    /** Parametric — pass `{ currency }`. Replaces totalAdvances{USD,LBP}. */
+    totalAdvancesFor: 'إجمالي السلف بـ{{currency}}',
+    /** @deprecated Use `totalAdvancesFor`. */
     totalAdvancesUSD: 'إجمالي السلف بالدولار',
+    /** @deprecated Use `totalAdvancesFor`. */
     totalAdvancesLBP: 'إجمالي السلف بالليرة اللبنانية',
     supplierRecordAdvance: 'تسجيل سلفة',
     suppliersWithAdvances: 'الموردين المسلفين',
@@ -1034,7 +1083,17 @@ const ar = {
     sortByDate: 'التاريخ',
     sortByCustomer: 'الزبون',
     sortByProduct: 'المنتج',
+    sortBySupplier: 'المورد',
     sortByValue: 'القيمة',
+    allTab: 'الكل',
+    soldBillsTab: 'الفواتير المباعة',
+    receivedBillsTab: 'الفواتير المستلمة',
+    unitCost: 'سعر التكلفة',
+    totalCost: 'التكلفة الإجمالية',
+    searchPlaceholderSold: 'البحث بالعميل أو المنتج أو الحالة...',
+    searchPlaceholderReceived: 'البحث بالمورد أو المنتج أو الحالة...',
+    noSoldItems: 'لا توجد عناصر مباعة غير مسعرة',
+    noReceivedItems: 'لا توجد عناصر مستلمة غير مسعرة',
     status: 'الحالة',
     customer: 'الزبون',
     product: 'المنتج',

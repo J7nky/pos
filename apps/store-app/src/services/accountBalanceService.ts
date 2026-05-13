@@ -10,10 +10,11 @@ import { createId } from '../lib/db';
 import { getFiscalPeriodForDate } from '../utils/fiscalPeriod';
 import { getLocalDateString } from '../utils/dateUtils';
 import type { JournalEntry } from '../types/accounting';
+import type { CurrencyCode } from '@pos-platform/shared';
 
 export interface RunningBalance {
-  USD: number;
-  LBP: number;
+  /** Per-currency running balance. Keys are present only when the currency has activity. */
+  byCurrency: Partial<Record<CurrencyCode, number>>;
   lastTransactionDate: string;
   transactionCount: number;
 }
@@ -27,6 +28,29 @@ export interface BalanceCalculationResult {
     calculated: RunningBalance;
     difference: RunningBalance;
   };
+}
+
+function diffByCurrency(
+  a: Partial<Record<CurrencyCode, number>>,
+  b: Partial<Record<CurrencyCode, number>>
+): Partial<Record<CurrencyCode, number>> {
+  const out: Partial<Record<CurrencyCode, number>> = {};
+  const codes = new Set<CurrencyCode>([
+    ...(Object.keys(a) as CurrencyCode[]),
+    ...(Object.keys(b) as CurrencyCode[]),
+  ]);
+  for (const code of codes) {
+    out[code] = (a[code] ?? 0) - (b[code] ?? 0);
+  }
+  return out;
+}
+
+function maxAbsDiff(diff: Partial<Record<CurrencyCode, number>>): number {
+  let max = 0;
+  for (const value of Object.values(diff)) {
+    if (typeof value === 'number') max = Math.max(max, Math.abs(value));
+  }
+  return max;
 }
 
 /**
@@ -64,16 +88,15 @@ export class AccountBalanceService {
       // No longer using cached balance fields - all balances calculated from journals
       const { entityBalanceService } = await import('./entityBalanceService');
       const accountCode = entityType === 'supplier' ? '2100' : '1200';
-      
+
       const currentBalances = await entityBalanceService.getEntityBalances(
         entityId,
         accountCode as '1200' | '2100',
         true // Use snapshot optimization
       );
-      
+
       const cachedBalance: RunningBalance = {
-        USD: currentBalances.USD,
-        LBP: currentBalances.LBP,
+        byCurrency: { USD: currentBalances.USD, LBP: currentBalances.LBP },
         lastTransactionDate: currentBalances.lastCalculated,
         transactionCount: 0
       };
@@ -94,10 +117,12 @@ export class AccountBalanceService {
         dateRange
       );
 
-      // Check for discrepancies
-      const usdDiff = Math.abs(cachedBalance.USD - calculatedBalance.currentBalance.USD);
-      const lbpDiff = Math.abs(cachedBalance.LBP - calculatedBalance.currentBalance.LBP);
-      const hasDiscrepancy = usdDiff > 0.01 || lbpDiff > 0.01;
+      // Check for discrepancies across all currencies present in either map
+      const difference = diffByCurrency(
+        calculatedBalance.currentBalance.byCurrency,
+        cachedBalance.byCurrency
+      );
+      const hasDiscrepancy = maxAbsDiff(difference) > 0.01;
 
       const result: BalanceCalculationResult = {
         currentBalance: calculatedBalance.currentBalance,
@@ -110,19 +135,14 @@ export class AccountBalanceService {
           cached: cachedBalance,
           calculated: calculatedBalance.currentBalance,
           difference: {
-            USD: calculatedBalance.currentBalance.USD - cachedBalance.USD,
-            LBP: calculatedBalance.currentBalance.LBP - cachedBalance.LBP,
+            byCurrency: difference,
             lastTransactionDate: calculatedBalance.currentBalance.lastTransactionDate,
             transactionCount: calculatedBalance.currentBalance.transactionCount
           }
         };
 
         console.warn(`Balance discrepancy for ${entityType} ${entityId}:`, result.discrepancy);
-
-        // Auto-reconcile if requested
-        if (verifyBalance) {
-          await this.updateCachedBalance(entityType, entityId, calculatedBalance.currentBalance);
-        }
+        // Reconciliation is journal-derived; no scalar balance fields to write.
       }
 
       return result;
@@ -159,13 +179,7 @@ export class AccountBalanceService {
               const startDate = dateRange?.start || new Date(2020, 0, 1).toISOString(); // Default to beginning of system
               const endDate = dateRange?.end || now;
 
-              // Initialize balances
-              let runningBalanceUSD = 0;
-              let runningBalanceLBP = 0;
-              let openingBalanceUSD = 0;
-              let openingBalanceLBP = 0;
-              let transactionCount = 0;
-              let lastTransactionDate = startDate;
+              let openingByCurrency: Partial<Record<CurrencyCode, number>> = {};
 
               // Get all relevant transactions and sales
               const [transactions, sales] = await Promise.all([
@@ -177,29 +191,27 @@ export class AccountBalanceService {
               if (dateRange?.start) {
                 const openingTransactions = await this.getEntityTransactions(entityType, entityId, undefined, startDate);
                 const openingSales = await this.getEntitySales(entityType, entityId, undefined, startDate);
-                
+
                 const openingResult = this.processTransactionsAndSales(entityType, openingTransactions, openingSales);
-                openingBalanceUSD = openingResult.usdBalance;
-                openingBalanceLBP = openingResult.lbpBalance;
+                openingByCurrency = openingResult.byCurrency;
               }
 
               // Process transactions and sales for the period
               const periodResult = this.processTransactionsAndSales(entityType, transactions, sales);
-              runningBalanceUSD = openingBalanceUSD + periodResult.usdBalance;
-              runningBalanceLBP = openingBalanceLBP + periodResult.lbpBalance;
-              transactionCount = periodResult.transactionCount;
-              lastTransactionDate = periodResult.lastTransactionDate || lastTransactionDate;
+
+              const runningByCurrency: Partial<Record<CurrencyCode, number>> = { ...openingByCurrency };
+              for (const code of Object.keys(periodResult.byCurrency) as CurrencyCode[]) {
+                runningByCurrency[code] = (runningByCurrency[code] ?? 0) + (periodResult.byCurrency[code] ?? 0);
+              }
 
               return {
                 currentBalance: {
-                  USD: runningBalanceUSD,
-                  LBP: runningBalanceLBP,
-                  lastTransactionDate,
-                  transactionCount
+                  byCurrency: runningByCurrency,
+                  lastTransactionDate: periodResult.lastTransactionDate || startDate,
+                  transactionCount: periodResult.transactionCount
                 },
                 openingBalance: {
-                  USD: openingBalanceUSD,
-                  LBP: openingBalanceLBP,
+                  byCurrency: openingByCurrency,
                   lastTransactionDate: startDate,
                   transactionCount: 0
                 }
@@ -224,25 +236,31 @@ export class AccountBalanceService {
     transactions: Transaction[],
     sales: LocalSaleItem[]
   ): {
-    usdBalance: number;
-    lbpBalance: number;
+    byCurrency: Partial<Record<CurrencyCode, number>>;
     transactionCount: number;
     lastTransactionDate?: string;
   } {
     // Use BalanceCalculator for consistent balance calculation
-    const balanceResult = BalanceCalculator.calculateFromTransactions(transactions, entityType);
-    
+    const byCurrency: Partial<Record<CurrencyCode, number>> = {
+      ...BalanceCalculator.calculateFromTransactions(
+        transactions as unknown as import('../utils/balanceCalculator').Transaction[],
+        entityType
+      )
+    };
+
     let transactionCount = transactions.length;
-    let lastTransactionDate: string | undefined = transactions.length > 0 
-      ? transactions[transactions.length - 1].created_at 
+    let lastTransactionDate: string | undefined = transactions.length > 0
+      ? transactions[transactions.length - 1].created_at
       : undefined;
 
-    // Process sales (only for customers, creates debt)
+    // Process credit sales (only for customers — they create debt in the
+    // bill's currency, not assumed LBP).
     if (entityType === 'customer') {
       sales.forEach(sale => {
         if (sale.payment_method === 'credit') {
-          // Credit sales increase customer debt
-          balanceResult.LBP += sale.received_value;
+          const saleCurrency = ((sale as unknown as { currency?: CurrencyCode }).currency
+            ?? 'USD') as CurrencyCode;
+          byCurrency[saleCurrency] = (byCurrency[saleCurrency] ?? 0) + sale.received_value;
           transactionCount++;
           lastTransactionDate = sale.created_at;
         }
@@ -254,8 +272,7 @@ export class AccountBalanceService {
     // This can be handled in a separate method if needed
 
     return {
-      usdBalance: balanceResult.USD,
-      lbpBalance: balanceResult.LBP,
+      byCurrency,
       transactionCount,
       lastTransactionDate
     };
@@ -326,25 +343,21 @@ export class AccountBalanceService {
   }
 
   /**
-   * Update cached balance in entities table
-   * Updated to use entities table instead of legacy customers/suppliers tables
+   * @deprecated Entity balance scalar columns were removed in Layer 7/8.
+   * Balances are now derived directly from journal entries (account 1100/
+   * 1200/2100 etc.) via `entityBalanceService` — no cached fields exist
+   * to update. Kept as a no-op so legacy call sites compile.
    */
   private async updateCachedBalance(
     entityType: 'customer' | 'supplier',
     entityId: string,
-    balance: RunningBalance
+    _balance: RunningBalance
   ): Promise<void> {
-    const updateData = {
-      usd_balance: balance.USD,
-      lb_balance: balance.LBP,
-      updated_at: new Date().toISOString(),
-      _synced: false
-    };
-
-    // Update unified entities table
-    await getDB().entities.update(entityId, updateData);
-
-    console.log(`Updated cached balance for ${entityType} ${entityId}:`, balance);
+    if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
+      console.debug(
+        `updateCachedBalance is a no-op (journal-derived balances): ${entityType} ${entityId}`
+      );
+    }
   }
 
   /**
@@ -457,7 +470,7 @@ export class AccountBalanceService {
       // Create opposite transaction using transactionService
       const reversalDescription = `Reversal of ${originalTransaction.description} - Reason: ${reason}`;
       const reversalAmount = originalTransaction.amount;
-      const reversalCurrency = originalTransaction.currency as 'USD' | 'LBP';
+      const reversalCurrency = originalTransaction.currency as CurrencyCode;
       
       let reversalResult;
       

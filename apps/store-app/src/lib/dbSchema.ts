@@ -2,7 +2,7 @@ import type { Transaction as DexieTransaction } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
 import type { SyncMetadata, PendingSync } from '../types';
 
-export const CURRENT_DB_VERSION = 60;
+export const CURRENT_DB_VERSION = 62;
 
 export const V54_STORES = {
   stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
@@ -103,6 +103,39 @@ export const V59_STORES = {
 export const V60_STORES = {
   journal_entries:
     'id, store_id, branch_id, transaction_id, entity_id, account_code, posted_date, bill_id, reversal_of_journal_entry_id, transfer_group_id, created_at, [store_id+branch_id], [store_id+account_code], [store_id+transfer_group_id], [entity_id+account_code], [transaction_id], [bill_id], [reversal_of_journal_entry_id], _synced, _deleted',
+} as const;
+
+/**
+ * v61 (018-currency-dehardcode, Layer 7): back-fill `balances` /
+ * `advance_balances` / `max_balances` JSONB maps on entities from the
+ * deprecated lb_balance/usd_balance/advance_*_balance scalar columns.
+ * Entities table has no new indexes — JSONB lookups are not range-queried.
+ */
+export const V61_STORES = {} as const;
+
+/**
+ * v62 (018-currency-dehardcode, Layer 8 finalization): drop the deprecated
+ * USD/LBP scalar columns from journal_entries and balance_snapshots, and
+ * remove balance_usd/balance_lbp from the balance_snapshots index. The
+ * JSONB `amounts` and `balances` maps are now the only source of
+ * per-currency data. Sister cleanup on entities scalar balance fields.
+ */
+export const V62_STORES = {
+  balance_snapshots:
+    'id, store_id, branch_id, account_code, entity_id, snapshot_date, snapshot_type, verified, created_at, [store_id+branch_id], [store_id+account_code+entity_id+snapshot_date], [store_id+account_code+entity_id], [store_id+snapshot_date+snapshot_type], [store_id+snapshot_date], _synced, _deleted',
+} as const;
+
+/**
+ * v63: local-only offline cache for product images. `product.image` keeps
+ * the canonical URL (often a remote Supabase Storage link); on first render
+ * the URL is fetched once, converted to a data URI, and stashed here so
+ * subsequent table renders, edits, and deletes never hit the network.
+ *
+ * This table is NOT synced to Supabase — it is a per-device blob cache.
+ * `source_url` lets us invalidate the cache when the upstream URL changes.
+ */
+export const V63_STORES = {
+  product_image_cache: 'product_id, source_url, cached_at',
 } as const;
 
 export async function upgradeV54(_tx: DexieTransaction): Promise<void> {
@@ -238,4 +271,93 @@ export async function upgradeV59(tx: DexieTransaction): Promise<void> {
 export async function upgradeV60(_tx: DexieTransaction): Promise<void> {
   console.log('🔧 Migrating database schema v59 → v60 (journal transfer_group_id index)');
   console.log('   ✅ v60 migration complete');
+}
+
+export async function upgradeV61(tx: DexieTransaction): Promise<void> {
+  console.log('🔧 Migrating database schema v60 → v61 (entity balances/advance/max JSONB maps)');
+
+  await tx
+    .table('entities')
+    .toCollection()
+    .modify((row: Record<string, unknown>) => {
+      const existingBalances = row.balances as Record<string, number> | undefined;
+      if (!existingBalances || Object.keys(existingBalances).length === 0) {
+        const balances: Record<string, number> = {};
+        const usd = Number(row.usd_balance ?? 0) || 0;
+        const lbp = Number(row.lb_balance ?? 0) || 0;
+        if (usd !== 0) balances.USD = usd;
+        if (lbp !== 0) balances.LBP = lbp;
+        row.balances = balances;
+      }
+
+      const existingAdvances = row.advance_balances as Record<string, number> | undefined;
+      if (!existingAdvances || Object.keys(existingAdvances).length === 0) {
+        const advances: Record<string, number> = {};
+        const advUsd = Number(row.advance_usd_balance ?? 0) || 0;
+        const advLbp = Number(row.advance_lb_balance ?? 0) || 0;
+        if (advUsd !== 0) advances.USD = advUsd;
+        if (advLbp !== 0) advances.LBP = advLbp;
+        row.advance_balances = advances;
+      }
+
+      const existingMax = row.max_balances as Record<string, number> | undefined;
+      if (!existingMax || Object.keys(existingMax).length === 0) {
+        const maxes: Record<string, number> = {};
+        const maxUsd = Number(row.usd_max_balance ?? 0) || 0;
+        const maxLbp = Number(row.lb_max_balance ?? 0) || 0;
+        if (maxUsd !== 0) maxes.USD = maxUsd;
+        if (maxLbp !== 0) maxes.LBP = maxLbp;
+        row.max_balances = maxes;
+      }
+    });
+
+  console.log('   ✅ v61 migration complete');
+}
+
+export async function upgradeV62(tx: DexieTransaction): Promise<void> {
+  console.log('🔧 Migrating database schema v61 → v62 (drop legacy USD/LBP scalar columns)');
+
+  // Strip legacy scalar fields from journal_entries — `amounts` JSONB
+  // (populated in v59) is now the only carrier.
+  await tx
+    .table('journal_entries')
+    .toCollection()
+    .modify((row: Record<string, unknown>) => {
+      delete row.debit_usd;
+      delete row.credit_usd;
+      delete row.debit_lbp;
+      delete row.credit_lbp;
+    });
+
+  // Strip legacy scalar fields from balance_snapshots — `balances` JSONB
+  // (populated in v59) is now the only carrier. The Dexie store-spec
+  // for V62 also drops the now-unused balance_usd/balance_lbp indexes.
+  await tx
+    .table('balance_snapshots')
+    .toCollection()
+    .modify((row: Record<string, unknown>) => {
+      delete row.balance_usd;
+      delete row.balance_lbp;
+    });
+
+  // Sister cleanup on entities — scalar mirrors of the JSONB balance maps
+  // populated in v61. Removing them now since no production data exists.
+  await tx
+    .table('entities')
+    .toCollection()
+    .modify((row: Record<string, unknown>) => {
+      delete row.lb_balance;
+      delete row.usd_balance;
+      delete row.advance_lb_balance;
+      delete row.advance_usd_balance;
+      delete row.lb_max_balance;
+      delete row.usd_max_balance;
+    });
+
+  console.log('   ✅ v62 migration complete');
+}
+
+export async function upgradeV63(_tx: DexieTransaction): Promise<void> {
+  console.log('🔧 Migrating database schema v62 → v63 (product_image_cache local-only table)');
+  console.log('   ✅ v63 migration complete');
 }

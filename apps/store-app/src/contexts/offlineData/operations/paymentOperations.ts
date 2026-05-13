@@ -8,6 +8,7 @@ import { getDB, createId } from '../../../lib/db';
 import type { Transaction } from '../../../types';
 import { transactionService } from '../../../services/transactionService';
 import { journalService } from '../../../services/journalService';
+import { currencyService } from '../../../services/currencyService';
 import { reminderMonitoringService } from '../../../services/reminderMonitoringService';
 import { BranchAccessValidationService } from '../../../services/branchAccessValidationService';
 import { getAccountMapping, getJournalDescription } from '../../../utils/accountMapping';
@@ -20,13 +21,58 @@ import type { CashDrawerAtomicResult } from './cashDrawerTransactionOperations';
 import type { MultilingualString } from '../../../utils/multilingual';
 import { withUndoOperation } from './withUndoOperation';
 
-// ─── helper (used only in supplier advance functions) ──────────────────────
-function getSupplierAdvanceBalances(supplier: any) {
-  const supplierData = (supplier.supplier_data as any) || {};
+// ─── per-currency advance balance helpers ──────────────────────────────────
+
+/**
+ * Read the per-currency advance-balance map from a supplier's
+ * `supplier_data` JSONB blob. Prefers the new `advance_balances` map and
+ * falls back to legacy `advance_lb_balance` / `advance_usd_balance`
+ * scalars when the map is empty (rows written before Tier 2).
+ */
+function getSupplierAdvanceBalanceMap(
+  supplier: any
+): Partial<Record<CurrencyCode, number>> {
+  const supplierData = (supplier?.supplier_data as Record<string, unknown>) || {};
+  const map = supplierData.advance_balances as Partial<Record<CurrencyCode, number>> | undefined;
+  if (map && typeof map === 'object' && Object.keys(map).length > 0) return { ...map };
+
+  const legacy: Partial<Record<CurrencyCode, number>> = {};
+  const lbp = Number(supplierData.advance_lb_balance ?? 0) || 0;
+  const usd = Number(supplierData.advance_usd_balance ?? 0) || 0;
+  if (lbp !== 0) legacy.LBP = lbp;
+  if (usd !== 0) legacy.USD = usd;
+  return legacy;
+}
+
+/**
+ * Build a `supplier_data` update object that mirrors the new map to the
+ * legacy scalar fields so older readers keep working.
+ */
+function buildSupplierAdvanceUpdate(
+  supplier: any,
+  newAdvanceBalances: Partial<Record<CurrencyCode, number>>,
+): Record<string, unknown> {
+  const supplierData = (supplier?.supplier_data as Record<string, unknown>) || {};
   return {
-    advance_lb_balance: supplierData.advance_lb_balance || 0,
-    advance_usd_balance: supplierData.advance_usd_balance || 0
+    ...supplierData,
+    advance_balances: newAdvanceBalances,
+    advance_lb_balance: newAdvanceBalances.LBP ?? 0,
+    advance_usd_balance: newAdvanceBalances.USD ?? 0,
   };
+}
+
+/**
+ * Convert any source currency into the cash-drawer's canonical currency
+ * for posting. Falls back to 1:1 when no rate is available (single-currency
+ * stores).
+ */
+function toCashDrawerAmount(
+  amount: number,
+  fromCurrency: CurrencyCode,
+  cashDrawerCurrency: CurrencyCode,
+): number {
+  if (fromCurrency === cashDrawerCurrency) return amount;
+  return currencyService.safeConvert(amount, fromCurrency, cashDrawerCurrency);
 }
 
 // ─── Deps interfaces ────────────────────────────────────────────────────────
@@ -240,7 +286,7 @@ export async function processEmployeePayment(
     }
 
     const descriptionPart = description ? `: ${description}` : '';
-    const amountPart = currency === 'USD' ? ` ($${numAmount.toFixed(2)} USD)` : '';
+    const amountPart = ` (${currencyService.format(numAmount, currency)})`;
     const transactionDescription: MultilingualString = {
       en: i18n.en.payments?.employeePayment
         ?.replace('{{employeeName}}', employee.name)
@@ -308,8 +354,10 @@ export async function processEmployeePayment(
           metadata: {
             payment_type: 'employee_salary',
             original_currency: currency,
-            cash_drawer_amount: currency === 'USD' ? numAmount * exchangeRate : numAmount,
-            exchange_rate: currency === 'USD' ? exchangeRate : 1
+            // Cash-drawer canonical currency is LBP in this code path —
+            // convert non-LBP amounts to LBP for the metadata snapshot.
+            cash_drawer_amount: toCashDrawerAmount(numAmount, currency, 'LBP'),
+            exchange_rate: currency === 'LBP' ? 1 : exchangeRate
           },
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
@@ -322,8 +370,8 @@ export async function processEmployeePayment(
           transactionId,
           debitAccount: '2200',
           creditAccount: '1100',
-          amountUSD: currency === 'USD' ? numAmount : 0,
-          amountLBP: currency === 'LBP' ? numAmount : 0,
+          amount: numAmount,
+          currency,
           entityId: employeeId,
           description: typeof transactionDescription === 'string'
             ? transactionDescription
@@ -371,23 +419,16 @@ export async function processSupplierAdvance(
   const supplier = suppliers.find(s => s.id === supplierId);
   if (!supplier) throw new Error('Supplier not found');
 
-  const { advance_lb_balance: currentAdvanceLBP, advance_usd_balance: currentAdvanceUSD } = getSupplierAdvanceBalances(supplier);
+  const previousAdvanceMap = getSupplierAdvanceBalanceMap(supplier);
+  const currentInCurrency = previousAdvanceMap[currency] ?? 0;
 
-  let newAdvanceBalance = 0;
-  let updateData: any = {};
+  const newAdvanceBalance = type === 'give'
+    ? currentInCurrency + amount
+    : currentInCurrency - amount;
+  if (newAdvanceBalance < 0) throw new Error('Cannot deduct more than the current advance balance');
 
-  if (currency === 'LBP') {
-    newAdvanceBalance = type === 'give' ? currentAdvanceLBP + amount : currentAdvanceLBP - amount;
-    if (newAdvanceBalance < 0) throw new Error('Cannot deduct more than the current advance balance');
-    updateData.supplier_data = { ...(supplier.supplier_data as any || {}), advance_lb_balance: newAdvanceBalance };
-  } else {
-    newAdvanceBalance = type === 'give' ? currentAdvanceUSD + amount : currentAdvanceUSD - amount;
-    if (newAdvanceBalance < 0) throw new Error('Cannot deduct more than the current advance balance');
-    updateData.supplier_data = { ...(supplier.supplier_data as any || {}), advance_usd_balance: newAdvanceBalance };
-  }
-
-  const previousAdvanceLBP = currentAdvanceLBP;
-  const previousAdvanceUSD = currentAdvanceUSD;
+  const newAdvanceMap: Partial<Record<CurrencyCode, number>> = { ...previousAdvanceMap, [currency]: newAdvanceBalance };
+  const updateData: any = { supplier_data: buildSupplierAdvanceUpdate(supplier, newAdvanceMap) };
 
   let previousCashDrawerBalance: number | undefined;
   if (type === 'give') {
@@ -432,7 +473,7 @@ export async function processSupplierAdvance(
       reversal_of_transaction_id: null,
       metadata: {
         correlationId: createId(), source: 'offline', module: 'supplier_management',
-        advanceType: type, reviewDate: params.reviewDate, previousAdvanceLBP, previousAdvanceUSD, newAdvanceBalance
+        advanceType: type, reviewDate: params.reviewDate, previousAdvanceMap, newAdvanceBalance
       }
     };
 
@@ -459,10 +500,13 @@ export async function processSupplierAdvance(
     });
 
     if (type === 'give') {
-      const amountInLBP = currency === 'USD' ? amount * exchangeRate : amount;
+      const cashAmount = toCashDrawerAmount(amount, currency, 'LBP');
+      const formattedOriginal = currency === 'LBP'
+        ? ''
+        : ` (${currencyService.format(amount, currency)})`;
       cashDrawerResult = await createCashDrawerExpenseAtomic(
-        amountInLBP, 'LBP',
-        `Advance payment to ${supplier.name}${currency === 'USD' ? ` ($${amount.toFixed(2)} USD)` : ''}`,
+        cashAmount, 'LBP',
+        `Advance payment to ${supplier.name}${formattedOriginal}`,
         generateAdvanceReference(),
         supplierId
       );
@@ -483,7 +527,7 @@ export async function processSupplierAdvance(
         remind_before_days: [7, 3, 1, 0],
         status: 'pending',
         title: `Review Advance for ${supplier.name}`,
-        description: `Review the ${currency === 'USD' ? `$${amount.toFixed(2)}` : `${Math.round(amount).toLocaleString()} ل.ل`} advance given to ${supplier.name}.`,
+        description: `Review the ${currencyService.format(amount, currency)} advance given to ${supplier.name}.`,
         priority: 'medium',
         action_url: '/accounting?tab=supplier-advances',
         metadata: { transaction_id: transactionId, supplier_id: supplierId, supplier_name: supplier.name, amount, currency, advance_date: params.date, advance_type: 'give' },
@@ -501,10 +545,7 @@ export async function processSupplierAdvance(
       {
         op: 'update', table: 'entities', id: supplierId,
         changes: {
-          supplier_data: {
-            ...(supplier.supplier_data as any || {}),
-            ...(currency === 'LBP' ? { advance_lb_balance: previousAdvanceLBP } : { advance_usd_balance: previousAdvanceUSD })
-          },
+          supplier_data: buildSupplierAdvanceUpdate(supplier, previousAdvanceMap),
           _synced: false
         }
       }
@@ -539,19 +580,20 @@ export async function deleteSupplierAdvance(
   if (!supplier) throw new Error('Supplier not found');
 
   const wasGiveAdvance = transaction.type === 'expense';
-  const { advance_lb_balance: previousAdvanceLBP, advance_usd_balance: previousAdvanceUSD } = getSupplierAdvanceBalances(supplier);
-  const { advance_lb_balance: currentAdvanceLBP, advance_usd_balance: currentAdvanceUSD } = getSupplierAdvanceBalances(supplier);
-  let updateData: any = {};
+  const txCurrency = transaction.currency as CurrencyCode;
+  const previousAdvanceMap = getSupplierAdvanceBalanceMap(supplier);
+  const currentInCurrency = previousAdvanceMap[txCurrency] ?? 0;
 
-  if (transaction.currency === 'LBP') {
-    const newBalance = wasGiveAdvance ? currentAdvanceLBP - transaction.amount : currentAdvanceLBP + transaction.amount;
-    if (newBalance < 0) throw new Error('Cannot delete: would result in negative advance balance');
-    updateData.supplier_data = { ...(supplier.supplier_data as any || {}), advance_lb_balance: newBalance };
-  } else {
-    const newBalance = wasGiveAdvance ? currentAdvanceUSD - transaction.amount : currentAdvanceUSD + transaction.amount;
-    if (newBalance < 0) throw new Error('Cannot delete: would result in negative advance balance');
-    updateData.supplier_data = { ...(supplier.supplier_data as any || {}), advance_usd_balance: newBalance };
-  }
+  const newBalanceForCurrency = wasGiveAdvance
+    ? currentInCurrency - transaction.amount
+    : currentInCurrency + transaction.amount;
+  if (newBalanceForCurrency < 0) throw new Error('Cannot delete: would result in negative advance balance');
+
+  const newAdvanceMap: Partial<Record<CurrencyCode, number>> = {
+    ...previousAdvanceMap,
+    [txCurrency]: newBalanceForCurrency
+  };
+  const updateData: any = { supplier_data: buildSupplierAdvanceUpdate(supplier, newAdvanceMap) };
 
   let previousCashDrawerBalance: number | undefined;
   if (wasGiveAdvance) {
@@ -569,9 +611,9 @@ export async function deleteSupplierAdvance(
     await getDB().transactions.update(transactionId, { _deleted: true, _synced: false });
 
     if (wasGiveAdvance) {
-      const amountInLBP = transaction.currency === 'USD' ? transaction.amount * exchangeRate : transaction.amount;
+      const cashAmount = toCashDrawerAmount(transaction.amount, txCurrency, 'LBP');
       cashDrawerResult = await createCashDrawerPaymentAtomic(
-        amountInLBP, 'LBP',
+        cashAmount, 'LBP',
         `Reversal: Deleted advance payment to ${supplier.name}`,
         generateReversalReference(),
         transaction.entity_id!
@@ -590,10 +632,7 @@ export async function deleteSupplierAdvance(
       {
         op: 'update', table: 'entities', id: transaction.entity_id!,
         changes: {
-          supplier_data: {
-            ...(supplier.supplier_data as any || {}),
-            ...(transaction.currency === 'LBP' ? { advance_lb_balance: previousAdvanceLBP } : { advance_usd_balance: previousAdvanceUSD })
-          },
+          supplier_data: buildSupplierAdvanceUpdate(supplier, previousAdvanceMap),
           _synced: false
         }
       }
@@ -661,34 +700,36 @@ export async function updateSupplierAdvance(
 
   const oldWasGiveAdvance = oldTransaction.type === 'expense';
   const newIsGiveAdvance = updates.type === 'give';
+  const oldTxCurrency = oldTransaction.currency as CurrencyCode;
+  const newTxCurrency = updates.currency;
 
-  const { advance_lb_balance: oldPreviousAdvanceLBP, advance_usd_balance: oldPreviousAdvanceUSD } = getSupplierAdvanceBalances(oldSupplier);
-  const newSupplierBalances = getSupplierAdvanceBalances(newSupplier);
-  const newPreviousAdvanceLBP = updates.supplierId !== oldTransaction.entity_id ? newSupplierBalances.advance_lb_balance : oldPreviousAdvanceLBP;
-  const newPreviousAdvanceUSD = updates.supplierId !== oldTransaction.entity_id ? newSupplierBalances.advance_usd_balance : oldPreviousAdvanceUSD;
+  const oldPreviousAdvanceMap = getSupplierAdvanceBalanceMap(oldSupplier);
+  const newSupplierAdvanceMap = getSupplierAdvanceBalanceMap(newSupplier);
+  const newPreviousAdvanceMap = updates.supplierId !== oldTransaction.entity_id
+    ? newSupplierAdvanceMap
+    : oldPreviousAdvanceMap;
 
-  const { advance_lb_balance: oldCurrentAdvanceLBP, advance_usd_balance: oldCurrentAdvanceUSD } = getSupplierAdvanceBalances(oldSupplier);
-  let oldReverseData: any = {};
+  const oldCurrentInCurrency = oldPreviousAdvanceMap[oldTxCurrency] ?? 0;
+  const reversedBalance = oldWasGiveAdvance
+    ? oldCurrentInCurrency - oldTransaction.amount
+    : oldCurrentInCurrency + oldTransaction.amount;
+  if (reversedBalance < 0) throw new Error('Cannot update: reversing old transaction would result in negative balance');
 
-  if (oldTransaction.currency === 'LBP') {
-    const reversedBalance = oldWasGiveAdvance ? oldCurrentAdvanceLBP - oldTransaction.amount : oldCurrentAdvanceLBP + oldTransaction.amount;
-    if (reversedBalance < 0) throw new Error('Cannot update: reversing old transaction would result in negative balance');
-    oldReverseData.supplier_data = { ...(oldSupplier.supplier_data as any || {}), advance_lb_balance: reversedBalance };
-  } else {
-    const reversedBalance = oldWasGiveAdvance ? oldCurrentAdvanceUSD - oldTransaction.amount : oldCurrentAdvanceUSD + oldTransaction.amount;
-    if (reversedBalance < 0) throw new Error('Cannot update: reversing old transaction would result in negative balance');
-    oldReverseData.supplier_data = { ...(oldSupplier.supplier_data as any || {}), advance_usd_balance: reversedBalance };
-  }
+  const oldReverseAdvanceMap: Partial<Record<CurrencyCode, number>> = {
+    ...oldPreviousAdvanceMap,
+    [oldTxCurrency]: reversedBalance
+  };
+  const oldReverseData: any = { supplier_data: buildSupplierAdvanceUpdate(oldSupplier, oldReverseAdvanceMap) };
 
   let oldCashDrawerResult: any = null;
   let oldPreviousCashDrawerBalance: number | undefined;
   let oldCashDrawerAccountId: string | undefined;
 
   if (oldWasGiveAdvance) {
-    const oldAmountInLBP = oldTransaction.currency === 'USD' ? oldTransaction.amount * exchangeRate : oldTransaction.amount;
+    const oldCashAmount = toCashDrawerAmount(oldTransaction.amount, oldTxCurrency, 'LBP');
     oldPreviousCashDrawerBalance = await getCurrentCashDrawerBalance(userStoreId || '');
     oldCashDrawerResult = await processCashDrawerTransaction({
-      type: 'payment', amount: oldAmountInLBP, currency: 'LBP',
+      type: 'payment', amount: oldCashAmount, currency: 'LBP',
       description: 'payments.reversalUpdatedAdvancePayment',
       reference: generateReversalReference(),
       supplierId: oldTransaction.entity_id!,
@@ -702,18 +743,18 @@ export async function updateSupplierAdvance(
     ? { ...oldSupplier, ...oldReverseData }
     : newSupplier;
 
-  const { advance_lb_balance: newCurrentAdvanceLBP, advance_usd_balance: newCurrentAdvanceUSD } = getSupplierAdvanceBalances(supplierToUpdate);
-  let newUpdateData: any = {};
+  const newCurrentAdvanceMap = getSupplierAdvanceBalanceMap(supplierToUpdate);
+  const newCurrentInCurrency = newCurrentAdvanceMap[newTxCurrency] ?? 0;
+  const newBalance = newIsGiveAdvance
+    ? newCurrentInCurrency + updates.amount
+    : newCurrentInCurrency - updates.amount;
+  if (newBalance < 0) throw new Error('Cannot update: would result in negative advance balance');
 
-  if (updates.currency === 'LBP') {
-    const newBalance = newIsGiveAdvance ? newCurrentAdvanceLBP + updates.amount : newCurrentAdvanceLBP - updates.amount;
-    if (newBalance < 0) throw new Error('Cannot update: would result in negative advance balance');
-    newUpdateData.supplier_data = { ...(supplierToUpdate.supplier_data as any || {}), advance_lb_balance: newBalance };
-  } else {
-    const newBalance = newIsGiveAdvance ? newCurrentAdvanceUSD + updates.amount : newCurrentAdvanceUSD - updates.amount;
-    if (newBalance < 0) throw new Error('Cannot update: would result in negative advance balance');
-    newUpdateData.supplier_data = { ...(supplierToUpdate.supplier_data as any || {}), advance_usd_balance: newBalance };
-  }
+  const newAdvanceMap: Partial<Record<CurrencyCode, number>> = {
+    ...newCurrentAdvanceMap,
+    [newTxCurrency]: newBalance
+  };
+  const newUpdateData: any = { supplier_data: buildSupplierAdvanceUpdate(supplierToUpdate, newAdvanceMap) };
 
   if (updates.supplierId !== oldTransaction.entity_id) {
     await updateSupplier(oldTransaction.entity_id!, oldReverseData);
@@ -725,10 +766,10 @@ export async function updateSupplierAdvance(
   let newCashDrawerAccountId: string | undefined;
 
   if (newIsGiveAdvance) {
-    const newAmountInLBP = updates.currency === 'USD' ? updates.amount * exchangeRate : updates.amount;
+    const newCashAmount = toCashDrawerAmount(updates.amount, newTxCurrency, 'LBP');
     newPreviousCashDrawerBalance = await getCurrentCashDrawerBalance(userStoreId || '');
     newCashDrawerResult = await processCashDrawerTransaction({
-      type: 'expense', amount: newAmountInLBP, currency: 'LBP',
+      type: 'expense', amount: newCashAmount, currency: 'LBP',
       description: 'payments.advancePayment',
       reference: generateAdvanceReference(),
       supplierId: updates.supplierId,
@@ -771,10 +812,7 @@ export async function updateSupplierAdvance(
     {
       op: 'update', table: 'entities', id: oldTransaction.entity_id!,
       changes: {
-        supplier_data: {
-          ...(oldSupplier.supplier_data as any || {}),
-          ...(oldTransaction.currency === 'LBP' ? { advance_lb_balance: oldPreviousAdvanceLBP } : { advance_usd_balance: oldPreviousAdvanceUSD })
-        },
+        supplier_data: buildSupplierAdvanceUpdate(oldSupplier, oldPreviousAdvanceMap),
         _synced: false
       }
     }
@@ -785,10 +823,7 @@ export async function updateSupplierAdvance(
     undoSteps.push({
       op: 'update', table: 'entities', id: updates.supplierId,
       changes: {
-        supplier_data: {
-          ...(newSupplier.supplier_data as any || {}),
-          ...(updates.currency === 'LBP' ? { advance_lb_balance: newPreviousAdvanceLBP } : { advance_usd_balance: newPreviousAdvanceUSD })
-        },
+        supplier_data: buildSupplierAdvanceUpdate(newSupplier, newPreviousAdvanceMap),
         _synced: false
       }
     });

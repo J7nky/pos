@@ -466,12 +466,20 @@ const en = {
         transactionId: 'Transaction',
         billId: 'Bill',
       },
+      accountTypes: {
+        asset: 'Asset',
+        liability: 'Liability',
+        equity: 'Equity',
+        revenue: 'Revenue',
+        expense: 'Expense',
+      },
     },
     balanceSheet: {
       title: 'Balance Sheet',
       loading: 'Loading balance sheet...',
       retry: 'Retry',
       showZeroBalances: 'Show zero balances',
+      allAccounts: 'All Accounts',
       account: 'Account',
       amount: 'Amount',
       equation: 'Assets = Liabilities + Equity',
@@ -482,6 +490,31 @@ const en = {
         current_liability: 'Current Liabilities',
         non_current_liability: 'Non-Current Liabilities',
         equity: 'Equity',
+      },
+      accounts: {
+        '1100': 'Cash',
+        '1200': 'Accounts Receivable',
+        '1300': 'Inventory',
+        '1400': 'Prepaid Expenses',
+        '1500': 'Equipment',
+        '2100': 'Accounts Payable',
+        '2200': 'Salaries Payable',
+        '2300': 'Short-term Loans',
+        '3100': "Owner's Equity",
+        '3200': 'Retained Earnings',
+        '4100': 'Sales Revenue',
+        '4200': 'Service Revenue',
+        '4300': 'Other Income',
+        '5100': 'Cost of Goods Sold',
+        '5200': 'Salaries Expense',
+        '5300': 'Rent Expense',
+        '5400': 'Utilities Expense',
+        '5500': 'Office Supplies',
+        '5600': 'Marketing Expense',
+        '5700': 'Professional Fees',
+        '5800': 'Bank Charges',
+        '5900': 'Miscellaneous Expense',
+        CYE: 'Current Year Earnings',
       },
     },
   },
@@ -522,7 +555,11 @@ const en = {
   },
   customers: {
     initialBalance: 'Initial Balance',
+    /** Parametric — pass `{ currency: code }`. Replaces initial{USD,LBP}Balance. */
+    initialBalanceFor: 'Initial {{currency}} Balance',
+    /** @deprecated Use `initialBalanceFor` with `{ currency }`. */
     initialUSDBalance: 'Initial USD Balance',
+    /** @deprecated Use `initialBalanceFor` with `{ currency }`. */
     initialLBPBalance: 'Initial LBP Balance',
 
     tryAdjustingTheDateRangeOrCheckingBackLater: 'Try adjusting the date range or checking back later',
@@ -548,16 +585,24 @@ const en = {
     from: 'from',
     to: 'to',
     balanceSettings: 'Balance Settings',
+    /** Parametric — pass `{ currency: code }`. Replaces max{LBP,USD}Balance. */
+    maxBalanceFor: 'Max {{currency}} Balance (Optional)',
+    /** @deprecated Use `maxBalanceFor` with `{ currency }`. */
     maxLBPBalance: 'Max LBP Balance (Optional)',
+    /** @deprecated Use `maxBalanceFor` with `{ currency }`. */
     maxUSDBalance: 'Max USD Balance (Optional)',
     noLimit: 'No Limit',
 
     reviewDate: 'Review Date',
     reviewDateHint: 'Set a date to review or settle this advance',
     recordAdvancePayment: 'Record Advance Payment',
+    /** Parametric — pass `{ currency: code }`. Replaces advance{USD,LBP}. */
+    advanceFor: 'Advance {{currency}}',
+    /** @deprecated Use `advanceFor` with `{ currency }`. */
     advanceUSD: 'Advance USD',
     given: 'Given',
     deducted: 'Deducted',
+    /** @deprecated Use `advanceFor` with `{ currency }`. */
     advanceLBP: 'Advance LBP',
     supplierAdvances: 'Supplier Advances',
     payments: 'Payments',
@@ -585,7 +630,11 @@ const en = {
     youCanAlsoManageAdvancesLaterFromTheSupplierAdvancesTabInAccounting: 'You can also manage advances later from the Supplier Advances tab in Accounting.',
     supplierAdvancesDesc: 'Track and manage advance payments made to suppliers',
     supplierAdvancesTitle: 'Supplier Advances',
+    /** Parametric — pass `{ currency: code }`. Replaces totalAdvances{USD,LBP}. */
+    totalAdvancesFor: 'Total Advances {{currency}}',
+    /** @deprecated Use `totalAdvancesFor` with `{ currency }`. */
     totalAdvancesUSD: 'Total Advances USD',
+    /** @deprecated Use `totalAdvancesFor` with `{ currency }`. */
     totalAdvancesLBP: 'Total Advances LBP',
     supplierRecordAdvance: 'Record Advance',
     suppliersWithAdvances: 'Suppliers with Advances',
@@ -916,7 +965,17 @@ const en = {
     sortByDate: 'Date',
     sortByCustomer: 'Customer',
     sortByProduct: 'Product',
+    sortBySupplier: 'Supplier',
     sortByValue: 'Value',
+    allTab: 'All',
+    soldBillsTab: 'Sold Bills',
+    receivedBillsTab: 'Received Bills',
+    unitCost: 'Unit Cost',
+    totalCost: 'Total Cost',
+    searchPlaceholderSold: 'Search by customer, product, or status...',
+    searchPlaceholderReceived: 'Search by supplier, product, or status...',
+    noSoldItems: 'No non-priced sold items',
+    noReceivedItems: 'No non-priced received items',
     status: 'Status',
     customer: 'Customer',
     product: 'Product',

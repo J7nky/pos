@@ -11,10 +11,16 @@
  * page on store change, which clears this cache for free.
  */
 
+import type { CurrencyCode } from '@pos-platform/shared';
+
 export type EntityType = 'customer' | 'supplier' | 'employee';
 
 export interface CachedBalance {
+  /** Per-currency balance map (primary surface). */
+  byCurrency: Partial<Record<CurrencyCode, number>>;
+  /** Legacy USD shortcut equal to `byCurrency.USD ?? 0`. */
   USD: number;
+  /** Legacy LBP shortcut equal to `byCurrency.LBP ?? 0`. */
   LBP: number;
 }
 
@@ -42,11 +48,39 @@ function notify(): void {
 export const entityBalanceCache = {
   get(entityType: EntityType, entityId: string): CachedBalance | undefined {
     const entry = store.get(key(entityType, entityId));
-    return entry ? { USD: entry.USD, LBP: entry.LBP } : undefined;
+    if (!entry) return undefined;
+    return {
+      byCurrency: { ...entry.byCurrency },
+      USD: entry.USD,
+      LBP: entry.LBP,
+    };
   },
 
-  set(entityType: EntityType, entityId: string, value: CachedBalance): void {
-    store.set(key(entityType, entityId), { ...value, fetchedAt: Date.now() });
+  /**
+   * Accepts either the new `{ byCurrency, USD?, LBP? }` shape or the legacy
+   * `{ USD, LBP }` shape. When `byCurrency` is missing it is derived from
+   * the USD/LBP fields (zeros are pruned).
+   */
+  set(
+    entityType: EntityType,
+    entityId: string,
+    value: { byCurrency?: Partial<Record<CurrencyCode, number>>; USD?: number; LBP?: number },
+  ): void {
+    const byCurrency: Partial<Record<CurrencyCode, number>> = value.byCurrency
+      ? { ...value.byCurrency }
+      : {};
+    if (!value.byCurrency) {
+      if (typeof value.USD === 'number' && value.USD !== 0) byCurrency.USD = value.USD;
+      if (typeof value.LBP === 'number' && value.LBP !== 0) byCurrency.LBP = value.LBP;
+    }
+    const usd = byCurrency.USD ?? value.USD ?? 0;
+    const lbp = byCurrency.LBP ?? value.LBP ?? 0;
+    store.set(key(entityType, entityId), {
+      byCurrency,
+      USD: usd,
+      LBP: lbp,
+      fetchedAt: Date.now(),
+    });
     notify();
   },
 

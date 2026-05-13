@@ -10,6 +10,7 @@ import {
 } from './accountingCurrencyHelpers';
 import type { CurrencyCode } from '@pos-platform/shared';
 import type { JournalEntryAmounts, BalanceSnapshotMap } from '../types/database';
+import { formatNumber } from '../utils/numberFormat';
 // Note: snapshotService import removed - snapshots not implemented yet, using direct journal entry calculation
 
 // Import locale dictionaries for direct translation access in services
@@ -1153,8 +1154,8 @@ export class AccountStatementService {
       text += `(no balance activity)\n`;
     } else {
       for (const c of allCurrencies) {
-        text += `Opening (${c}): ${(opening[c] ?? 0).toLocaleString()}\n`;
-        text += `Current (${c}): ${(current[c] ?? 0).toLocaleString()}\n`;
+        text += `Opening (${c}): ${formatNumber(opening[c] ?? 0)}\n`;
+        text += `Current (${c}): ${formatNumber(current[c] ?? 0)}\n`;
       }
     }
     text += `\n`;

@@ -116,9 +116,9 @@ export default function Accounting() {
     handleError(error);
     // Provide fallback values
     currency = 'USD';
-    formatCurrency = (amount: number) => `$${amount.toFixed(2)}`;
-    formatCurrencyWithSymbol = (amount: number, curr: string) => `${curr === 'LBP' ? 'LBP' : '$'}${amount.toFixed(2)}`;
-    getConvertedAmount = (amount: number, curr: string) => amount;
+    formatCurrency = (amount: number) => currencyService.format(amount, 'USD');
+    formatCurrencyWithSymbol = (amount: number, curr: string) => currencyService.format(amount, curr as CurrencyCode);
+    getConvertedAmount = (amount: number, _curr: string) => amount;
   }
 
   // Unified recent entities (replaces separate recentCustomers and recentSuppliers)
@@ -573,7 +573,7 @@ export default function Accounting() {
         entityType: form.entityType,
         entityId: form.entityId,
         amount: form.amount,
-        currency: form.currency as 'USD' | 'LBP',
+        currency: form.currency as CurrencyCode,
         description: form.description,
         reference: form.reference || generatePaymentReference(),
         storeId: userProfile?.store_id || '',
@@ -626,7 +626,7 @@ export default function Accounting() {
       const expenseResult = await raw.processCashDrawerTransaction({
         type: 'expense',
         amount: parseFloat(expenseForm.amount),
-        currency: expenseForm.currency as 'USD' | 'LBP',
+        currency: expenseForm.currency as CurrencyCode,
         description: `Expense: ${category.name} - ${expenseForm.description}`,
         reference: expenseForm.reference || generateExpenseReference(),
         storeId: userProfile?.store_id || '',
@@ -1056,7 +1056,7 @@ export default function Accounting() {
     nonPricedPage * NON_PRICED_PAGE_SIZE
   );
 
-  const handleCloseReceivedBill = async (bill: any, fees: { commission: number; porterage: number; transfer: number; plastic?: number; supplierAmount: number, currency: 'USD' | 'LBP' }) => {
+  const handleCloseReceivedBill = async (bill: any, fees: { commission: number; porterage: number; transfer: number; plastic?: number; supplierAmount: number, currency: CurrencyCode }) => {
 
     try {
       // Guard: do not allow closing an already closed bill
@@ -1451,11 +1451,9 @@ export default function Accounting() {
         <div className="space-y-6">
            <NonPricedItems
               filteredNonPricedItems={filteredNonPricedItems}
-              pagedNonPricedItems={pagedNonPricedItems}
               stagedNonPricedChanges={stagedNonPricedChanges}
               selectedNonPriced={selectedNonPriced}
               nonPricedPage={nonPricedPage}
-              nonPricedTotalPages={nonPricedTotalPages}
               nonPricedSearch={nonPricedSearch}
               nonPricedSort={nonPricedSort}
               nonPricedSortDir={nonPricedSortDir}

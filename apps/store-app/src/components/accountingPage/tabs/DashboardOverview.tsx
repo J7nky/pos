@@ -5,6 +5,10 @@ import { normalizeNameForComparison } from "../../../utils/nameNormalization";
 import TransactionListItem from "../../common/TransactionListItem";
 import { StatCard } from "../../common/StatCard";
 import { FilterPanel, FilterState } from "../FilterPanel";
+import { useOfflineData } from "../../../contexts/OfflineDataContext";
+import { currencyService } from "../../../services/currencyService";
+import { getLegacyBalance } from "../../../utils/currencyFieldMap";
+import type { CurrencyCode } from "@pos-platform/shared";
 import {
   RefreshCw,
   Wallet,
@@ -16,7 +20,7 @@ import {
   Search,
 } from "lucide-react";
 
-type Currency = "USD" | "LBP";
+type Currency = CurrencyCode;
 
 type Transaction = {
   id: string;
@@ -72,11 +76,12 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     return entities
       .filter((e: any) => e.entity_type === 'customer' && !e._deleted)
       .map((c: any) => {
-        const balances = customerBalances.getBalances(c.id) || { USD: 0, LBP: 0 };
+        const byCurrency = customerBalances.getBalances(c.id) || {};
         return {
           ...c,
-          lb_balance: balances.LBP,
-          usd_balance: balances.USD,
+          balances: byCurrency,
+          lb_balance: byCurrency.LBP ?? 0,
+          usd_balance: byCurrency.USD ?? 0,
         };
       });
   }, [entities, customerBalances]);
@@ -85,11 +90,12 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     return entities
       .filter((e: any) => e.entity_type === 'supplier' && !e._deleted)
       .map((s: any) => {
-        const balances = supplierBalances.getBalances(s.id) || { USD: 0, LBP: 0 };
+        const byCurrency = supplierBalances.getBalances(s.id) || {};
         return {
           ...s,
-          lb_balance: balances.LBP,
-          usd_balance: balances.USD,
+          balances: byCurrency,
+          lb_balance: byCurrency.LBP ?? 0,
+          usd_balance: byCurrency.USD ?? 0,
         };
       });
   }, [entities, supplierBalances]);
@@ -144,22 +150,23 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     sortOrder: 'desc',
   });
 
-  // Memoized customer debt calculations
+  const { acceptedCurrencies } = useOfflineData();
+
+  // Memoized customer debt calculations (per accepted currency)
   const customerDebtData = useMemo(() => {
-    const totalLBPDebt = customers
-      .filter((c) => (c.lb_balance || 0) > 0)
-      .reduce((sum, c) => sum + (c.lb_balance || 0), 0);
-
-    const totalUSDDebt = customers
-      .filter((c) => (c.usd_balance || 0) > 0)
-      .reduce((sum, c) => sum + (c.usd_balance || 0), 0);
-
+    const totalsByCurrency: Partial<Record<CurrencyCode, number>> = {};
+    for (const code of acceptedCurrencies) {
+      totalsByCurrency[code] = customers.reduce(
+        (sum, c) => sum + Math.max(0, getLegacyBalance(c as Record<string, unknown>, code, 'initial')),
+        0
+      );
+    }
     const customersWithDebt = customers.filter(
-      (c) => (c.lb_balance || 0) > 0 || (c.usd_balance || 0) > 0
+      (c) => acceptedCurrencies.some(code => getLegacyBalance(c as Record<string, unknown>, code, 'initial') > 0)
     ).length;
 
-    return { totalLBPDebt, totalUSDDebt, customersWithDebt };
-  }, [customers]);
+    return { totalsByCurrency, customersWithDebt };
+  }, [customers, acceptedCurrencies]);
 
   // Enhanced filtered transactions with advanced filtering
   const filteredTransactions = useMemo(() => {
@@ -341,14 +348,14 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           title={t('dashboard.totalCustomerDebt')}
           value={
             <div className="space-y-1">
-              <div className="flex items-center">
-                <span className="text-xs text-gray-500 mr-2">LBP:</span>
-                <span className="text-lg font-semibold">{formatCurrency(customerDebtData.totalLBPDebt)}</span>
-              </div>
-              <div className="flex items-center">
-                <span className="text-xs text-gray-500 mr-2">USD:</span>
-                <span className="text-lg font-semibold">{formatCurrency(customerDebtData.totalUSDDebt)}</span>
-              </div>
+              {acceptedCurrencies.map(code => (
+                <div key={code} className="flex items-center">
+                  <span className="text-xs text-gray-500 mr-2">{code}:</span>
+                  <span className="text-lg font-semibold">
+                    {currencyService.format(customerDebtData.totalsByCurrency[code] || 0, code)}
+                  </span>
+                </div>
+              ))}
             </div>
           }
           borderColor="border-orange-500"

@@ -12,7 +12,8 @@ import { getFiscalPeriodForDate } from '../utils/fiscalPeriod';
 import { createId } from '../lib/db';
 import { getLocalDateString } from '../utils/dateUtils';
 import { CacheManager, CacheKeys } from '../utils/cacheManager';
-import { buildLegacyDualAmounts } from './accountingCurrencyHelpers';
+import { buildDualCurrencyAmounts, amountsFromLegacyEntry, getDebit, getCredit } from './accountingCurrencyHelpers';
+import type { CurrencyCode } from '@pos-platform/shared';
 
 /**
  * Service for creating and managing journal entries
@@ -49,24 +50,21 @@ export class JournalService {
       throw makeAppError(first?.code ?? 'UNKNOWN_ERROR');
     }
     
-    // Handle legacy parameters (amount + currency) - convert to new format
-    let finalAmountUSD = amountUSD;
-    let finalAmountLBP = amountLBP;
-    
+    // Resolve the per-currency amount map. Callers can either:
+    //   1. Pass `amount` + `currency` (legacy single-currency entry shape), OR
+    //   2. Pass `amountUSD` and/or `amountLBP` (legacy USD+LBP shape)
+    // Both paths funnel into a generic `entryAmounts` map keyed by CurrencyCode.
+    let entryAmounts: Partial<Record<string, number>> = {};
+
     if (amount !== undefined && currency) {
-      // Legacy mode: single currency amount
-      if (currency === 'USD') {
-        finalAmountUSD = amount;
-        finalAmountLBP = 0;
-      } else {
-        finalAmountUSD = 0;
-        finalAmountLBP = amount;
-      }
+      entryAmounts[currency] = amount;
+    } else {
+      if (amountUSD && amountUSD !== 0) entryAmounts.USD = amountUSD;
+      if (amountLBP && amountLBP !== 0) entryAmounts.LBP = amountLBP;
     }
-    
-    // Validate that at least one currency has an amount
-    if (finalAmountUSD === 0 && finalAmountLBP === 0) {
-      throw new Error('At least one currency amount (USD or LBP) must be provided');
+
+    if (Object.values(entryAmounts).every(v => !v || v === 0)) {
+      throw new Error('At least one currency amount must be provided');
     }
     
     // Validate accounting setup
@@ -96,6 +94,18 @@ export class JournalService {
     // Phase 11 dual-write: also build the self-describing `amounts` map so
     // new read paths can consume it. The deprecated scalar columns stay
     // until 11d (column drop) for backward compatibility.
+    // Build the JSONB amounts maps directly from `entryAmounts`. The debit
+    // entry carries each currency in its `debit` slot (credit=0); the credit
+    // entry mirrors with `credit` slot (debit=0).
+    const debitAmounts: import('../types/accounting').JournalEntryAmounts = {};
+    const creditAmounts: import('../types/accounting').JournalEntryAmounts = {};
+    for (const [code, value] of Object.entries(entryAmounts)) {
+      const amt = Number(value) || 0;
+      if (amt === 0) continue;
+      debitAmounts[code as keyof typeof debitAmounts] = { debit: amt, credit: 0 };
+      creditAmounts[code as keyof typeof creditAmounts] = { debit: 0, credit: amt };
+    }
+
     const debitEntry: JournalEntry = {
       id: createId(),
       store_id: storeId,
@@ -103,16 +113,7 @@ export class JournalService {
       transaction_id: transactionId,
       account_code: debitAccount,
       account_name: debitAccountInfo.account_name,
-      debit_usd: finalAmountUSD,
-      credit_usd: 0,
-      debit_lbp: finalAmountLBP,
-      credit_lbp: 0,
-      amounts: buildLegacyDualAmounts({
-        debit_usd: finalAmountUSD,
-        credit_usd: 0,
-        debit_lbp: finalAmountLBP,
-        credit_lbp: 0,
-      }),
+      amounts: debitAmounts,
       entity_id: entityId,
       entity_type: entity.entity_type,
       posted_date: postedDate,
@@ -131,16 +132,7 @@ export class JournalService {
       transaction_id: transactionId,
       account_code: creditAccount,
       account_name: creditAccountInfo.account_name,
-      debit_usd: 0,
-      credit_usd: finalAmountUSD,
-      debit_lbp: 0,
-      credit_lbp: finalAmountLBP,
-      amounts: buildLegacyDualAmounts({
-        debit_usd: 0,
-        credit_usd: finalAmountUSD,
-        debit_lbp: 0,
-        credit_lbp: finalAmountLBP,
-      }),
+      amounts: creditAmounts,
       entity_id: entityId,
       entity_type: entity.entity_type,
       posted_date: postedDate,
@@ -166,14 +158,12 @@ export class JournalService {
       debitEntry: {
         id: debitEntry.id,
         account_code: debitEntry.account_code,
-        debit_usd: debitEntry.debit_usd,
-        debit_lbp: debitEntry.debit_lbp
+        amounts: debitEntry.amounts,
       },
       creditEntry: {
         id: creditEntry.id,
         account_code: creditEntry.account_code,
-        credit_usd: creditEntry.credit_usd,
-        credit_lbp: creditEntry.credit_lbp
+        amounts: creditEntry.amounts,
       }
     });
     
@@ -199,10 +189,7 @@ export class JournalService {
         entries: savedEntries.map(e => ({
           id: e.id,
           account_code: e.account_code,
-          debit_usd: e.debit_usd,
-          credit_usd: e.credit_usd,
-          debit_lbp: e.debit_lbp,
-          credit_lbp: e.credit_lbp
+          amounts: e.amounts,
         }))
       });
       
@@ -220,9 +207,10 @@ export class JournalService {
       console.log(`[JOURNAL_SERVICE] Skipping verification queries (called within transaction)`);
     }
     
-    const amountStr = finalAmountUSD > 0 
-      ? `USD ${finalAmountUSD}${finalAmountLBP > 0 ? ` + LBP ${finalAmountLBP}` : ''}`
-      : `LBP ${finalAmountLBP}`;
+    const amountStr = Object.entries(entryAmounts)
+      .filter(([, v]) => v && v !== 0)
+      .map(([code, v]) => `${code} ${v}`)
+      .join(' + ');
     console.log(`✅ Journal entry created: ${transactionId} (${amountStr})`);
     return transactionId;
   }
@@ -232,7 +220,7 @@ export class JournalService {
    */
   async recordCashSale(
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     customerId?: string,
     description?: string
   ): Promise<string> {
@@ -256,7 +244,7 @@ export class JournalService {
   async recordCreditSale(
     customerId: string,
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description?: string
   ): Promise<string> {
     const transactionId = createId();
@@ -278,7 +266,7 @@ export class JournalService {
   async recordCustomerPayment(
     customerId: string,
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description?: string
   ): Promise<string> {
     const transactionId = createId();
@@ -299,7 +287,7 @@ export class JournalService {
    */
   async recordCashPurchase(
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     supplierId?: string,
     description?: string
   ): Promise<string> {
@@ -323,7 +311,7 @@ export class JournalService {
   async recordCreditPurchase(
     supplierId: string,
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description?: string
   ): Promise<string> {
     const transactionId = createId();
@@ -345,7 +333,7 @@ export class JournalService {
   async recordSupplierPayment(
     supplierId: string,
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description?: string
   ): Promise<string> {
     const transactionId = createId();
@@ -367,7 +355,7 @@ export class JournalService {
   async recordSalaryPayment(
     employeeId: string,
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description?: string
   ): Promise<string> {
     const transactionId = createId();
@@ -390,7 +378,7 @@ export class JournalService {
     expenseAccount: string,
     entityId: string,
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     description?: string
   ): Promise<string> {
     const transactionId = createId();
@@ -477,35 +465,39 @@ export class JournalService {
     const entries = await query.toArray();
     
     const balance = { USD: 0, LBP: 0 };
-    
+
     for (const entry of entries) {
-      balance.USD += entry.debit_usd - entry.credit_usd;
-      balance.LBP += entry.debit_lbp - entry.credit_lbp;
+      const map = amountsFromLegacyEntry(entry as Parameters<typeof amountsFromLegacyEntry>[0]);
+      balance.USD += getDebit(map, 'USD') - getCredit(map, 'USD');
+      balance.LBP += getDebit(map, 'LBP') - getCredit(map, 'LBP');
     }
-    
+
     return balance;
   }
-  
+
   /**
-   * Verify transaction balance (debits = credits)
-   * Checks both USD and LBP balances separately
+   * Verify transaction balance (debits = credits) for every currency that
+   * appears in the entries — no hardcoded USD/LBP assumption.
    */
   async verifyTransactionBalance(transactionId: string): Promise<boolean> {
     const entries = await this.getJournalEntriesForTransaction(transactionId);
-    
-    const totals = { USD: { debit: 0, credit: 0 }, LBP: { debit: 0, credit: 0 } };
-    
+
+    const debits: Record<string, number> = {};
+    const credits: Record<string, number> = {};
+
     for (const entry of entries) {
-      totals.USD.debit += entry.debit_usd;
-      totals.USD.credit += entry.credit_usd;
-      totals.LBP.debit += entry.debit_lbp;
-      totals.LBP.credit += entry.credit_lbp;
+      const map = amountsFromLegacyEntry(entry as Parameters<typeof amountsFromLegacyEntry>[0]);
+      for (const code of Object.keys(map)) {
+        const { debit, credit } = map[code as keyof typeof map]!;
+        debits[code] = (debits[code] ?? 0) + debit;
+        credits[code] = (credits[code] ?? 0) + credit;
+      }
     }
-    
-    return (
-      totals.USD.debit === totals.USD.credit &&
-      totals.LBP.debit === totals.LBP.credit
-    );
+
+    for (const code of new Set([...Object.keys(debits), ...Object.keys(credits)])) {
+      if (Math.abs((debits[code] ?? 0) - (credits[code] ?? 0)) > 0.01) return false;
+    }
+    return true;
   }
   
   // Helper methods

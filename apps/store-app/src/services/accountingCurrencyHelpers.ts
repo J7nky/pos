@@ -1,11 +1,9 @@
 /**
- * Accounting currency helpers (Phase 11 / 008-multi-currency-country, Task 16c).
+ * Accounting currency helpers.
  *
  * The `journal_entries.amounts` JSONB and `balance_snapshots.balances`
- * JSONB are the new, self-describing carriers for per-currency ledger
- * data. The deprecated USD/LBP scalar columns remain during the
- * dual-write transition; helpers here let callers move to the map shape
- * without reaching for `entry.debit_usd` etc. directly.
+ * JSONB are the only carriers for per-currency ledger data — the legacy
+ * USD/LBP scalar columns were dropped in Layer 8 finalization.
  *
  * Shapes:
  *   amounts:  { [CurrencyCode]: { debit: number; credit: number } }
@@ -36,12 +34,11 @@ export function buildEntryAmounts(
 }
 
 /**
- * Convenience wrapper for the common dual-currency entry shape (USD + LBP)
- * that the existing journalService uses. Pass through the same numbers
- * that go into the deprecated `debit_usd`/`credit_usd`/`debit_lbp`/`credit_lbp`
- * columns and get back the equivalent JSONB map for dual-write.
+ * Convenience wrapper for the common dual-currency entry shape (USD + LBP).
+ * Pass per-currency debit/credit numbers and get back the JSONB map that
+ * goes into `journal_entries.amounts`.
  */
-export function buildLegacyDualAmounts(args: {
+export function buildDualCurrencyAmounts(args: {
   debit_usd?: number;
   credit_usd?: number;
   debit_lbp?: number;
@@ -52,6 +49,9 @@ export function buildLegacyDualAmounts(args: {
     { currency: 'LBP', debit: args.debit_lbp ?? 0, credit: args.credit_lbp ?? 0 },
   ]);
 }
+
+/** @deprecated Renamed to `buildDualCurrencyAmounts`. */
+export const buildLegacyDualAmounts = buildDualCurrencyAmounts;
 
 /** Build a BalanceSnapshotMap from a list of per-currency balances. */
 export function buildBalances(
@@ -110,31 +110,22 @@ export function reverseAmounts(amounts: JournalEntryAmounts | undefined): Journa
 }
 
 /**
- * Coerce an entry that may carry only the deprecated scalar columns into
- * a JournalEntryAmounts map. Useful for read paths during the dual-write
- * transition: callers that prefer the map shape can normalize once, and
- * legacy rows still in flight from older clients won't be invisible.
+ * Read the JSONB amounts map from a journal entry. Returns `{}` if the
+ * map is missing — callers should treat this as "no per-currency data".
+ *
+ * The name carries historical baggage from the dual-write transition; it
+ * is now a simple identity-with-default helper preserved so existing
+ * call sites keep working.
  */
 export function amountsFromLegacyEntry(entry: {
   amounts?: JournalEntryAmounts;
-  debit_usd?: number;
-  credit_usd?: number;
-  debit_lbp?: number;
-  credit_lbp?: number;
 }): JournalEntryAmounts {
-  if (entry.amounts && Object.keys(entry.amounts).length > 0) return entry.amounts;
-  return buildLegacyDualAmounts(entry);
+  return entry.amounts ?? {};
 }
 
-/** Same idea for balance_snapshots rows. */
+/** Read the JSONB balances map from a snapshot row, defaulting to `{}`. */
 export function balancesFromLegacySnapshot(snapshot: {
   balances?: BalanceSnapshotMap;
-  balance_usd?: number;
-  balance_lbp?: number;
 }): BalanceSnapshotMap {
-  if (snapshot.balances && Object.keys(snapshot.balances).length > 0) return snapshot.balances;
-  return buildBalances([
-    { currency: 'USD', balance: snapshot.balance_usd ?? 0 },
-    { currency: 'LBP', balance: snapshot.balance_lbp ?? 0 },
-  ]);
+  return snapshot.balances ?? {};
 }

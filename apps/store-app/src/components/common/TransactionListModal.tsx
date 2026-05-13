@@ -2,6 +2,9 @@ import AccessibleModal from './AccessibleModal';
 import { Transaction } from '../../types';
 import { useI18n } from '../../i18n';
 import TransactionListItem from './TransactionListItem';
+import { currencyService } from '../../services/currencyService';
+import { useOfflineData } from '../../contexts/OfflineDataContext';
+import type { CurrencyCode } from '@pos-platform/shared';
 
 interface TransactionListModalProps {
   isOpen: boolean;
@@ -10,13 +13,11 @@ interface TransactionListModalProps {
   title: string;
   formatCurrency: (amount: number) => string;
   convertAmount: (transaction: Transaction | any) => number;
-  storePreferredCurrency?: 'USD' | 'LBP';
+  storePreferredCurrency?: CurrencyCode;
 }
 
-const formatOriginalAmount = (amount: number, currency: string): string => {
-  if (currency === 'USD') return `$${amount.toFixed(2)}`;
-  return `${Math.round(amount).toLocaleString()} ل.ل`;
-};
+const formatOriginalAmount = (amount: number, currency: CurrencyCode): string =>
+  currencyService.format(amount, currency);
 
 export default function TransactionListModal({
   isOpen,
@@ -28,6 +29,8 @@ export default function TransactionListModal({
   storePreferredCurrency,
 }: TransactionListModalProps) {
   const { t } = useI18n();
+  const { preferredCurrency } = useOfflineData();
+  const effectivePreferredCurrency = storePreferredCurrency ?? preferredCurrency;
 
   const sortedTransactions = [...transactions].sort((a, b) => {
     const dateA = a.createdAt || a.created_at || '';
@@ -81,9 +84,9 @@ export default function TransactionListModal({
                 amount: Math.abs(convertedAmount),
               };
 
-              const transactionCurrency = transaction.currency || 'LBP';
+              const transactionCurrency = (transaction.currency as CurrencyCode | undefined) || effectivePreferredCurrency;
               const originalAmountLabel =
-                storePreferredCurrency && transactionCurrency !== storePreferredCurrency
+                transactionCurrency !== effectivePreferredCurrency
                   ? formatOriginalAmount(Math.abs(transaction.amount || 0), transactionCurrency)
                   : undefined;
 

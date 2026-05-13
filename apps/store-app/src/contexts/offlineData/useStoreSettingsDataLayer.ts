@@ -53,7 +53,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
       return {};
     }
   });
-  const [lowStockAlertsEnabled, setLowStockAlertsEnabled] = useState(true);
+  const [lowStockAlertsEnabled, setLowStockAlertsEnabled] = useState(false);
   const [lowStockThreshold, setLowStockThreshold] = useState(() => {
     try {
       const stored = localStorage.getItem('lowStockThreshold');
@@ -69,7 +69,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
       setCurrency('LBP');
       setDefaultCommissionRate(10);
       setExchangeRate(89500);
-      setLowStockAlertsEnabled(true);
+      setLowStockAlertsEnabled(false);
       return;
     }
     if (storeData.preferred_currency) setCurrency(storeData.preferred_currency);

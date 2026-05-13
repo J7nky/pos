@@ -3,6 +3,7 @@ import { Bell, X, Check, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { NotificationRecord } from '../types';
+import { formatDateTime } from '../utils/numberFormat';
 
 export function NotificationCenter() {
   const { notifications, unreadCount, markAsRead, markAllAsRead, deleteNotification } = useOfflineData();
@@ -146,7 +147,7 @@ export function NotificationCenter() {
                         <h4 className="font-semibold text-sm mb-1">{notification.title}</h4>
                         <p className="text-sm text-gray-600 mb-2">{notification.message}</p>
                         <span className="text-xs text-gray-400">
-                          {new Date(notification.created_at).toLocaleString()}
+                          {formatDateTime(notification.created_at)}
                         </span>
                       </div>
                       <div className="flex gap-1">

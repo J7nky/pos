@@ -115,11 +115,14 @@ export function useAccounting(storeId: string): [AccountingState, AccountingActi
     [raw.transactions]
   );
 
-  // Period data calculation
+  // Period data calculation. Aggregates roll up into the store's
+  // preferredCurrency (was: hardcoded USD). For LBP-only stores the
+  // safeConvert short-circuits to identity and totals stay in LBP.
+  const reportingCurrency = (raw.preferredCurrency ?? 'USD') as CurrencyCode;
   const periodData = useMemo(() => {
     const now = new Date();
     let startDate: Date;
-    
+
     switch (dashboardPeriod) {
       case 'today':
         startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -141,31 +144,27 @@ export function useAccounting(storeId: string): [AccountingState, AccountingActi
         startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     }
 
-    const filteredTransactions = transactions.filter(t => 
+    const filteredTransactions = transactions.filter(t =>
       t.createdAt && new Date(t.createdAt) >= startDate
     );
 
-    const income = filteredTransactions
-      .filter(t => t.type === 'income')
-      .reduce((sum, t) => {
+    /** Sum a transaction list into `reportingCurrency`, honoring "Originally NNN LBP" hints. */
+    const sumInto = (list: Transaction[]): number =>
+      list.reduce((sum, t) => {
         const originalLBPAmount = t.description.match(/Originally ([\d,]+) LBP/);
         if (originalLBPAmount) {
           const originalAmount = parseInt(originalLBPAmount[1].replace(/,/g, ''));
-          return sum + currencyService.convert(originalAmount, 'LBP', 'USD');
+          return sum + currencyService.safeConvert(originalAmount, 'LBP', reportingCurrency);
         }
-        return sum + currencyService.convert(t.amount, (t.currency || 'USD') as CurrencyCode, 'USD');
+        return sum + currencyService.safeConvert(
+          t.amount,
+          (t.currency || reportingCurrency) as CurrencyCode,
+          reportingCurrency,
+        );
       }, 0);
 
-    const expenses = filteredTransactions
-      .filter(t => t.type === 'expense')
-      .reduce((sum, t) => {
-        const originalLBPAmount = t.description.match(/Originally ([\d,]+) LBP/);
-        if (originalLBPAmount) {
-          const originalAmount = parseInt(originalLBPAmount[1].replace(/,/g, ''));
-          return sum + currencyService.convert(originalAmount, 'LBP', 'USD');
-        }
-        return sum + currencyService.convert(t.amount, (t.currency || 'USD') as CurrencyCode, 'USD');
-      }, 0);
+    const income = sumInto(filteredTransactions.filter(t => t.type === 'income'));
+    const expenses = sumInto(filteredTransactions.filter(t => t.type === 'expense'));
 
     const netProfit = income - expenses;
     const profitMargin = income > 0 ? (netProfit / income) * 100 : 0;
@@ -181,13 +180,8 @@ export function useAccounting(storeId: string): [AccountingState, AccountingActi
       return date >= prevStartDate && date <= prevEndDate;
     });
 
-    const prevIncome = prevTransactions
-      .filter(t => t.type === 'income')
-      .reduce((sum, t) => sum + currencyService.convert(t.amount, 'USD', 'USD'), 0);
-
-    const prevExpenses = prevTransactions
-      .filter(t => t.type === 'expense')
-      .reduce((sum, t) => sum + currencyService.convert(t.amount, 'USD', 'USD'), 0);
+    const prevIncome = sumInto(prevTransactions.filter(t => t.type === 'income'));
+    const prevExpenses = sumInto(prevTransactions.filter(t => t.type === 'expense'));
 
     const incomeChange = prevIncome > 0 ? ((income - prevIncome) / prevIncome) * 100 : 0;
     const expenseChange = prevExpenses > 0 ? ((expenses - prevExpenses) / prevExpenses) * 100 : 0;
@@ -202,7 +196,7 @@ export function useAccounting(storeId: string): [AccountingState, AccountingActi
       transactionCount: filteredTransactions.length,
       avgTransactionValue: filteredTransactions.length > 0 ? (income + expenses) / filteredTransactions.length : 0
     };
-  }, [transactions, dashboardPeriod]);
+  }, [transactions, dashboardPeriod, reportingCurrency]);
 
   // KPI data calculation
   const kpiData = useMemo(() => {
@@ -221,16 +215,20 @@ export function useAccounting(storeId: string): [AccountingState, AccountingActi
       .reduce((acc, t) => {
         const day = new Date(t.createdAt).toLocaleDateString();
         if (!acc[day]) acc[day] = { income: 0, expenses: 0 };
-        
+
         const originalLBPAmount = t.description.match(/Originally ([\d,]+) LBP/);
         let amount;
         if (originalLBPAmount) {
           const originalAmount = parseInt(originalLBPAmount[1].replace(/,/g, ''));
-          amount = currencyService.convert(originalAmount, 'LBP', 'USD');
+          amount = currencyService.safeConvert(originalAmount, 'LBP', reportingCurrency);
         } else {
-          amount = currencyService.convert(t.amount, (t.currency || 'USD') as CurrencyCode, 'USD');
+          amount = currencyService.safeConvert(
+            t.amount,
+            (t.currency || reportingCurrency) as CurrencyCode,
+            reportingCurrency,
+          );
         }
-        
+
         if (t.type === 'income') acc[day].income += amount;
         else acc[day].expenses += amount;
         return acc;
@@ -245,7 +243,7 @@ export function useAccounting(storeId: string): [AccountingState, AccountingActi
       recentTransactions,
       cashFlowTrend
     };
-  }, [customers, suppliers, transactions]);
+  }, [customers, suppliers, transactions, reportingCurrency]);
 
   // Filtered receivables
   const filteredReceivables = useMemo(() => {

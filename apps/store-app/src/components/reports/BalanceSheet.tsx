@@ -19,7 +19,8 @@ const SECTION_ORDER = [
 ] as const;
 
 export default function BalanceSheet({ storeId, branchId }: Props) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
+  const isRTL = language === 'ar';
   const { formatAmount } = useCurrency();
   const [asOfDate, setAsOfDate] = useState(getTodayLocalDate());
   const [showZero, setShowZero] = useState(false);
@@ -58,8 +59,11 @@ export default function BalanceSheet({ storeId, branchId }: Props) {
   const primaryColumn = report.columns[0];
   const hasVariance = !primaryColumn.isBalanced && primaryColumn.variance;
 
+  const accountAlign = isRTL ? 'text-right' : 'text-left';
+  const amountAlign = isRTL ? 'text-left' : 'text-right';
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" dir={isRTL ? 'rtl' : 'ltr'}>
       <div className="bg-white rounded-lg shadow-sm p-5">
         <div className="flex items-center justify-between gap-4">
           <h2 className="text-xl font-semibold flex items-center gap-2">
@@ -70,7 +74,7 @@ export default function BalanceSheet({ storeId, branchId }: Props) {
             <input type="date" value={asOfDate} onChange={(e) => setAsOfDate(e.target.value)} className="border rounded px-3 py-2" />
             <label className="text-sm flex items-center gap-2">
               <input type="checkbox" checked={showZero} onChange={(e) => setShowZero(e.target.checked)} />
-              {t('reports.balanceSheet.showZeroBalances')}
+              {t('reports.balanceSheet.allAccounts')}
             </label>
           </div>
         </div>
@@ -80,9 +84,9 @@ export default function BalanceSheet({ storeId, branchId }: Props) {
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b">
             <tr>
-              <th className="px-4 py-3 text-left">{t('reports.balanceSheet.account')}</th>
+              <th className={`px-4 py-3 ${accountAlign}`}>{t('reports.balanceSheet.account')}</th>
               {report.currencies.map((currency) => (
-                <th key={currency} className="px-4 py-3 text-right">{t('reports.balanceSheet.amount')} ({currency})</th>
+                <th key={currency} className={`px-4 py-3 ${amountAlign}`}>{t('reports.balanceSheet.amount')} ({currency})</th>
               ))}
             </tr>
           </thead>
@@ -90,20 +94,25 @@ export default function BalanceSheet({ storeId, branchId }: Props) {
             {SECTION_ORDER.map((section) => (
               <Fragment key={section}>
                 <tr className="bg-gray-50">
-                  <td colSpan={report.currencies.length + 1} className="px-4 py-2 font-semibold">
+                  <td colSpan={report.currencies.length + 1} className={`px-4 py-2 font-semibold ${accountAlign}`}>
                     {t(`reports.balanceSheet.sections.${section}`)}
                   </td>
                 </tr>
-                {(lineGroups.get(section) ?? []).map((line) => (
+                {(lineGroups.get(section) ?? []).map((line) => {
+                  const accountKey = `reports.balanceSheet.accounts.${line.account_code}`;
+                  const translated = t(accountKey);
+                  const displayName = translated === accountKey ? line.account_name : translated;
+                  return (
                   <tr key={line.account_code}>
-                    <td className="px-4 py-2">{line.account_name}</td>
+                    <td className={`px-4 py-2 ${accountAlign}`}>{displayName}</td>
                     {report.currencies.map((currency) => (
-                      <td key={`${line.account_code}-${currency}`} className="px-4 py-2 text-right tabular-nums">
+                      <td key={`${line.account_code}-${currency}`} className={`px-4 py-2 tabular-nums ${amountAlign}`}>
                         {formatAmount(line.balanceByColumn[0].nativeBalance[currency] ?? 0, currency)}
                       </td>
                     ))}
                   </tr>
-                ))}
+                  );
+                })}
               </Fragment>
             ))}
           </tbody>

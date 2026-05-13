@@ -34,7 +34,7 @@ import { useProductMultilingual } from '../hooks/useMultilingual';
 import { parseMultilingualString } from '../utils/multilingual';
 import { normalizeNameForComparison } from '../utils/nameNormalization';
 import { computeLineUnitPrice } from '../contexts/offlineData/operations/saleOperations';
-import { MissingExchangeRateError } from '../services/currencyService';
+import { MissingExchangeRateError, currencyService } from '../services/currencyService';
 import { LegacyCurrencyMissingError } from '../errors/currencyErrors';
 import type { CurrencyCode } from '@pos-platform/shared';
 
@@ -74,13 +74,15 @@ export default function POS() {
   const customerIds = useMemo(() => customerEntities.map(c => c.id), [customerEntities]);
   const customerBalances = useEntityBalances(customerIds, 'customer', true);
   const customers = customerEntities.map(c => {
-    const balances = customerBalances.getBalances(c.id) || { USD: 0, LBP: 0 };
+    const byCurrency = customerBalances.getBalances(c.id) || {};
     return {
-      ...c, 
-      isActive: c.is_active, 
-      createdAt: c.created_at, 
-      lb_balance: balances.LBP,  // From journal entries
-      usd_balance: balances.USD  // From journal entries
+      ...c,
+      isActive: c.is_active,
+      createdAt: c.created_at,
+      balances: byCurrency,
+      // Legacy shortcuts.
+      lb_balance: byCurrency.LBP ?? 0,
+      usd_balance: byCurrency.USD ?? 0
     };
   }) as Array<any>;
   const suppliers = (raw.suppliers || []).map(s => ({...s,createdAt: s.created_at})) as Array<any>;
@@ -394,18 +396,26 @@ ${dashSeparator}`;
 ${t('receipt.totalItems')}: ${lineItemsData.length}`;
     }
 
-    content += `
-${t('receipt.subtotal')}:                         ${formatCurrency(billData.subtotal)} ${t('common.currency.LBP')}`;
+    // Render the receipt in the bill's actual currency. Falls back to the
+    // store's preferred currency if the bill doesn't carry a currency tag.
+    const billCurrency = (billData.currency as CurrencyCode | undefined) ?? raw.preferredCurrency;
+    const currencyLabel = t(`common.currency.${billCurrency}`) || billCurrency;
+    const previousBalanceForCurrency = entity?.balances?.[billCurrency]
+      ?? (billCurrency === 'LBP' ? entity?.lb_balance : entity?.usd_balance)
+      ?? 0;
 
-    // Show previous balance if enabled and entity has balance
-    if (receiptSettings.showPreviousBalance && entity && entity.lb_balance > 0) {
+    content += `
+${t('receipt.subtotal')}:                         ${formatCurrency(billData.subtotal)} ${currencyLabel}`;
+
+    // Show previous balance if enabled and entity has balance in this currency.
+    if (receiptSettings.showPreviousBalance && entity && previousBalanceForCurrency > 0) {
       content += `
-${t('receipt.previousBalance')}:                 ${formatCurrency(entity.lb_balance)} ${t('common.currency.LBP')}`;
+${t('receipt.previousBalance')}:                 ${formatCurrency(previousBalanceForCurrency)} ${currencyLabel}`;
     }
 
     content += `
 ${dashSeparator}
-${t('receipt.totalBalance')}:                    ${formatCurrency(billData.total_amount)} ${t('common.currency.LBP')}
+${t('receipt.totalBalance')}:                    ${formatCurrency(billData.total_amount)} ${currencyLabel}
 ${dashSeparator}
            💬 ${receiptSettings.thankYouMessage}
 ${dashSeparator}`;
@@ -497,13 +507,24 @@ ${dashSeparator}`;
       return;
     }
 
-    const needsCurrencyMigration = activeTabs.some(tab => !(tab as BillTab).settlementCurrency);
+    // Migrate tabs whose settlementCurrency is missing OR stale — i.e. set
+    // to a currency the store no longer accepts (common after switching a
+    // multi-currency store to single-currency, or after dropping a currency
+    // from the admin dashboard). Without this coercion `addToCart` would
+    // throw `MissingExchangeRateError` trying to convert USD → LBP for a
+    // tab stuck at the prior default.
+    const accepted = new Set(raw.acceptedCurrencies);
+    const needsCurrencyMigration = activeTabs.some(tab => {
+      const cur = (tab as BillTab).settlementCurrency;
+      return !cur || !accepted.has(cur);
+    });
     const migratedTabs = needsCurrencyMigration
-      ? activeTabs.map(tab =>
-          (tab as BillTab).settlementCurrency
+      ? activeTabs.map(tab => {
+          const cur = (tab as BillTab).settlementCurrency;
+          return cur && accepted.has(cur)
             ? tab
-            : { ...tab, settlementCurrency: raw.preferredCurrency }
-        )
+            : { ...tab, settlementCurrency: raw.preferredCurrency };
+        })
       : activeTabs;
     if (needsCurrencyMigration) setActiveTabs(migratedTabs);
 
@@ -927,7 +948,13 @@ ${dashSeparator}`;
       const payload = {
         bill: billData,
         lineItems: fmtedLineItems,
-        entity: entity ? { name: entity.name, phone: entity.phone, lb_balance: entity.lb_balance } : null,
+        entity: entity ? {
+          name: entity.name,
+          phone: entity.phone,
+          balances: entity.balances ?? {},
+          // Legacy field for older formal-bill renderers.
+          lb_balance: entity.lb_balance ?? entity.balances?.LBP ?? 0,
+        } : null,
         receiptSettings: {
           storeName: settings.storeName || '',
           address: settings.address || '',
@@ -943,7 +970,7 @@ ${dashSeparator}`;
         logo,
         printerName,
         language: raw.language || 'en',
-        currency: raw.currency || 'LBP',
+        currency: raw.currency || raw.preferredCurrency,
         exchangeRate: raw.exchangeRate || 0,
       };
 
@@ -1048,13 +1075,15 @@ ${dashSeparator}`;
     setIsProcessing(true);
     
     try {
-      // Convert the entered amount to LBP for storage
-      // User enters in preferred currency, we store in LBP
+      // Convert the entered amount to LBP for storage when LBP is in use.
+      // For non-LBP stores (USD-only, AED, …), convert through safeConvert
+      // and fall back to the entered amount when no rate is available.
       let amountInLBP = openingAmount;
-      if (raw.currency === 'USD' && raw.exchangeRate > 0) {
-        amountInLBP = openingAmount * raw.exchangeRate;
+      const preferred = (raw.currency || raw.preferredCurrency) as CurrencyCode;
+      if (preferred !== 'LBP' && currencyService.canConvert(preferred, 'LBP')) {
+        amountInLBP = currencyService.convert(openingAmount, preferred, 'LBP');
       }
-      
+
       // Open cash drawer with the converted amount
       await raw.openCashDrawer(amountInLBP, userProfile.id);
       

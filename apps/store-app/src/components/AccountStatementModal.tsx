@@ -250,7 +250,7 @@ export default function AccountStatementModal({
   const formatCurrency = (amount: number, currency: CurrencyCode, includeSymbol: boolean = true) => {
     if (!includeSymbol) {
       const meta = currencyService.getMeta(currency);
-      return new Intl.NumberFormat(meta.locale, {
+      return new Intl.NumberFormat(`${meta.locale}-u-nu-latn`, {
         minimumFractionDigits: meta.decimals,
         maximumFractionDigits: meta.decimals,
       }).format(amount);

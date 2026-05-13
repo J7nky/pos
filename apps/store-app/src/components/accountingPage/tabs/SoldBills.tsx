@@ -20,6 +20,8 @@ import SearchableSelect from '../../common/SearchableSelect';
 import { transactionService } from '../../../services/transactionService';
 import { TRANSACTION_CATEGORIES } from '../../../constants/transactionCategories';
 import { entityBalanceCache } from '../../../services/entityBalanceCache';
+import type { CurrencyCode } from '@pos-platform/shared';
+import { formatDateTime } from '../../../utils/numberFormat';
 
 import { 
   FileText, 
@@ -115,41 +117,6 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
   const [expandedBills, setExpandedBills] = useState<Set<string>>(new Set());
   const [expandedLineItems, setExpandedLineItems] = useState<Set<string>>(new Set());
 
-  // Check for bill to highlight from sessionStorage
-  useEffect(() => {
-    const checkHighlight = () => {
-      const billNumber = highlightBillNumber || sessionStorage.getItem('highlightBillNumber');
-      if (billNumber) {
-        setHighlightedBillNumber(billNumber);
-        // Scroll to the bill
-        setTimeout(() => {
-          const element = document.getElementById(`bill-${billNumber}`);
-          if (element) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
-        }, 300);
-        // Clear after highlighting
-        sessionStorage.removeItem('highlightBillNumber');
-        // Stop highlighting after 3 seconds
-        setTimeout(() => {
-          setHighlightedBillNumber(null);
-        }, 1000);
-        return true;
-      }
-      return false;
-    };
-
-    // Check immediately
-    if (checkHighlight()) return;
-
-    // Also check after a short delay to account for navigation timing
-    const timeout = setTimeout(() => {
-      checkHighlight();
-    }, 200);
-
-    return () => clearTimeout(timeout);
-  }, [highlightBillNumber]);
-
   // Get data from offline context
   const customers = raw.customers.map(c => ({...c, isActive: c.is_active, createdAt: c.created_at, lb_balance: c.lb_balance || 0, usd_balance: c.usd_balance || 0}));
   const inventoryItems = raw.inventory || [];
@@ -202,6 +169,50 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
   const [showFilters, setShowFilters] = useLocalStorage('soldBills_showFilters', true);
   const [fastDateFilter, setFastDateFilter] = useLocalStorage<'all' | 'today' | 'week' | 'month'>('soldBills_fastDateFilter', 'today');
   const [isInitialized, setIsInitialized] = useState(false);
+
+  // Check for bill to highlight from sessionStorage.
+  // Lives below the filter setters because it widens the date window so the
+  // target bill (which may pre-date the saved fast-date filter) is in view.
+  useEffect(() => {
+    const checkHighlight = () => {
+      const billNumber = highlightBillNumber || sessionStorage.getItem('highlightBillNumber');
+      if (billNumber) {
+        // The target bill may be outside the saved fast-date window (e.g. user
+        // clicked an income transaction from yesterday). Widen to "All Time"
+        // so the bill is in the rendered list before we try to scroll to it.
+        setFastDateFilter('all');
+        setDateFrom('');
+        setDateTo('');
+
+        setHighlightedBillNumber(billNumber);
+        // Scroll to the bill
+        setTimeout(() => {
+          const element = document.getElementById(`bill-${billNumber}`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 300);
+        // Clear after highlighting
+        sessionStorage.removeItem('highlightBillNumber');
+        // Stop highlighting after 3 seconds
+        setTimeout(() => {
+          setHighlightedBillNumber(null);
+        }, 1000);
+        return true;
+      }
+      return false;
+    };
+
+    // Check immediately
+    if (checkHighlight()) return;
+
+    // Also check after a short delay to account for navigation timing
+    const timeout = setTimeout(() => {
+      checkHighlight();
+    }, 200);
+
+    return () => clearTimeout(timeout);
+  }, [highlightBillNumber, setFastDateFilter, setDateFrom, setDateTo]);
 
   // Helper function to format date in local timezone as YYYY-MM-DD
   const formatLocalDate = useCallback((date: Date): string => {
@@ -491,7 +502,7 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
         return (
           <span className="inline-flex items-center gap-1.5 text-sm">
             <Clock className="h-3.5 w-3.5 text-slate-400" />
-            <span>{date.toLocaleString()}</span>
+            <span>{formatDateTime(date)}</span>
           </span>
         );
       }
@@ -1010,7 +1021,7 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
         // ledger empty. For walk-ins (no entity), fall back to the legacy cash-drawer
         // transaction path which only updates the drawer balance.
         if (cashDrawerDelta !== 0) {
-          const billCurrency = (selectedBill.currency ?? preferredCurrency) as 'USD' | 'LBP';
+          const billCurrency = (selectedBill.currency ?? preferredCurrency) as CurrencyCode;
           const absoluteAmount = Math.abs(cashDrawerDelta);
 
           // Resolve entity across all three lists — bills can be tied to a customer,
@@ -1851,7 +1862,7 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600 rtl:text-right">{t('soldBills.date')}:</span>
-                      <span className="font-medium rtl:text-right">{new Date(selectedBill.bill_date).toLocaleString()}</span>
+                      <span className="font-medium rtl:text-right">{formatDateTime(selectedBill.bill_date)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600 rtl:text-right">{t('soldBills.customer')}:</span>
@@ -2530,7 +2541,7 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
                                 )}
                               </div>
                               <div className="flex items-center gap-3 text-right text-xs text-slate-500">
-                                <div>{new Date(firstLog.created_at).toLocaleString()}</div>
+                                <div>{formatDateTime(firstLog.created_at)}</div>
                               </div>
                             </div>
 

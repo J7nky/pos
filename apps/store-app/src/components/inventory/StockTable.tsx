@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { useProductMultilingual } from '../../hooks/useMultilingual';
-import { getProductImageUrl, handleImageError } from '../../constants/productImages';
+import { ProductImage } from '../common/ProductImage';
 import { useOfflineData } from '../../contexts/OfflineDataContext';
 import { useI18n } from '../../i18n';
 import type { CurrencyCode } from '@pos-platform/shared';
@@ -104,11 +104,11 @@ const StockTable: React.FC<StockTableProps> = ({
                 <tr key={item.product_id} className="hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
                   <td className="px-6 py-4">
                     <div className="flex items-center">
-                      <img
-                        src={getProductImageUrl(product?.image)}
+                      <ProductImage
+                        productId={product?.id}
+                        src={product?.image}
                         alt={getProductName(product)}
                         className="w-10 h-10 rounded-lg object-cover mr-3"
-                        onError={handleImageError}
                       />
                       <div>
                         <p className="font-medium text-gray-900 dark:text-slate-100">{item.product_name}</p>

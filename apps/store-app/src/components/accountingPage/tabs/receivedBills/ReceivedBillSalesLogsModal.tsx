@@ -3,6 +3,7 @@ import { X, Edit, Trash2, FileText } from 'lucide-react';
 import { Modal } from '../../../common/Modal';
 import { useOfflineData } from '../../../../contexts/OfflineDataContext';
 import { ReceivedBill, SaleLineItem, CloseBillFees } from './types';
+import { formatDateTime } from '../../../../utils/numberFormat';
 
 interface ReceivedBillSalesLogsModalProps {
   bill: ReceivedBill | null;
@@ -284,7 +285,7 @@ export function ReceivedBillSalesLogsModal({
           totals.totalRevenue.toFixed(2),
           totals.totalCost.toFixed(2),
           totals.totalProfit.toFixed(2),
-          new Date(bill.receivedAt).toLocaleString()
+          formatDateTime(bill.receivedAt)
         ];
       } else {
         billRow = [
@@ -300,13 +301,13 @@ export function ReceivedBillSalesLogsModal({
           (bill.totalProfit || 0).toFixed(2),
           bill.status,
           (bill.avgUnitPrice || 0).toFixed(2),
-          new Date(bill.receivedAt).toLocaleString()
+          formatDateTime(bill.receivedAt)
         ];
       }
 
       const salesHeader = ['Date', 'Customer', 'Quantity', 'Weight', 'Unit Price', 'Total Price', 'Payment Method', 'Notes'];
       const salesRows = processedSalesData.map((s: any) => [
-        new Date(s.saleDate).toLocaleString(),
+        formatDateTime(s.saleDate),
         `"${s.customerName}"`,
         s.quantity ?? '',
         s.weight ?? '',

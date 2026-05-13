@@ -272,6 +272,12 @@ export function useOfflineInitialization(params: UseOfflineInitializationParams)
               console.warn('⚠️ Failed to initialize sync state after tier1:', syncStateError);
             }
             setIsDataReady(true);
+            // Pre-warm product images into the local cache so the inventory
+            // tables render offline even on second-launch with no connectivity.
+            // Fire-and-forget; failures are tolerated and logged inside the service.
+            void import('../../services/productImageCacheService')
+              .then(({ productImageCacheService }) => productImageCacheService.prewarmAll())
+              .catch((err) => console.warn('⚠️ Product image pre-warm failed:', err));
             // H1: Use a shared AbortController so tier 2/3 can be cancelled if the
             // component unmounts or the user switches stores before they finish.
             const bgController = new AbortController();

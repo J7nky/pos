@@ -6,6 +6,7 @@ import { useErrorHandler } from '../hooks/useErrorHandler';
 import BranchSelectionScreen from '../components/BranchSelectionScreen';
 import packageJson from '../../package.json';
 import { CURRENCY_META, type CurrencyCode } from '@pos-platform/shared';
+import { formatDateTime } from '../utils/numberFormat';
 import {
   Settings as SettingsIcon,
   Bell,
@@ -548,7 +549,7 @@ export default function Settings() {
                       const syncStatus = offlineData?.getSyncStatus?.();
                       const lastSync = syncStatus?.lastSync;
                       return lastSync 
-                        ? new Date(lastSync).toLocaleString()
+                        ? formatDateTime(lastSync)
                         : 'Never (Local only)';
                     })()}
                   </p>

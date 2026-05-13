@@ -13,21 +13,37 @@ describe('entityBalanceCache', () => {
 
     it('stores and retrieves a balance', () => {
       entityBalanceCache.set('customer', 'c-1', { USD: 100, LBP: 150_000 });
-      expect(entityBalanceCache.get('customer', 'c-1')).toEqual({ USD: 100, LBP: 150_000 });
+      expect(entityBalanceCache.get('customer', 'c-1')).toEqual({
+        byCurrency: { USD: 100, LBP: 150_000 },
+        USD: 100,
+        LBP: 150_000,
+      });
     });
 
     it('keys separately by entity type so supplier and customer do not collide', () => {
       entityBalanceCache.set('customer', 'shared-id', { USD: 10, LBP: 0 });
       entityBalanceCache.set('supplier', 'shared-id', { USD: 20, LBP: 0 });
-      expect(entityBalanceCache.get('customer', 'shared-id')).toEqual({ USD: 10, LBP: 0 });
-      expect(entityBalanceCache.get('supplier', 'shared-id')).toEqual({ USD: 20, LBP: 0 });
+      expect(entityBalanceCache.get('customer', 'shared-id')).toEqual({
+        byCurrency: { USD: 10 },
+        USD: 10,
+        LBP: 0,
+      });
+      expect(entityBalanceCache.get('supplier', 'shared-id')).toEqual({
+        byCurrency: { USD: 20 },
+        USD: 20,
+        LBP: 0,
+      });
       expect(entityBalanceCache._size()).toBe(2);
     });
 
     it('overwrites an existing entry on set', () => {
       entityBalanceCache.set('customer', 'c-1', { USD: 100, LBP: 0 });
       entityBalanceCache.set('customer', 'c-1', { USD: 250, LBP: 0 });
-      expect(entityBalanceCache.get('customer', 'c-1')).toEqual({ USD: 250, LBP: 0 });
+      expect(entityBalanceCache.get('customer', 'c-1')).toEqual({
+        byCurrency: { USD: 250 },
+        USD: 250,
+        LBP: 0,
+      });
       expect(entityBalanceCache._size()).toBe(1);
     });
   });

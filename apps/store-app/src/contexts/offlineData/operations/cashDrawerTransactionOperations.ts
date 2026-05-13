@@ -18,6 +18,31 @@ import { getSystemEntity } from '../../../constants/systemEntities';
 import { TRANSACTION_CATEGORIES } from '../../../constants/transactionCategories';
 import type { CurrencyCode } from '@pos-platform/shared';
 
+/**
+ * Sum the cash-account net change across every currency present in the
+ * JSONB `amounts` maps, converting each leg to the cash drawer's
+ * canonical currency (currently LBP). Currencies without an exchange
+ * rate fall back to 1:1 via `safeConvert` — fine for single-currency
+ * stores where the cash drawer matches the only currency.
+ */
+function sumCashJournalChange(
+  entries: Array<{ amounts?: Partial<Record<CurrencyCode, { debit?: number; credit?: number }>> }>,
+  cashDrawerCurrency: CurrencyCode = 'LBP'
+): number {
+  let total = 0;
+  for (const entry of entries) {
+    const map = (entry.amounts ?? {}) as Record<string, { debit?: number; credit?: number }>;
+    for (const code of Object.keys(map) as CurrencyCode[]) {
+      const change = (map[code]?.debit ?? 0) - (map[code]?.credit ?? 0);
+      if (change === 0) continue;
+      total += code === cashDrawerCurrency
+        ? change
+        : currencyService.safeConvert(change, code, cashDrawerCurrency);
+    }
+  }
+  return total;
+}
+
 export interface CashDrawerAtomicsDeps {
   storeId: string | null | undefined;
   currentBranchId: string | null;
@@ -115,13 +140,7 @@ export function createCashDrawerAtomics(deps: CashDrawerAtomicsDeps) {
       .and((entry: any) => entry.account_code === '1100' && entry.is_posted === true)
       .toArray();
 
-    let balanceChange = 0;
-    for (const entry of cashJournalEntries) {
-      const usdChange = (entry.debit_usd || 0) - (entry.credit_usd || 0);
-      const lbpChange = (entry.debit_lbp || 0) - (entry.credit_lbp || 0);
-      if (usdChange !== 0) balanceChange += currencyService.convert(usdChange, 'USD', 'LBP');
-      balanceChange += lbpChange;
-    }
+    const balanceChange = sumCashJournalChange(cashJournalEntries);
 
     return {
       transactionId,
@@ -212,13 +231,7 @@ export function createCashDrawerAtomics(deps: CashDrawerAtomicsDeps) {
       .and((entry: any) => entry.account_code === '1100' && entry.is_posted === true)
       .toArray();
 
-    let balanceChange = 0;
-    for (const entry of cashJournalEntries) {
-      const usdChange = (entry.debit_usd || 0) - (entry.credit_usd || 0);
-      const lbpChange = (entry.debit_lbp || 0) - (entry.credit_lbp || 0);
-      if (usdChange !== 0) balanceChange += currencyService.convert(usdChange, 'USD', 'LBP');
-      balanceChange += lbpChange;
-    }
+    const balanceChange = sumCashJournalChange(cashJournalEntries);
 
     return {
       transactionId,
@@ -306,13 +319,7 @@ export function createCashDrawerAtomics(deps: CashDrawerAtomicsDeps) {
       .and((entry: any) => entry.account_code === '1100' && entry.is_posted === true)
       .toArray();
 
-    let balanceChange = 0;
-    for (const entry of cashJournalEntries) {
-      const usdChange = (entry.debit_usd || 0) - (entry.credit_usd || 0);
-      const lbpChange = (entry.debit_lbp || 0) - (entry.credit_lbp || 0);
-      if (usdChange !== 0) balanceChange += currencyService.convert(usdChange, 'USD', 'LBP');
-      balanceChange += lbpChange;
-    }
+    const balanceChange = sumCashJournalChange(cashJournalEntries);
 
     return {
       transactionId,

@@ -19,7 +19,7 @@ export function useCashDrawerDataLayer(adapter: CashDrawerDataLayerAdapter): Cas
     debouncedSync,
   } = adapter;
 
-  const [cashDrawer, setCashDrawer] = useState<any>(null);
+  const [cashDrawer, setCashDrawer] = useState<CashDrawerDataLayerResult['cashDrawer']>(null);
 
   const refreshCashDrawerStatus = useCallback(async () => {
     if (!storeId || !currentBranchId) return;
@@ -34,6 +34,8 @@ export function useCashDrawerDataLayer(adapter: CashDrawerDataLayerAdapter): Cas
           currentBalance: status.currentBalance,
           currency: currency,
           lastUpdated: new Date().toISOString(),
+          openedAt: status.openedAt,
+          openingAmount: status.openingAmount ?? 0,
         });
       } else {
         setCashDrawer(null);
@@ -65,13 +67,16 @@ export function useCashDrawerDataLayer(adapter: CashDrawerDataLayerAdapter): Cas
           throw new Error('Failed to retrieve cash drawer account after opening session');
         }
 
+        const nowIso = new Date().toISOString();
         setCashDrawer({
           id: result.sessionId!,
           accountId: account.id,
           status: 'open',
           currentBalance: amount,
           currency: (account as any).currency,
-          lastUpdated: new Date().toISOString(),
+          lastUpdated: nowIso,
+          openedAt: nowIso,
+          openingAmount: amount,
         });
 
         await refreshCashDrawerStatus();

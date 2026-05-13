@@ -69,11 +69,7 @@ export class ReceivedItemsJournalService {
         account_name: entry.account_name,
         entity_id: entry.entity_id,
         entity_type: entry.entity_type,
-        debit_usd: entry.credit_usd, // Swap: original credit becomes debit
-        credit_usd: entry.debit_usd, // Swap: original debit becomes credit
-        debit_lbp: entry.credit_lbp,
-        credit_lbp: entry.debit_lbp,
-        // Phase 11 dual-write: full per-currency reversal preserves AED/EUR/etc.
+        // Per-currency reversal: swap debit/credit for every currency present.
         amounts: reverseAmounts(amountsFromLegacyEntry(entry)),
         description: `Reversal: ${entry.description || reason}`,
         posted_date: postedDate,
@@ -169,21 +165,9 @@ export class ReceivedItemsJournalService {
     const reversalEntries: JournalEntry[] = [];
 
     for (const entry of originalEntries) {
-      // Calculate proportional amounts
-      const proportionalDebitUSD = entry.debit_usd * itemRatio;
-      const proportionalCreditUSD = entry.credit_usd * itemRatio;
-      const proportionalDebitLBP = entry.debit_lbp * itemRatio;
-      const proportionalCreditLBP = entry.credit_lbp * itemRatio;
-
-      // Skip if amounts are too small (rounding)
-      if (proportionalDebitUSD === 0 && proportionalCreditUSD === 0 && 
-          proportionalDebitLBP === 0 && proportionalCreditLBP === 0) {
-        continue;
-      }
-
-      // Phase 11 dual-write: build a reversed, proportional amounts map
-      // by walking every currency present in the original entry. This
-      // also covers AED/EUR/etc. — not just USD/LBP.
+      // Build a reversed, proportional amounts map by walking every
+      // currency present in the original entry's JSONB map. The reversal's
+      // debit is the original's credit (and vice versa), scaled by ratio.
       const originalAmounts = amountsFromLegacyEntry(entry);
       const reversedProportional: typeof originalAmounts = {};
       for (const [code, { debit, credit }] of Object.entries(originalAmounts) as Array<
@@ -192,10 +176,12 @@ export class ReceivedItemsJournalService {
         const propDebit = (debit ?? 0) * itemRatio;
         const propCredit = (credit ?? 0) * itemRatio;
         if (propDebit !== 0 || propCredit !== 0) {
-          // Swap: the reversal's debit is the original's credit, etc.
           reversedProportional[code] = { debit: propCredit, credit: propDebit };
         }
       }
+
+      // Skip if every currency rounded to zero
+      if (Object.keys(reversedProportional).length === 0) continue;
 
       const reversalEntry: JournalEntry = {
         id: createId(),
@@ -206,10 +192,6 @@ export class ReceivedItemsJournalService {
         account_name: entry.account_name,
         entity_id: entry.entity_id,
         entity_type: entry.entity_type,
-        debit_usd: proportionalCreditUSD, // Swap
-        credit_usd: proportionalDebitUSD, // Swap
-        debit_lbp: proportionalCreditLBP,
-        credit_lbp: proportionalDebitLBP,
         amounts: reversedProportional,
         description: `Reversal: ${entry.description || reason} (Item: ${itemId})`,
         posted_date: postedDate,

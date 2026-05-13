@@ -28,6 +28,9 @@ import CashDrawerOpeningModal from '../components/common/CashDrawerOpeningModal'
 import TransactionListModal from '../components/common/TransactionListModal';
 import RecordExpenseModal from '../components/common/RecordExpenseModal';
 import { getLocalDateString, getTodayLocalDate } from '../utils/dateUtils';
+import { currencyService } from '../services/currencyService';
+import type { CurrencyCode } from '@pos-platform/shared';
+import { formatTime } from '../utils/numberFormat';
 
 interface CashDrawerStatus {
   currentBalance: number; // Keep for backward compatibility
@@ -42,6 +45,7 @@ export default function Home() {
 
   const navigate = useNavigate();
   const [cashDrawerStatus, setCashDrawerStatus] = useState<CashDrawerStatus | null>(null);
+  const [cashAffectingTxIds, setCashAffectingTxIds] = useState<Set<string>>(() => new Set());
   const [isLoadingCashDrawer, setIsLoadingCashDrawer] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [showOpeningModal, setShowOpeningModal] = useState(false);
@@ -63,13 +67,15 @@ export default function Home() {
   const customerBalances = useEntityBalances(customerIds, 'customer', true);
 
   const customers = customerEntities.map(c => {
-    const balances = customerBalances.getBalances(c.id) || { USD: 0, LBP: 0 };
+    const byCurrency = customerBalances.getBalances(c.id) || {};
     return {
       ...c,
       isActive: c.is_active,
       createdAt: c.created_at,
-      lb_balance: balances.LBP,  // From journal entries
-      usd_balance: balances.USD  // From journal entries
+      balances: byCurrency,
+      // Legacy shortcuts for older code paths.
+      lb_balance: byCurrency.LBP ?? 0,
+      usd_balance: byCurrency.USD ?? 0
     };
   });
   const sales = Array.isArray(raw.sales) ? raw.sales.map(s => ({ ...s, createdAt: s.created_at })) : [];
@@ -80,7 +86,7 @@ export default function Home() {
   const lowStockAlertsEnabled = raw.lowStockAlertsEnabled;
   const lowStockThreshold = raw.lowStockThreshold;
   const exchangeRate = raw.exchangeRate || 89500; // Get exchange rate from context
-  const storePreferredCurrency = raw.currency || 'LBP'; // SINGLE SOURCE OF TRUTH from context
+  const storePreferredCurrency = (raw.currency || 'USD') as CurrencyCode; // SINGLE SOURCE OF TRUTH from context
   const { userProfile } = useSupabaseAuth();
   const [showFastActions, setShowFastActions] = useState(true);
   const { t } = useI18n();
@@ -102,73 +108,36 @@ export default function Home() {
     ), [sales, today]
   );
 
-  // Session start: prefer the open cash drawer session's opened_at so expenses/income
-  // align with the cash drawer balance (which is computed for the active session).
-  // Fallback to start-of-today when no session is open.
-  const sessionStartMs = useMemo(() => {
-    const openedAt = (cashDrawer as any)?.opened_at;
-    if (openedAt) {
-      const t = new Date(openedAt).getTime();
-      if (!Number.isNaN(t)) return t;
-    }
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-    return startOfToday.getTime();
-  }, [cashDrawer]);
-
+  // A transaction is "cash-affecting" iff it has at least one posted journal
+  // entry on account 1100 (Cash) inside the active session window — the same
+  // source of truth the cash drawer balance is computed from. The id set is
+  // fetched inside loadCashDrawerStatus (journal_entries are intentionally
+  // not hydrated into context per crudHelperService §5.1).
   const sessionExpenses = useMemo(() =>
-    transactions.filter(t => {
-      if (t.type !== 'expense' || !t.createdAt) return false;
-      const ts = new Date(t.createdAt).getTime();
-      return !Number.isNaN(ts) && ts >= sessionStartMs;
-    }), [transactions, sessionStartMs]
+    transactions.filter(t => t.type === 'expense' && cashAffectingTxIds.has(t.id)),
+    [transactions, cashAffectingTxIds]
   );
 
   const sessionIncome = useMemo(() =>
-    transactions.filter(t => {
-      if (t.type !== 'income' || !t.createdAt) return false;
-      const ts = new Date(t.createdAt).getTime();
-      return !Number.isNaN(ts) && ts >= sessionStartMs;
-    }), [transactions, sessionStartMs]
+    transactions.filter(t => t.type === 'income' && cashAffectingTxIds.has(t.id)),
+    [transactions, cashAffectingTxIds]
   );
 
   // Helper function to convert expense amounts to preferred currency
   const convertExpenseAmount = useCallback((expense: any): number => {
     const amount = expense.amount || 0;
-    const transactionCurrency = expense.currency || 'LBP';
-
-    if (transactionCurrency === storePreferredCurrency) {
-      return amount;
-    }
-
-    if (transactionCurrency === 'USD' && storePreferredCurrency === 'LBP') {
-      return amount * exchangeRate;
-    } else if (transactionCurrency === 'LBP' && storePreferredCurrency === 'USD') {
-      return amount / exchangeRate;
-    }
-
-    return amount;
-  }, [storePreferredCurrency, exchangeRate]);
+    const transactionCurrency = (expense.currency as CurrencyCode | undefined) || storePreferredCurrency;
+    if (transactionCurrency === storePreferredCurrency) return amount;
+    return currencyService.safeConvert(amount, transactionCurrency, storePreferredCurrency);
+  }, [storePreferredCurrency]);
 
   // Helper function to convert income amounts to preferred currency
   const convertIncomeAmount = useCallback((income: any): number => {
     const amount = income.amount || 0;
-    const transactionCurrency = income.currency || 'LBP';
-
-    // If transaction currency matches store preferred currency, return as-is
-    if (transactionCurrency === storePreferredCurrency) {
-      return amount;
-    }
-
-    // Convert between currencies
-    if (transactionCurrency === 'USD' && storePreferredCurrency === 'LBP') {
-      return amount * exchangeRate;
-    } else if (transactionCurrency === 'LBP' && storePreferredCurrency === 'USD') {
-      return amount / exchangeRate;
-    }
-
-    return amount;
-  }, [storePreferredCurrency, exchangeRate]);
+    const transactionCurrency = (income.currency as CurrencyCode | undefined) || storePreferredCurrency;
+    if (transactionCurrency === storePreferredCurrency) return amount;
+    return currencyService.safeConvert(amount, transactionCurrency, storePreferredCurrency);
+  }, [storePreferredCurrency]);
 
   // Helper function to get local cash drawer session from context
   const getLocalCurrentSession = useCallback(() => {
@@ -213,6 +182,7 @@ export default function Home() {
           if (prev === null) return prev;
           return null;
         });
+        setCashAffectingTxIds(prev => (prev.size === 0 ? prev : new Set()));
         prevBalancesRef.current = null;
         setIsInitialLoad(false);
         setIsLoadingCashDrawer(false);
@@ -220,15 +190,27 @@ export default function Home() {
       }
 
       // Get balances for both currencies computed from journal entries (account_code = '1100')
-      const balances = await cashDrawerUpdateService.getCurrentCashDrawerBalances(
-        raw.storeId,
-        raw.currentBranchId
-      );
+      // and, in parallel, the set of transaction IDs that posted a 1100 entry
+      // within the active session — used to filter the income/expense cards so
+      // they reflect only cash-affecting transactions.
+      const [balances, txIds] = await Promise.all([
+        cashDrawerUpdateService.getCurrentCashDrawerBalances(raw.storeId, raw.currentBranchId),
+        cashDrawerUpdateService.getCurrentSessionCashTransactionIds(raw.storeId, raw.currentBranchId),
+      ]);
+      setCashAffectingTxIds(prev => {
+        if (prev.size === txIds.size && [...prev].every(id => txIds.has(id))) return prev;
+        return txIds;
+      });
 
-      // Calculate current balance in store's preferred currency for backward compatibility
-      const currentBalance = storePreferredCurrency === 'USD'
-        ? balances.USD + (balances.LBP / exchangeRate)
-        : balances.LBP + (balances.USD * exchangeRate);
+      // Calculate current balance in store's preferred currency.
+      // Each leg only contributes when its rate is available; otherwise it stays 0.
+      const usdInPreferred = currencyService.canConvert('USD', storePreferredCurrency)
+        ? currencyService.convert(balances.USD || 0, 'USD', storePreferredCurrency)
+        : (storePreferredCurrency === 'USD' ? (balances.USD || 0) : 0);
+      const lbpInPreferred = currencyService.canConvert('LBP', storePreferredCurrency)
+        ? currencyService.convert(balances.LBP || 0, 'LBP', storePreferredCurrency)
+        : (storePreferredCurrency === 'LBP' ? (balances.LBP || 0) : 0);
+      const currentBalance = usdInPreferred + lbpInPreferred;
 
       const localHistory = getLocalCashDrawerHistory();
 
@@ -257,7 +239,7 @@ export default function Home() {
             lbpBalance: balances.LBP,
             lastUpdated: new Date().toISOString(),
             transactionCount: localHistory.length,
-            openedAt: currentSession?.opened_at || currentSession?.lastUpdated || ''
+            openedAt: currentSession?.openedAt || currentSession?.lastUpdated || ''
           };
         });
       }
@@ -287,11 +269,7 @@ export default function Home() {
 
   // Helper function to format currency based on store's preferred currency
   const formatCurrencyForStore = useCallback((amount: number): string => {
-    if (storePreferredCurrency === 'LBP') {
-      return `${Math.round(amount).toLocaleString()} ل.ل`;
-    }
-    // For USD, show 2 decimal places
-    return `$${amount.toFixed(2)}`;
+    return currencyService.format(amount, storePreferredCurrency);
   }, [storePreferredCurrency]);
 
   // Track previous cash drawer session ID to detect changes
@@ -428,11 +406,11 @@ export default function Home() {
       throw new Error('User not authenticated');
     }
 
-    // Convert the entered amount to LBP for storage
-    // User enters in preferred currency, we store in LBP
+    // Convert the entered amount to LBP for storage when LBP is in use.
+    // For USD-only stores (no LBP rate), pass the amount through.
     let amountInLBP = openingAmount;
-    if (storePreferredCurrency === 'USD') {
-      amountInLBP = openingAmount * exchangeRate;
+    if (storePreferredCurrency !== 'LBP' && currencyService.canConvert(storePreferredCurrency, 'LBP')) {
+      amountInLBP = currencyService.convert(openingAmount, storePreferredCurrency, 'LBP');
     }
 
     await openCashDrawer(amountInLBP, userProfile.id);
@@ -530,24 +508,38 @@ export default function Home() {
     const usdBalance = cashDrawerStatus.usdBalance;
     const lbpBalance = cashDrawerStatus.lbpBalance;
 
-    // If showing combined balance, convert both to preferred currency and sum
+    // The cash drawer service still returns a {USD, LBP}-keyed shape — fold
+    // it into a per-currency map so the rest of this function can iterate
+    // only the currencies the store actually accepts.
+    const balanceByCurrency: Partial<Record<CurrencyCode, number>> = {
+      USD: usdBalance,
+      LBP: lbpBalance,
+    };
+
+    // If showing combined balance, convert every accepted currency to the
+    // preferred currency and sum.
     if (showCombinedBalance) {
-      let combinedAmount: number;
-      if (storePreferredCurrency === 'USD') {
-        // Convert LBP to USD and add to USD balance
-        combinedAmount = usdBalance + (lbpBalance / exchangeRate);
-      } else {
-        // Convert USD to LBP and add to LBP balance
-        combinedAmount = lbpBalance + (usdBalance * exchangeRate);
-      }
-      return formatCurrencyForStore(combinedAmount);
+      const total = raw.acceptedCurrencies.reduce((sum, code) => {
+        const value = balanceByCurrency[code] ?? 0;
+        if (value === 0) return sum;
+        if (code === storePreferredCurrency) return sum + value;
+        if (currencyService.canConvert(code, storePreferredCurrency)) {
+          return sum + currencyService.convert(value, code, storePreferredCurrency);
+        }
+        return sum; // No rate — drop this leg rather than silently mis-summing.
+      }, 0);
+      return formatCurrencyForStore(total);
     }
 
-    // Dual currency view: show both currencies
-    const usdFormatted = `$${usdBalance.toFixed(2)}`;
-    const lbpFormatted = `${Math.round(lbpBalance).toLocaleString()} ل.ل`;
-    return `${usdFormatted}\n${lbpFormatted}`;
-  }, [cashDrawerStatus, showCombinedBalance, storePreferredCurrency, exchangeRate, isInitialLoad, isLoadingCashDrawer, formatCurrencyForStore, t]);
+    // Dual-currency view: render one line per accepted currency.
+    // Falls back to the preferred currency alone when a USD-only or LBP-only
+    // store has no second leg to display.
+    const lines = raw.acceptedCurrencies
+      .map(code => currencyService.format(balanceByCurrency[code] ?? 0, code));
+    return lines.length > 0
+      ? lines.join('\n')
+      : currencyService.format(0, storePreferredCurrency);
+  }, [cashDrawerStatus, showCombinedBalance, storePreferredCurrency, raw.acceptedCurrencies, isInitialLoad, isLoadingCashDrawer, formatCurrencyForStore, t]);
 
   const getCashDrawerDisplayChange = useCallback(() => {
     if (isInitialLoad && isLoadingCashDrawer) {
@@ -558,7 +550,7 @@ export default function Home() {
       return t('home.notOpenedToday');
     }
 
-    return `${t('common.opened')}: ${new Date(cashDrawerStatus.openedAt).toLocaleTimeString()}`;
+    return `${t('common.opened')}: ${formatTime(cashDrawerStatus.openedAt)}`;
   }, [cashDrawerStatus, isInitialLoad, isLoadingCashDrawer, t]);
 
   const stats = [
@@ -568,11 +560,17 @@ export default function Home() {
       icon: DollarSign,
       color: 'bg-green-500',
       change: getCashDrawerDisplayChange(),
-      isLoading: isLoadingCashDrawer && !isInitialLoad && cashDrawerStatus !== null, // Show subtle loading indicator only during updates, not initial load
       isCashDrawer: true,
       showCombinedBalance,
-      onToggleCombined: () => setShowCombinedBalance(!showCombinedBalance),
+      // The combined-vs-split toggle only has meaning when the store accepts
+      // more than one currency. For single-currency stores both views render
+      // the same thing, so we hide the button by leaving `onToggleCombined`
+      // undefined (StatCard already gates the button on its presence).
+      onToggleCombined: raw.isMultiCurrency
+        ? () => setShowCombinedBalance(!showCombinedBalance)
+        : undefined,
     },
+    
     {
       title: t('home.sessionExpenses', { currency: t(`common.currency.${storePreferredCurrency}`) }),
       value: formatCurrencyForStore(sessionExpenses.reduce((sum, expense) => sum + convertExpenseAmount(expense), 0)),
@@ -589,13 +587,13 @@ export default function Home() {
       change: `${sessionIncome.length} ${t('common.transactions')}`,
       onClick: () => setShowIncomeModal(true)
     },
-    {
+    ...(lowStockAlertsEnabled ? [{
       title: t('home.lowStockItems'),
-      value: lowStockAlertsEnabled ? lowStockItems.length.toString() : lowStockItems.length.toString(),
+      value: lowStockItems.length.toString(),
       icon: AlertTriangle,
-      color: lowStockAlertsEnabled ? 'bg-amber-500' : 'bg-gray-400',
-      change: lowStockAlertsEnabled ? t('home.needAttention') : t('home.alertsDisabled')
-    }
+      color: 'bg-amber-500',
+      change: t('home.needAttention')
+    }] : [])
   ];
 
   return (
@@ -645,7 +643,7 @@ export default function Home() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div className={`grid grid-cols-1 md:grid-cols-2 ${lowStockAlertsEnabled ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-6 mb-8`}>
         {stats.map((stat, index) => (
           <StatCard
             key={index}
@@ -699,7 +697,7 @@ export default function Home() {
         title={t('home.sessionExpenses', { currency: t(`common.currency.${storePreferredCurrency}`) })}
         formatCurrency={formatCurrencyForStore}
         convertAmount={convertExpenseAmount}
-        storePreferredCurrency={storePreferredCurrency as 'USD' | 'LBP'}
+        storePreferredCurrency={storePreferredCurrency}
       />
 
       <TransactionListModal
@@ -709,7 +707,7 @@ export default function Home() {
         title={t('home.sessionIncome', { currency: t(`common.currency.${storePreferredCurrency}`) })}
         formatCurrency={formatCurrencyForStore}
         convertAmount={convertIncomeAmount}
-        storePreferredCurrency={storePreferredCurrency as 'USD' | 'LBP'}
+        storePreferredCurrency={storePreferredCurrency}
       />
 
       {/* Cash Drawer Opening Modal */}

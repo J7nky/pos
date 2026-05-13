@@ -133,14 +133,21 @@ export interface EntityOperationResult extends OperationResultWithId {
 }
 
 /**
- * Entity with balance result
- * Use for entity queries that include balance information
+ * Entity with balance result.
+ * Use for entity queries that include balance information.
+ *
+ * `byCurrency` is the primary surface; `usdBalance`/`lbpBalance` are
+ * legacy shortcuts kept for back-compat.
  */
 export interface EntityWithBalanceResult {
   entityId: string;
   entityName: string;
   entityType: 'customer' | 'supplier' | 'employee';
+  /** Per-currency balance map. */
+  byCurrency: Partial<Record<import('@pos-platform/shared').CurrencyCode, number>>;
+  /** @deprecated Use `byCurrency.USD`. */
   usdBalance: number;
+  /** @deprecated Use `byCurrency.LBP`. */
   lbpBalance: number;
   lastTransactionDate?: string;
 }

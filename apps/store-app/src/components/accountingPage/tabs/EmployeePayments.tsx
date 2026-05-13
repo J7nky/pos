@@ -8,6 +8,9 @@ import { Pagination } from '../../../components/common/Pagination';
 import { useI18n } from '../../../i18n';
 import { rtlTableHeaderClasses, rtlTableCellClasses, rtlFlexClasses, rtlSpacingClasses } from '../../../utils/rtl';
 import { useEntityBalances } from '../../../hooks/useEntityBalances';
+import { currencyService } from '../../../services/currencyService';
+import type { CurrencyCode } from '@pos-platform/shared';
+import { formatDateTime } from '../../../utils/numberFormat';
 
 interface EmployeePaymentsProps {
   employees: Employee[];
@@ -16,14 +19,14 @@ interface EmployeePaymentsProps {
   processEmployeePayment: (params: {
     employeeId: string;
     amount: string;
-    currency: 'USD' | 'LBP';
+    currency: CurrencyCode;
     description: string;
     reference: string;
     storeId: string;
     createdBy: string;
   }) => Promise<{ success: boolean; error?: string }>;
-  formatCurrency: (amount: number, currency: 'USD' | 'LBP') => string;
-  formatCurrencyWithSymbol: (amount: number, currency: 'USD' | 'LBP') => string;
+  formatCurrency: (amount: number, currency: CurrencyCode) => string;
+  formatCurrencyWithSymbol: (amount: number, currency: CurrencyCode) => string;
   onViewAccountStatement?: (employee: Employee) => void;
 }
 
@@ -41,7 +44,7 @@ export default function EmployeePayments({
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [paymentForm, setPaymentForm] = useState({
     amount: '',
-    currency: 'USD' as 'USD' | 'LBP',
+    currency: raw.preferredCurrency as CurrencyCode,
     description: ''
   });
   const [loading, setLoading] = useState(false);
@@ -111,14 +114,11 @@ export default function EmployeePayments({
 
   // Format balance display for employees
   // For employees: Positive balance = we owe them (unpaid salary), Negative = overpaid
-  const formatBalanceDisplay = (balance: number, currency: 'USD' | 'LBP') => {
+  const formatBalanceDisplay = (balance: number, currency: CurrencyCode) => {
     if (balance > 0) {
       // We owe them (unpaid salary)
-      const amountText = currency === 'USD' 
-        ? `$${balance.toFixed(2)}` 
-        : `${Math.round(balance).toLocaleString()} ل.ل`;
       return {
-        text: `+${amountText}`,
+        text: `+${currencyService.format(balance, currency)}`,
         label: t('customers.weOwe') || 'We Owe',
         color: 'text-blue-700',
         bgColor: 'bg-blue-50',
@@ -128,11 +128,8 @@ export default function EmployeePayments({
       };
     } else if (balance < 0) {
       // They overpaid (we paid more than owed)
-      const amountText = currency === 'USD' 
-        ? `$${Math.abs(balance).toFixed(2)}` 
-        : `${Math.round(Math.abs(balance)).toLocaleString()} ل.ل`;
       return {
-        text: `-${amountText}`,
+        text: `-${currencyService.format(Math.abs(balance), currency)}`,
         label: t('customers.overpaid') || 'Overpaid',
         color: 'text-green-700',
         bgColor: 'bg-green-50',
@@ -142,9 +139,8 @@ export default function EmployeePayments({
       };
     } else {
       // Paid up
-      const amountText = currency === 'USD' ? '$0.00' : '0 ل.ل';
       return {
-        text: amountText,
+        text: currencyService.format(0, currency),
         label: t('customers.paid') || 'Paid',
         color: 'text-gray-700',
         bgColor: 'bg-gray-50',
@@ -189,7 +185,7 @@ export default function EmployeePayments({
       await refreshData();
       // Clear form and selection after refresh
       setShowPaymentForm(false);
-      setPaymentForm({ amount: '', currency: 'USD', description: '' });
+      setPaymentForm({ amount: '', currency: raw.preferredCurrency, description: '' });
       setSelectedEmployee(null);
     } else {
       showToast(result.error || t('customers.failedToProcessPayment'), 'error');
@@ -242,8 +238,7 @@ const { t } = useI18n();
                   
                   // Get calculated balance from journal entries (account 2200)
                   const balanceData = employeeBalances.get(employee.id);
-                  const usdBalance = balanceData?.USD || 0;
-                  const lbpBalance = balanceData?.LBP || 0;
+                  const balanceMap = balanceData?.byCurrency ?? {};
 
                   return (
                     <tr key={employee.id} className="hover:bg-gray-50">
@@ -264,34 +259,20 @@ const { t } = useI18n();
                           <div className="text-sm text-gray-400">Loading...</div>
                         ) : (
                           <div className="space-y-1">
-                            {(() => {
-                              const lbpBalanceDisplay = formatBalanceDisplay(lbpBalance, 'LBP');
+                            {raw.acceptedCurrencies.map(code => {
+                              const display = formatBalanceDisplay(balanceMap[code] ?? 0, code);
                               return (
-                                <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border ${lbpBalanceDisplay.bgColor} ${lbpBalanceDisplay.borderColor}`}>
-                                  <span className="text-base">{lbpBalanceDisplay.icon}</span>
-                                  <span className={`text-xs font-semibold ${lbpBalanceDisplay.color}`}>
-                                    {lbpBalanceDisplay.label}:
+                                <div key={code} className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border ${display.bgColor} ${display.borderColor}`}>
+                                  <span className="text-base">{display.icon}</span>
+                                  <span className={`text-xs font-semibold ${display.color}`}>
+                                    {display.label}:
                                   </span>
-                                  <span className={`text-sm font-bold ${lbpBalanceDisplay.color}`}>
-                                    {lbpBalanceDisplay.text}
+                                  <span className={`text-sm font-bold ${display.color}`}>
+                                    {display.text}
                                   </span>
                                 </div>
                               );
-                            })()}
-                            {(() => {
-                              const usdBalanceDisplay = formatBalanceDisplay(usdBalance, 'USD');
-                              return (
-                                <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border ${usdBalanceDisplay.bgColor} ${usdBalanceDisplay.borderColor}`}>
-                                  <span className="text-base">{usdBalanceDisplay.icon}</span>
-                                  <span className={`text-xs font-semibold ${usdBalanceDisplay.color}`}>
-                                    {usdBalanceDisplay.label}:
-                                  </span>
-                                  <span className={`text-sm font-bold ${usdBalanceDisplay.color}`}>
-                                    {usdBalanceDisplay.text}
-                                  </span>
-                                </div>
-                              );
-                            })()}
+                            })}
                           </div>
                         )}
                       </td>
@@ -399,17 +380,22 @@ const { t } = useI18n();
                   />
                 </div>
 
-                <div>
+                {raw.isMultiCurrency && (
+                  <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">{t('dashboard.currency')} *</label>
-                  <select
-                    value={paymentForm.currency}
-                    onChange={(e) => setPaymentForm(prev => ({ ...prev, currency: e.target.value as 'USD' | 'LBP' }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="USD">{t('customers.usd')} ($)</option>
-                    <option value="LBP">{t('customers.lbp')} (ل.ل)</option>
-                  </select>
-                </div>
+                    <select
+                      value={paymentForm.currency}
+                      onChange={(e) => setPaymentForm(prev => ({ ...prev, currency: e.target.value as CurrencyCode }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      {raw.acceptedCurrencies.map(code => (
+                        <option key={code} value={code}>
+                          {t(`common.currency.${code}`) || code} ({currencyService.getMeta(code).symbol})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -428,7 +414,7 @@ const { t } = useI18n();
                   type="button"
                   onClick={() => {
                     setShowPaymentForm(false);
-                    setPaymentForm({ amount: '', currency: 'USD', description: '' });
+                    setPaymentForm({ amount: '', currency: raw.preferredCurrency, description: '' });
                     setSelectedEmployee(null);
                   }}
                   className="px-6 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
@@ -481,10 +467,10 @@ const { t } = useI18n();
                       return (
                         <tr key={att.id}>
                           <td className={`${rtlTableCellClasses} whitespace-nowrap text-sm text-gray-900`}>
-                            {new Date(att.check_in_at).toLocaleString()}
+                            {formatDateTime(att.check_in_at)}
                           </td>
                           <td className={`${rtlTableCellClasses} whitespace-nowrap text-sm text-gray-900`}>
-                            {att.check_out_at ? new Date(att.check_out_at).toLocaleString() : '-'}
+                            {att.check_out_at ? formatDateTime(att.check_out_at) : '-'}
                           </td>
                           <td className={`${rtlTableCellClasses} whitespace-nowrap text-sm text-gray-900`}>
                             {hours !== null ? `${hours.toFixed(2)} hrs` : '-'}

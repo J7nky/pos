@@ -128,6 +128,39 @@ export class CurrencyService {
     return to === 'USD' ? amountUsd : amountUsd * (rateTo as number);
   }
 
+  /**
+   * Returns true when convert(from, to) can succeed without throwing
+   * (i.e. both legs of the USD-pivot have a positive rate). Use this
+   * to gate UI conversions in render paths that should degrade rather
+   * than crash when a rate is missing (e.g. a USD-only store reading
+   * a stranded LBP balance).
+   */
+  public canConvert(from: CurrencyCode, to: CurrencyCode): boolean {
+    if (from === to) return true;
+    if (!this.isInitialized) return false;
+    const rateFrom = from === 'USD' ? 1 : this.rates[from];
+    const rateTo = to === 'USD' ? 1 : this.rates[to];
+    return (
+      rateFrom !== undefined && rateFrom > 0 &&
+      rateTo !== undefined && rateTo > 0
+    );
+  }
+
+  /**
+   * Render-path helper: returns the converted amount when a rate is
+   * available, or the input amount unchanged (with a dev warning) when
+   * not. Use only on UI/dashboard surfaces — never on money-write
+   * paths, which must keep using convert() so missing rates surface
+   * loudly.
+   */
+  public safeConvert(amount: number, from: CurrencyCode, to: CurrencyCode): number {
+    if (this.canConvert(from, to)) return this.convert(amount, from, to);
+    if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
+      console.warn(`safeConvert: no rate for ${from} → ${to}; returning amount as-is`);
+    }
+    return amount;
+  }
+
   public format(amount: number, currency: CurrencyCode): string {
     const meta = CURRENCY_META[currency as keyof typeof CURRENCY_META];
     if (!meta) {
@@ -135,14 +168,14 @@ export class CurrencyService {
         UNKNOWN_FORMAT_WARNED.add(currency);
         console.warn(`Unknown currency code for format: ${currency}`);
       }
-      return new Intl.NumberFormat('en-US', {
+      return new Intl.NumberFormat('en-US-u-nu-latn', {
         style: 'currency',
         currency: 'USD',
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       }).format(amount);
     }
-    return new Intl.NumberFormat(meta.locale, {
+    return new Intl.NumberFormat(`${meta.locale}-u-nu-latn`, {
       style: 'currency',
       currency: meta.code,
       minimumFractionDigits: meta.decimals,

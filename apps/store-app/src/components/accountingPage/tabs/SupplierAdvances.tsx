@@ -16,6 +16,10 @@ import { Pagination } from '../../../components/common/Pagination';
 import { getTranslatedString } from '../../../utils/multilingual';
 import { normalizeNameForComparison } from '../../../utils/nameNormalization';
 import { getLocalDateString, getTodayLocalDate } from '../../../utils/dateUtils';
+import { useOfflineData } from '../../../contexts/OfflineDataContext';
+import { currencyService } from '../../../services/currencyService';
+import { getLegacyBalance } from '../../../utils/currencyFieldMap';
+import type { CurrencyCode } from '@pos-platform/shared';
 
 interface SupplierAdvancesProps {
   suppliers: Supplier[];
@@ -26,7 +30,7 @@ interface SupplierAdvancesProps {
   onProcessAdvance: (data: {
     supplierId: string;
     amount: number;
-    currency: 'USD' | 'LBP';
+    currency: CurrencyCode;
     type: 'give' | 'deduct';
     description: string;
     date: string;
@@ -51,22 +55,23 @@ export default function SupplierAdvances({
   refreshData
 }: SupplierAdvancesProps) {
   const { t } = useI18n();
-  
+  const { acceptedCurrencies, preferredCurrency, isMultiCurrency } = useOfflineData();
+
   // State
   const [searchTerm, setSearchTerm] = useState('');
   const [showAdvanceForm, setShowAdvanceForm] = useState(false);
   const [showSupplierForm, setShowSupplierForm] = useState(false);
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
-  const [currencyFilter, setCurrencyFilter] = useState<'all' | 'USD' | 'LBP'>('all');
+  const [currencyFilter, setCurrencyFilter] = useState<'all' | CurrencyCode>('all');
   const [editingAdvance, setEditingAdvance] = useState<Transaction | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
-  
+
   // Advance form state
   const [advanceForm, setAdvanceForm] = useState({
     supplierId: '',
     amount: '',
-    currency: 'USD' as 'USD' | 'LBP',
+    currency: preferredCurrency as CurrencyCode,
     type: 'give' as 'give' | 'deduct',
     description: '',
     date: getTodayLocalDate(),
@@ -75,27 +80,31 @@ export default function SupplierAdvances({
 
   // Calculate advance statistics
   const advanceStats = useMemo(() => {
-    const totalUSD = suppliers.reduce((sum, s) => sum + (s.advance_usd_balance || 0), 0);
-    const totalLBP = suppliers.reduce((sum, s) => sum + (s.advance_lb_balance || 0), 0);
-    const suppliersWithAdvances = suppliers.filter(s => 
-      (s.advance_usd_balance || 0) > 0 || (s.advance_lb_balance || 0) > 0
+    const totalsByCurrency: Partial<Record<CurrencyCode, number>> = {};
+    for (const code of acceptedCurrencies) {
+      totalsByCurrency[code] = suppliers.reduce(
+        (sum, s) => sum + getLegacyBalance(s as unknown as Record<string, unknown>, code, 'advance'),
+        0
+      );
+    }
+    const suppliersWithAdvances = suppliers.filter(s =>
+      acceptedCurrencies.some(code => getLegacyBalance(s as unknown as Record<string, unknown>, code, 'advance') > 0)
     ).length;
 
     // Get advance transactions (excluding deleted)
     const advanceTransactions = transactions.filter(t => {
-      const descriptionStr = typeof t.description === 'string' 
-        ? t.description 
+      const descriptionStr = typeof t.description === 'string'
+        ? t.description
         : getTranslatedString(t.description, 'en', 'en');
       return (t.category === 'Supplier Advance' || descriptionStr?.toLowerCase().includes('advance')) && !t._deleted;
     });
 
     return {
-      totalUSD,
-      totalLBP,
+      totalsByCurrency,
       suppliersWithAdvances,
       totalTransactions: advanceTransactions.length
     };
-  }, [suppliers, transactions]);
+  }, [suppliers, transactions, acceptedCurrencies]);
 
   // Get all advance transactions with supplier details
   const advanceTransactionsWithDetails = useMemo(() => {
@@ -118,18 +127,22 @@ export default function SupplierAdvances({
         const reviewDateMatch = descriptionStr?.match(/\[Review: (.*?)\]/);
         const reviewDate = reviewDateMatch ? reviewDateMatch[1] : null;
         
+        const txCurrency = (transaction.currency as CurrencyCode | undefined) ?? preferredCurrency;
+        const amountByCurrency: Partial<Record<CurrencyCode, number>> = {};
+        for (const code of acceptedCurrencies) {
+          amountByCurrency[code] = txCurrency === code ? transaction.amount : 0;
+        }
         return {
           ...transaction,
           supplierName: supplier?.name || 'Unknown Supplier',
           reviewDate: reviewDate,
           description: descriptionStr, // Store as string for easier filtering
-          // Determine if this is USD or LBP based on currency field
-          advanceUSD: transaction.currency === 'USD' ? transaction.amount : 0,
-          advanceLBP: transaction.currency === 'LBP' ? transaction.amount : 0,
+          txCurrency,
+          amountByCurrency,
         };
       })
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [transactions, suppliers]);
+  }, [transactions, suppliers, acceptedCurrencies, preferredCurrency]);
 
   // Filter advance transactions
   const filteredAdvances = useMemo(() => {
@@ -218,7 +231,7 @@ export default function SupplierAdvances({
       setAdvanceForm({
         supplierId: '',
         amount: '',
-        currency: 'USD',
+        currency: preferredCurrency,
         type: 'give',
         description: '',
         date: getTodayLocalDate(),
@@ -326,26 +339,26 @@ export default function SupplierAdvances({
   return (
     <div className="space-y-6">
       {/* Statistics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600">{t('customers.totalAdvancesUSD')}</p>
-              <p className="text-2xl font-bold text-gray-900">{formatCurrency(advanceStats.totalUSD)}</p>
+      <div className={`grid grid-cols-1 gap-4 ${
+        acceptedCurrencies.length === 1 ? 'md:grid-cols-2' :
+        acceptedCurrencies.length === 2 ? 'md:grid-cols-3' :
+        'md:grid-cols-4'
+      }`}>
+        {acceptedCurrencies.map((code, idx) => (
+          <div key={code} className="bg-white rounded-lg shadow-sm p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-600">
+                  {t('customers.totalAdvancesFor', { currency: code }) || `Total Advances (${code})`}
+                </p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {currencyService.format(advanceStats.totalsByCurrency[code] || 0, code)}
+                </p>
+              </div>
+              <DollarSign className={`w-10 h-10 ${idx === 0 ? 'text-green-600' : 'text-blue-600'}`} />
             </div>
-            <DollarSign className="w-10 h-10 text-green-600" />
           </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600">{t('customers.totalAdvancesLBP')}</p>
-              <p className="text-2xl font-bold text-gray-900">{formatCurrency(advanceStats.totalLBP)}</p>
-            </div>
-            <DollarSign className="w-10 h-10 text-blue-600" />
-          </div>
-        </div>
+        ))}
 
         <div className="bg-white rounded-lg shadow-sm p-6">
           <div className="flex items-center justify-between">
@@ -368,14 +381,17 @@ export default function SupplierAdvances({
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">{t('payments.supplier') || 'Supplier'}</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">{t('customers.advanceUSD') || 'USD Advance'}</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">{t('customers.advanceLBP') || 'LBP Advance'}</th>
+                  {acceptedCurrencies.map(code => (
+                    <th key={code} className="px-4 py-3 text-left text-sm font-medium text-gray-700">
+                      {t('customers.advanceFor', { currency: code }) || `${code} Advance`}
+                    </th>
+                  ))}
                   <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">{t('common.labels.contact') || 'Contact'}</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {suppliers
-                  .filter(s => (s.advance_usd_balance || 0) > 0 || (s.advance_lb_balance || 0) > 0)
+                  .filter(s => acceptedCurrencies.some(code => getLegacyBalance(s as unknown as Record<string, unknown>, code, 'advance') > 0))
                   .map(supplier => (
                     <tr key={supplier.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3">
@@ -384,16 +400,17 @@ export default function SupplierAdvances({
                           <div className="text-xs text-gray-500">{supplier.address}</div>
                         )}
                       </td>
-                      <td className="px-4 py-3">
-                        <div className={`text-sm font-semibold ${(supplier.advance_usd_balance || 0) > 0 ? 'text-green-600' : 'text-gray-400'}`}>
-                          {(supplier.advance_usd_balance || 0) > 0 ? `$${formatCurrency(supplier.advance_usd_balance || 0)}` : '-'}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className={`text-sm font-semibold ${(supplier.advance_lb_balance || 0) > 0 ? 'text-blue-600' : 'text-gray-400'}`}>
-                          {(supplier.advance_lb_balance || 0) > 0 ? `${formatCurrency(supplier.advance_lb_balance || 0)} ل.ل` : '-'}
-                        </div>
-                      </td>
+                      {acceptedCurrencies.map((code, idx) => {
+                        const value = getLegacyBalance(supplier as unknown as Record<string, unknown>, code, 'advance');
+                        const colorClass = idx === 0 ? 'text-green-600' : 'text-blue-600';
+                        return (
+                          <td key={code} className="px-4 py-3">
+                            <div className={`text-sm font-semibold ${value > 0 ? colorClass : 'text-gray-400'}`}>
+                              {value > 0 ? currencyService.format(value, code) : '-'}
+                            </div>
+                          </td>
+                        );
+                      })}
                       <td className="px-4 py-3">
                         <div className="text-sm text-gray-900">{supplier.phone}</div>
                         {supplier.email && (
@@ -490,20 +507,23 @@ export default function SupplierAdvances({
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t('payments.currency')} *
-                </label>
-                <select
-                  value={advanceForm.currency}
-                  onChange={(e) => setAdvanceForm({ ...advanceForm, currency: e.target.value as 'USD' | 'LBP' })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  required
-                >
-                  <option value="USD">${t('common.currency.USD') || 'USD'}</option>
-                  <option value="LBP">{t('common.currency.LBP') || 'LBP'}</option>
-                </select>
-              </div>
+              {isMultiCurrency && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    {t('payments.currency')} *
+                  </label>
+                  <select
+                    value={advanceForm.currency}
+                    onChange={(e) => setAdvanceForm({ ...advanceForm, currency: e.target.value as CurrencyCode })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                    required
+                  >
+                    {acceptedCurrencies.map(code => (
+                      <option key={code} value={code}>{t(`common.currency.${code}`) || code}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -602,15 +622,18 @@ export default function SupplierAdvances({
               <option value="week">{t('customers.thisWeek') || 'This Week'}</option>
               <option value="month">{t('customers.thisMonth') || 'This Month'}</option>
             </select>
-            <select
-              value={currencyFilter}
-              onChange={(e) => setCurrencyFilter(e.target.value as any)}
-              className="border border-gray-300 rounded-lg px-3 py-2"
-            >
-              <option value="all">{t('customers.allCurrencies') || 'All Currencies'}</option>
-              <option value="USD">${t('common.currency.USD') || 'USD'}</option>
-              <option value="LBP">{t('common.currency.LBP') || 'LBP'}</option>
-            </select>
+            {isMultiCurrency && (
+              <select
+                value={currencyFilter}
+                onChange={(e) => setCurrencyFilter(e.target.value as 'all' | CurrencyCode)}
+                className="border border-gray-300 rounded-lg px-3 py-2"
+              >
+                <option value="all">{t('customers.allCurrencies') || 'All Currencies'}</option>
+                {acceptedCurrencies.map(code => (
+                  <option key={code} value={code}>{t(`common.currency.${code}`) || code}</option>
+                ))}
+              </select>
+            )}
           </div>
         </div>
 
@@ -628,12 +651,14 @@ export default function SupplierAdvances({
                 <th className="px-4 py-4 rtl:text-right ltr:text-left text-sm font-medium text-gray-700 min-w-[120px]">
                   {t('common.labels.type') || 'Type'}
                 </th>
-                <th className="px-4 py-4 rtl:text-right ltr:text-left text-sm font-medium text-gray-700 min-w-[120px]">
-                  {t('customers.advanceUSD') || 'USD'}
-                </th>
-                <th className="px-4 py-4 rtl:text-right ltr:text-left text-sm font-medium text-gray-700 min-w-[120px]">
-                  {t('customers.advanceLBP') || 'LBP'}
-                </th>
+                {acceptedCurrencies.map(code => (
+                  <th
+                    key={code}
+                    className="px-4 py-4 rtl:text-right ltr:text-left text-sm font-medium text-gray-700 min-w-[120px]"
+                  >
+                    {t(`customers.advance${code}`) || code}
+                  </th>
+                ))}
                 <th className="px-4 py-4 rtl:text-right ltr:text-left text-sm font-medium text-gray-700 min-w-[150px]">
                   {t('customers.reviewDate') || 'Review Date'}
                 </th>
@@ -645,7 +670,7 @@ export default function SupplierAdvances({
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredAdvances.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                  <td colSpan={5 + acceptedCurrencies.length} className="px-4 py-8 text-center text-gray-500">
                     {searchTerm || dateFilter !== 'all' || currencyFilter !== 'all'
                       ? t('customers.noAdvancesFound') || 'No advances found'
                       : t('customers.noAdvancesRecorded') || 'No advance transactions recorded yet'}
@@ -679,16 +704,17 @@ export default function SupplierAdvances({
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-4 rtl:text-right ltr:text-left">
-                      <div className={`text-sm font-semibold ${advance.advanceUSD > 0 ? 'text-green-600' : 'text-gray-400'}`}>
-                        {advance.advanceUSD > 0 ? `$${formatCurrency(advance.advanceUSD)}` : '-'}
-                      </div>
-                    </td>
-                    <td className="px-4 py-4 rtl:text-right ltr:text-left">
-                      <div className={`text-sm font-semibold ${advance.advanceLBP > 0 ? 'text-blue-600' : 'text-gray-400'}`}>
-                        {advance.advanceLBP > 0 ? `${formatCurrency(advance.advanceLBP)} ل.ل` : '-'}
-                      </div>
-                    </td>
+                    {acceptedCurrencies.map((code, idx) => {
+                      const value = advance.amountByCurrency?.[code] || 0;
+                      const colorClass = idx === 0 ? 'text-green-600' : 'text-blue-600';
+                      return (
+                        <td key={code} className="px-4 py-4 rtl:text-right ltr:text-left">
+                          <div className={`text-sm font-semibold ${value > 0 ? colorClass : 'text-gray-400'}`}>
+                            {value > 0 ? currencyService.format(value, code) : '-'}
+                          </div>
+                        </td>
+                      );
+                    })}
                     <td className="px-4 py-4 rtl:text-right ltr:text-left">
                       {advance.reviewDate ? (
                         <div className="text-sm text-gray-900 flex">

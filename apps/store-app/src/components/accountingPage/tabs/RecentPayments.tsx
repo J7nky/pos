@@ -659,9 +659,7 @@ export default function RecentPayments({
         undefined // No date range
       );
 
-      const currentBalance = payment.currency === 'USD' 
-        ? balanceResult.currentBalance.USD 
-        : balanceResult.currentBalance.LBP;
+      const currentBalance = balanceResult.currentBalance.byCurrency[payment.currency as 'USD' | 'LBP'] ?? 0;
 
       // Calculate impact: deletion reverses the transaction
       // Customer payment: when received, it DECREASES customer balance (they owe us less)

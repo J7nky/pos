@@ -6,6 +6,7 @@ import type { JournalEntry } from '../../types/accounting';
 import { amountsFromLegacyEntry, getCredit, getDebit } from '../../services/accountingCurrencyHelpers';
 import { useI18n } from '../../i18n';
 import { useCurrency } from '../../hooks/useCurrency';
+import { formatDateTime } from '../../utils/numberFormat';
 
 export interface JournalEntryDrillDownModalProps {
   isOpen: boolean;
@@ -176,7 +177,7 @@ export default function JournalEntryDrillDownModal({
                   return (
                     <tr key={e.id} className="hover:bg-blue-50/40">
                       <td className="px-4 py-3 whitespace-nowrap text-gray-900">
-                        {new Date(e.posted_date).toLocaleString()}
+                        {formatDateTime(e.posted_date)}
                       </td>
                       <td className="px-4 py-3 text-gray-700 max-w-xs truncate" title={e.description ?? ''}>
                         {e.description || '—'}

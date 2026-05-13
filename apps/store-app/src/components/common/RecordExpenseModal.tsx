@@ -5,6 +5,8 @@ import { useSupabaseAuth } from '../../contexts/SupabaseAuthContext';
 import { useI18n } from '../../i18n';
 import { useCurrency } from '../../hooks/useCurrency';
 import SearchableSelect from './SearchableSelect';
+import { currencyService } from '../../services/currencyService';
+import type { CurrencyCode } from '@pos-platform/shared';
 
 interface RecordExpenseModalProps {
     isOpen: boolean;
@@ -19,13 +21,14 @@ export default function RecordExpenseModal({ isOpen, onClose, onSuccess }: Recor
     const { formatCurrencyWithSymbol } = useCurrency();
 
     const expenseCategories = raw.expenseCategories || [];
-    const currency = raw.currency || 'LBP';
-    const exchangeRate = raw.exchangeRate || 89500;
+    const currency = (raw.currency || 'USD') as CurrencyCode;
+    const acceptedCurrencies = raw.acceptedCurrencies;
+    const isMultiCurrency = raw.isMultiCurrency;
 
     const [expenseForm, setExpenseForm] = useState({
         categoryId: '',
         amount: '',
-        currency: currency as 'USD' | 'LBP',
+        currency: currency,
         description: ''
     });
 
@@ -39,7 +42,7 @@ export default function RecordExpenseModal({ isOpen, onClose, onSuccess }: Recor
             setExpenseForm({
                 categoryId: '',
                 amount: '',
-                currency: currency as 'USD' | 'LBP',
+                currency: currency,
                 description: ''
             });
             setError(null);
@@ -111,11 +114,9 @@ export default function RecordExpenseModal({ isOpen, onClose, onSuccess }: Recor
     };
 
     // Helper to convert amount for display
-    const getConvertedAmount = (amount: number, fromCurrency: string): number => {
+    const getConvertedAmount = (amount: number, fromCurrency: CurrencyCode): number => {
         if (fromCurrency === currency) return amount;
-        if (fromCurrency === 'USD' && currency === 'LBP') return amount * exchangeRate;
-        if (fromCurrency === 'LBP' && currency === 'USD') return amount / exchangeRate;
-        return amount;
+        return currencyService.safeConvert(amount, fromCurrency, currency);
     };
 
     if (!isOpen) return null;
@@ -176,24 +177,29 @@ export default function RecordExpenseModal({ isOpen, onClose, onSuccess }: Recor
                     </div>
 
                     {/* Currency */}
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                            {t('common.currency') || 'Currency'} *
-                        </label>
-                        <select
-                            value={expenseForm.currency}
-                            onChange={(e) =>
-                                setExpenseForm(prev => ({
-                                    ...prev,
-                                    currency: e.target.value as 'USD' | 'LBP'
-                                }))
-                            }
-                            className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-amber-500 focus:border-amber-500"
-                        >
-                            <option value="USD">USD ($)</option>
-                            <option value="LBP">LBP (ل.ل)</option>
-                        </select>
-                    </div>
+                    {isMultiCurrency && (
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                {t('common.currency') || 'Currency'} *
+                            </label>
+                            <select
+                                value={expenseForm.currency}
+                                onChange={(e) =>
+                                    setExpenseForm(prev => ({
+                                        ...prev,
+                                        currency: e.target.value as CurrencyCode
+                                    }))
+                                }
+                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-amber-500 focus:border-amber-500"
+                            >
+                                {acceptedCurrencies.map(code => (
+                                    <option key={code} value={code}>
+                                        {code} ({currencyService.getMeta(code).symbol})
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
 
                     {/* Amount */}
                     <div>
@@ -230,9 +236,6 @@ export default function RecordExpenseModal({ isOpen, onClose, onSuccess }: Recor
                                 ),
                                 currency
                             )}
-                            <div className="text-xs text-gray-500 mt-1">
-                                {t('common.rate') || 'Rate'}: 1 USD = {exchangeRate.toLocaleString()} LBP
-                            </div>
                         </div>
                     )}
 

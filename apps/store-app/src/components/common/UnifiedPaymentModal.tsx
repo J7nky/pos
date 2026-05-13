@@ -2,6 +2,10 @@ import React from 'react';
 import { CheckCircle, TrendingDown, UserCheck } from 'lucide-react';
 import { Customer, Supplier } from '../../types';
 import { useI18n } from '../../i18n';
+import { useOfflineData } from '../../contexts/OfflineDataContext';
+import { currencyService } from '../../services/currencyService';
+import { getLegacyBalance } from '../../utils/currencyFieldMap';
+import type { CurrencyCode } from '@pos-platform/shared';
 
 interface UnifiedPaymentModalProps {
     entity: Customer | Supplier;
@@ -10,18 +14,18 @@ interface UnifiedPaymentModalProps {
     setPaymentDirection: (direction: 'receive' | 'pay') => void;
     paymentForm: {
         amount: string;
-        currency: 'USD' | 'LBP';
+        currency: CurrencyCode;
         description: string;
     };
     setPaymentForm: React.Dispatch<React.SetStateAction<{
         amount: string;
-        currency: 'USD' | 'LBP';
+        currency: CurrencyCode;
         description: string;
         reference: string;
     }>>;
     overpaymentWarning: { show: boolean; amount: number; currency: string } | null;
     setOverpaymentWarning: React.Dispatch<React.SetStateAction<{ show: boolean; amount: number; currency: string } | null>>;
-    getSuggestedPayments: (entity: Customer | Supplier | undefined, currency: 'USD' | 'LBP') => Array<{ percentage: number; amount: number; label: string }>;
+    getSuggestedPayments: (entity: Customer | Supplier | undefined, currency: CurrencyCode) => Array<{ percentage: number; amount: number; label: string }>;
     onSubmit: (e: React.FormEvent) => void;
     onClose: () => void;
 }
@@ -40,6 +44,7 @@ export const UnifiedPaymentModal: React.FC<UnifiedPaymentModalProps> = ({
     onClose,
 }) => {
     const { t } = useI18n();
+    const { acceptedCurrencies, isMultiCurrency } = useOfflineData();
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -129,9 +134,11 @@ export const UnifiedPaymentModal: React.FC<UnifiedPaymentModalProps> = ({
                                 onChange={(e) => {
                                     const value = e.target.value;
                                     const numValue = parseFloat(value);
-                                    const currentBalance = paymentForm.currency === 'LBP'
-                                        ? (entity.lb_balance || 0)
-                                        : (entity.usd_balance || 0);
+                                    const currentBalance = getLegacyBalance(
+                                        entity as unknown as Record<string, unknown>,
+                                        paymentForm.currency,
+                                        'initial'
+                                    );
 
                                     // Show overpayment warning if payment exceeds debt (only relevant when receiving)
                                     if (paymentDirection === 'receive' && !isNaN(numValue) && numValue > currentBalance && currentBalance > 0) {
@@ -171,17 +178,16 @@ export const UnifiedPaymentModal: React.FC<UnifiedPaymentModalProps> = ({
                                                     key={suggestion.percentage}
                                                     type="button"
                                                     onClick={() => {
-                                                        const formattedAmount = paymentForm.currency === 'USD'
-                                                            ? suggestion.amount.toFixed(2)
+                                                        const decimals = currencyService.getMeta(paymentForm.currency).decimals;
+                                                        const formattedAmount = decimals > 0
+                                                            ? suggestion.amount.toFixed(decimals)
                                                             : Math.round(suggestion.amount).toString();
                                                         setPaymentForm(prev => ({ ...prev, amount: formattedAmount }));
                                                         setOverpaymentWarning(null);
                                                     }}
                                                     className={`px-3 py-1.5 text-xs font-medium border-2 rounded-lg transition-colors ${colorClass}`}
                                                 >
-                                                    {suggestion.label} ({paymentForm.currency === 'USD'
-                                                        ? `$${suggestion.amount.toFixed(2)}`
-                                                        : `${Math.round(suggestion.amount).toLocaleString()} ل.ل`})
+                                                    {suggestion.label} ({currencyService.format(suggestion.amount, paymentForm.currency)})
                                                 </button>
                                             ))}
                                         </div>
@@ -201,9 +207,7 @@ export const UnifiedPaymentModal: React.FC<UnifiedPaymentModalProps> = ({
                                             <p className="text-xs text-yellow-700 mt-1">
                                                 {t('customers.overpaymentMessage') || 'This payment exceeds the current debt. They will have a credit of'} {' '}
                                                 <span className="font-bold">
-                                                    {overpaymentWarning.currency === 'USD'
-                                                        ? `$${overpaymentWarning.amount.toFixed(2)}`
-                                                        : `${Math.round(overpaymentWarning.amount).toLocaleString()} ل.ل`}
+                                                    {currencyService.format(overpaymentWarning.amount, overpaymentWarning.currency as CurrencyCode)}
                                                 </span>
                                             </p>
                                         </div>
@@ -212,20 +216,25 @@ export const UnifiedPaymentModal: React.FC<UnifiedPaymentModalProps> = ({
                             )}
                         </div>
 
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">{t('customers.paymentCurrency')} *</label>
-                            <select
-                                value={paymentForm.currency}
-                                onChange={(e) => setPaymentForm(prev => ({ ...prev, currency: e.target.value as 'USD' | 'LBP' }))}
-                                className={`w-full border border-gray-300 rounded-lg px-3 py-2 ${paymentDirection === 'receive'
-                                        ? 'focus:ring-green-500 focus:border-green-500'
-                                        : 'focus:ring-red-500 focus:border-red-500'
-                                    }`}
-                            >
-                                <option value="USD">{t('customers.usd')}</option>
-                                <option value="LBP">{t('customers.lbp')}</option>
-                            </select>
-                        </div>
+                        {isMultiCurrency && (
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">{t('customers.paymentCurrency')} *</label>
+                                <select
+                                    value={paymentForm.currency}
+                                    onChange={(e) => setPaymentForm(prev => ({ ...prev, currency: e.target.value as CurrencyCode }))}
+                                    className={`w-full border border-gray-300 rounded-lg px-3 py-2 ${paymentDirection === 'receive'
+                                            ? 'focus:ring-green-500 focus:border-green-500'
+                                            : 'focus:ring-red-500 focus:border-red-500'
+                                        }`}
+                                >
+                                    {acceptedCurrencies.map(code => (
+                                        <option key={code} value={code}>
+                                            {t(`common.currency.${code}`) || code}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
                     </div>
 
                     <div>

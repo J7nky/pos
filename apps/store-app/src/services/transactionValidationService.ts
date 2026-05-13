@@ -1,6 +1,8 @@
 import { getDB } from '../lib/db';
 import { Transaction } from '../types';
 import { accountBalanceService } from './accountBalanceService';
+import { currencyService } from './currencyService';
+import type { CurrencyCode } from '@pos-platform/shared';
 
 export interface TransactionValidationResult {
   isValid: boolean;
@@ -53,8 +55,9 @@ export class TransactionValidationService {
       result.errors.push('Transaction amount must be greater than 0');
     }
 
-    if (!transaction.currency || !['USD', 'LBP'].includes(transaction.currency)) {
-      result.errors.push('Currency must be "USD" or "LBP"');
+    const accepted = currencyService.getAcceptedCurrencies();
+    if (!transaction.currency || !accepted.includes(transaction.currency as CurrencyCode)) {
+      result.errors.push(`Currency must be one of: ${accepted.join(', ')}`);
     }
 
     if (!transaction.description) {
@@ -144,8 +147,11 @@ export class TransactionValidationService {
         result.errors.push('Transaction type must be "income" or "expense"');
       }
 
-      if (updates.currency !== undefined && !['USD', 'LBP'].includes(updates.currency)) {
-        result.errors.push('Currency must be "USD" or "LBP"');
+      if (updates.currency !== undefined) {
+        const accepted = currencyService.getAcceptedCurrencies();
+        if (!accepted.includes(updates.currency as CurrencyCode)) {
+          result.errors.push(`Currency must be one of: ${accepted.join(', ')}`);
+        }
       }
 
       // If critical fields are being changed, require balance recalculation

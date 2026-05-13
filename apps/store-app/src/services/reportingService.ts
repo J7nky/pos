@@ -1,10 +1,15 @@
-// Reporting Service - Phase 5 of Accounting Foundation Migration
-// High-performance reports using journal entries and balance snapshots
+// Reporting Service - High-performance reports using journal entries and snapshots.
+// Currency-agnostic: every per-currency total is a Partial<Record<CurrencyCode, number>>
+// keyed by whatever currencies appear in the underlying data — no USD/LBP assumptions.
 
 import { getDB } from '../lib/db';
 import { snapshotService } from './snapshotService';
 import { entityQueryService } from './entityQueryService';
 import { getLocalDateString } from '../utils/dateUtils';
+import { amountsFromLegacyEntry } from './accountingCurrencyHelpers';
+import type { CurrencyCode } from '@pos-platform/shared';
+
+type CurrencyTotals = Partial<Record<CurrencyCode, number>>;
 
 export interface GeneralLedgerEntry {
   date: string;
@@ -13,10 +18,12 @@ export interface GeneralLedgerEntry {
   accountCode: string;
   accountName: string;
   entityName: string | null;
-  debit: number;
-  credit: number;
-  balance: number;
-  currency: 'USD' | 'LBP';
+  /** Per-currency debit (zero entries omitted). */
+  debits: CurrencyTotals;
+  /** Per-currency credit (zero entries omitted). */
+  credits: CurrencyTotals;
+  /** Running balance per currency after this entry. */
+  runningBalance: CurrencyTotals;
 }
 
 export interface GeneralLedgerReport {
@@ -25,11 +32,20 @@ export interface GeneralLedgerReport {
   accountName: string;
   startDate: string;
   endDate: string;
-  openingBalance: { USD: number; LBP: number };
-  closingBalance: { USD: number; LBP: number };
+  openingBalance: CurrencyTotals;
+  closingBalance: CurrencyTotals;
   entries: GeneralLedgerEntry[];
-  totalDebits: { USD: number; LBP: number };
-  totalCredits: { USD: number; LBP: number };
+  totalDebits: CurrencyTotals;
+  totalCredits: CurrencyTotals;
+}
+
+export interface AccountStatementTransaction {
+  date: string;
+  transactionId: string;
+  description: string;
+  debits: CurrencyTotals;
+  credits: CurrencyTotals;
+  runningBalance: CurrencyTotals;
 }
 
 export interface AccountStatement {
@@ -39,32 +55,36 @@ export interface AccountStatement {
   accountName: string;
   startDate: string;
   endDate: string;
-  openingBalance: { USD: number; LBP: number };
-  closingBalance: { USD: number; LBP: number };
-  transactions: Array<{
-    date: string;
-    transactionId: string;
-    description: string;
-    debit: number;
-    credit: number;
-    balance: number;
-    currency: 'USD' | 'LBP';
-  }>;
+  openingBalance: CurrencyTotals;
+  closingBalance: CurrencyTotals;
+  transactions: AccountStatementTransaction[];
+}
+
+export interface TrialBalanceAccountRow {
+  accountCode: string;
+  accountName: string;
+  accountType: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
+  /** Per-currency debit balance (sign-stripped). */
+  debitBalance: CurrencyTotals;
+  /** Per-currency credit balance (sign-stripped). */
+  creditBalance: CurrencyTotals;
 }
 
 export interface TrialBalance {
   storeId: string;
   asOfDate: string;
-  accounts: Array<{
-    accountCode: string;
-    accountName: string;
-    accountType: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
-    debitBalance: { USD: number; LBP: number };
-    creditBalance: { USD: number; LBP: number };
-  }>;
-  totalDebits: { USD: number; LBP: number };
-  totalCredits: { USD: number; LBP: number };
+  accounts: TrialBalanceAccountRow[];
+  totalDebits: CurrencyTotals;
+  totalCredits: CurrencyTotals;
   isBalanced: boolean;
+}
+
+export interface AgingBucket {
+  current: CurrencyTotals;
+  days30: CurrencyTotals;
+  days60: CurrencyTotals;
+  days90: CurrencyTotals;
+  over90: CurrencyTotals;
 }
 
 export interface AgingReport {
@@ -73,31 +93,79 @@ export interface AgingReport {
   entities: Array<{
     entityId: string;
     entityName: string;
-    totalBalance: { USD: number; LBP: number };
-    aging: {
-      current: { USD: number; LBP: number };
-      days30: { USD: number; LBP: number };
-      days60: { USD: number; LBP: number };
-      days90: { USD: number; LBP: number };
-      over90: { USD: number; LBP: number };
-    };
+    totalBalance: CurrencyTotals;
+    aging: AgingBucket;
   }>;
-  totals: {
-    current: { USD: number; LBP: number };
-    days30: { USD: number; LBP: number };
-    days60: { USD: number; LBP: number };
-    days90: { USD: number; LBP: number };
-    over90: { USD: number; LBP: number };
-  };
+  totals: AgingBucket;
 }
+
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+function addInto(target: CurrencyTotals, source: CurrencyTotals): void {
+  for (const code of Object.keys(source) as CurrencyCode[]) {
+    target[code] = (target[code] ?? 0) + (source[code] ?? 0);
+  }
+}
+
+function maxAbs(map: CurrencyTotals): number {
+  let max = 0;
+  for (const v of Object.values(map)) {
+    if (typeof v === 'number') max = Math.max(max, Math.abs(v));
+  }
+  return max;
+}
+
+function emptyAgingBucket(): AgingBucket {
+  return { current: {}, days30: {}, days60: {}, days90: {}, over90: {} };
+}
+
+/**
+ * Determine if an account's per-currency balance map should be displayed
+ * on the debit side. Looks at the dominant sign across all currencies.
+ */
+function isDebitBalance(accountType: string, balance: CurrencyTotals): boolean {
+  const hasBalance = maxAbs(balance) > 0.01;
+  if (!hasBalance) return true;
+
+  const allNonNegative = Object.values(balance).every(v => (v ?? 0) >= 0);
+
+  switch (accountType) {
+    case 'asset':
+    case 'expense':
+      return allNonNegative;
+    case 'liability':
+    case 'equity':
+    case 'revenue':
+      return !allNonNegative;
+    default:
+      return allNonNegative;
+  }
+}
+
+/**
+ * Map a journal-entry row to its (debits, credits) currency-totals pair
+ * by reading the JSONB `amounts` map.
+ */
+function entryAmounts(entry: { amounts?: any }): { debits: CurrencyTotals; credits: CurrencyTotals } {
+  const map = amountsFromLegacyEntry(entry as Parameters<typeof amountsFromLegacyEntry>[0]);
+  const debits: CurrencyTotals = {};
+  const credits: CurrencyTotals = {};
+  for (const code of Object.keys(map) as CurrencyCode[]) {
+    const { debit, credit } = map[code]!;
+    if (debit) debits[code] = debit;
+    if (credit) credits[code] = credit;
+  }
+  return { debits, credits };
+}
+
+// ─── service ────────────────────────────────────────────────────────────────
 
 /**
  * High-performance reporting service using journal entries and snapshots
  */
 export class ReportingService {
-  
   /**
-   * Generate General Ledger report for an account
+   * Generate General Ledger report for an account.
    */
   async generateGeneralLedger(
     storeId: string,
@@ -107,25 +175,22 @@ export class ReportingService {
     entityId?: string
   ): Promise<GeneralLedgerReport> {
     try {
-      // Get account information
       const account = await getDB().chart_of_accounts
         .where('[store_id+account_code]')
         .equals([storeId, accountCode])
         .first();
-      
+
       if (!account) {
         throw new Error(`Account ${accountCode} not found`);
       }
-      
-      // Get opening balance using snapshots
+
       const previousDay = new Date(startDate);
       previousDay.setDate(previousDay.getDate() - 1);
       const previousDayStr = getLocalDateString(previousDay.toISOString());
-      
-      let openingBalance = { USD: 0, LBP: 0 };
-      
+
+      const openingBalance: CurrencyTotals = {};
+
       if (entityId) {
-        // Entity-specific opening balance
         try {
           const balance = await snapshotService.getHistoricalBalance(
             storeId,
@@ -133,15 +198,12 @@ export class ReportingService {
             entityId,
             previousDayStr
           );
-          openingBalance.USD = balance.balanceUSD;
-          openingBalance.LBP = balance.balanceLBP;
+          addInto(openingBalance, balance.byCurrency);
         } catch (error) {
           console.warn('Failed to get opening balance from snapshots, calculating from journal:', error);
         }
       } else {
-        // Account total opening balance - sum across all entities
         const entities = await getDB().entities.where('store_id').equals(storeId).toArray();
-        
         for (const entity of entities) {
           try {
             const balance = await snapshotService.getHistoricalBalance(
@@ -150,73 +212,65 @@ export class ReportingService {
               entity.id,
               previousDayStr
             );
-            openingBalance.USD += balance.balanceUSD;
-            openingBalance.LBP += balance.balanceLBP;
+            addInto(openingBalance, balance.byCurrency);
           } catch (error) {
             // Skip entities with no balance
           }
         }
       }
-      
-      // Get journal entries for the period
+
       let query = getDB().journal_entries
         .where('[store_id+account_code]')
         .equals([storeId, accountCode])
         .filter(entry => entry.posted_date >= startDate && entry.posted_date <= endDate);
-      
+
       if (entityId) {
         query = query.filter(entry => entry.entity_id === entityId);
       }
-      
+
       const journalEntries = await query.toArray();
-      
-      // Sort by date and time
+
       journalEntries.sort((a, b) => {
         const dateCompare = a.posted_date.localeCompare(b.posted_date);
         if (dateCompare !== 0) return dateCompare;
         return a.created_at.localeCompare(b.created_at);
       });
-      
-      // Build general ledger entries with running balance
+
       const entries: GeneralLedgerEntry[] = [];
-      let runningBalanceUSD = openingBalance.USD;
-      let runningBalanceLBP = openingBalance.LBP;
-      let totalDebits = { USD: 0, LBP: 0 };
-      let totalCredits = { USD: 0, LBP: 0 };
-      
+      const runningBalance: CurrencyTotals = { ...openingBalance };
+      const totalDebits: CurrencyTotals = {};
+      const totalCredits: CurrencyTotals = {};
+
       for (const entry of journalEntries) {
-        // Get entity name
         let entityName: string | null = null;
         if (entry.entity_id) {
           const entity = await getDB().entities.get(entry.entity_id);
           entityName = entity?.name || null;
         }
-        
-        // Update running balance
-        if (entry.currency === 'USD') {
-          runningBalanceUSD += entry.debit - entry.credit;
-          totalDebits.USD += entry.debit;
-          totalCredits.USD += entry.credit;
-        } else {
-          runningBalanceLBP += entry.debit - entry.credit;
-          totalDebits.LBP += entry.debit;
-          totalCredits.LBP += entry.credit;
+
+        const { debits, credits } = entryAmounts(entry);
+        for (const code of Object.keys(debits) as CurrencyCode[]) {
+          runningBalance[code] = (runningBalance[code] ?? 0) + (debits[code] ?? 0);
         }
-        
+        for (const code of Object.keys(credits) as CurrencyCode[]) {
+          runningBalance[code] = (runningBalance[code] ?? 0) - (credits[code] ?? 0);
+        }
+        addInto(totalDebits, debits);
+        addInto(totalCredits, credits);
+
         entries.push({
           date: entry.posted_date,
           transactionId: entry.transaction_id,
-          description: entry.description,
+          description: entry.description ?? '',
           accountCode: entry.account_code,
           accountName: account.account_name,
           entityName,
-          debit: entry.debit,
-          credit: entry.credit,
-          balance: entry.currency === 'USD' ? runningBalanceUSD : runningBalanceLBP,
-          currency: entry.currency
+          debits,
+          credits,
+          runningBalance: { ...runningBalance }
         });
       }
-      
+
       return {
         storeId,
         accountCode,
@@ -224,23 +278,20 @@ export class ReportingService {
         startDate,
         endDate,
         openingBalance,
-        closingBalance: {
-          USD: runningBalanceUSD,
-          LBP: runningBalanceLBP
-        },
+        closingBalance: runningBalance,
         entries,
         totalDebits,
         totalCredits
       };
-      
+
     } catch (error) {
       console.error('Failed to generate general ledger:', error);
       throw error;
     }
   }
-  
+
   /**
-   * Generate account statement for an entity
+   * Generate account statement for an entity.
    */
   async generateAccountStatement(
     storeId: string,
@@ -250,7 +301,6 @@ export class ReportingService {
     endDate: string
   ): Promise<AccountStatement> {
     try {
-      // Get entity and account information
       const [entity, account] = await Promise.all([
         getDB().entities.get(entityId),
         getDB().chart_of_accounts
@@ -258,22 +308,16 @@ export class ReportingService {
           .equals([storeId, accountCode])
           .first()
       ]);
-      
-      if (!entity) {
-        throw new Error(`Entity ${entityId} not found`);
-      }
-      
-      if (!account) {
-        throw new Error(`Account ${accountCode} not found`);
-      }
-      
-      // Get opening balance
+
+      if (!entity) throw new Error(`Entity ${entityId} not found`);
+      if (!account) throw new Error(`Account ${accountCode} not found`);
+
       const previousDay = new Date(startDate);
       previousDay.setDate(previousDay.getDate() - 1);
       const previousDayStr = getLocalDateString(previousDay.toISOString());
-      
-      let openingBalance = { USD: 0, LBP: 0 };
-      
+
+      const openingBalance: CurrencyTotals = {};
+
       try {
         const balance = await snapshotService.getHistoricalBalance(
           storeId,
@@ -281,50 +325,45 @@ export class ReportingService {
           entityId,
           previousDayStr
         );
-        openingBalance.USD = balance.balanceUSD;
-        openingBalance.LBP = balance.balanceLBP;
+        addInto(openingBalance, balance.byCurrency);
       } catch (error) {
         console.warn('Failed to get opening balance from snapshots:', error);
       }
-      
-      // Get journal entries for the period
+
       const journalEntries = await getDB().journal_entries
         .where('[store_id+account_code+entity_id]')
         .equals([storeId, accountCode, entityId])
         .filter(entry => entry.posted_date >= startDate && entry.posted_date <= endDate)
         .toArray();
-      
-      // Sort by date and time
+
       journalEntries.sort((a, b) => {
         const dateCompare = a.posted_date.localeCompare(b.posted_date);
         if (dateCompare !== 0) return dateCompare;
         return a.created_at.localeCompare(b.created_at);
       });
-      
-      // Build transactions with running balance
-      const transactions: AccountStatement['transactions'] = [];
-      let runningBalanceUSD = openingBalance.USD;
-      let runningBalanceLBP = openingBalance.LBP;
-      
+
+      const transactions: AccountStatementTransaction[] = [];
+      const runningBalance: CurrencyTotals = { ...openingBalance };
+
       for (const entry of journalEntries) {
-        // Update running balance
-        if (entry.currency === 'USD') {
-          runningBalanceUSD += entry.debit - entry.credit;
-        } else {
-          runningBalanceLBP += entry.debit - entry.credit;
+        const { debits, credits } = entryAmounts(entry);
+        for (const code of Object.keys(debits) as CurrencyCode[]) {
+          runningBalance[code] = (runningBalance[code] ?? 0) + (debits[code] ?? 0);
         }
-        
+        for (const code of Object.keys(credits) as CurrencyCode[]) {
+          runningBalance[code] = (runningBalance[code] ?? 0) - (credits[code] ?? 0);
+        }
+
         transactions.push({
           date: entry.posted_date,
           transactionId: entry.transaction_id,
-          description: entry.description,
-          debit: entry.debit,
-          credit: entry.credit,
-          balance: entry.currency === 'USD' ? runningBalanceUSD : runningBalanceLBP,
-          currency: entry.currency
+          description: entry.description ?? '',
+          debits,
+          credits,
+          runningBalance: { ...runningBalance }
         });
       }
-      
+
       return {
         entityId,
         entityName: entity.name,
@@ -333,21 +372,18 @@ export class ReportingService {
         startDate,
         endDate,
         openingBalance,
-        closingBalance: {
-          USD: runningBalanceUSD,
-          LBP: runningBalanceLBP
-        },
+        closingBalance: runningBalance,
         transactions
       };
-      
+
     } catch (error) {
       console.error('Failed to generate account statement:', error);
       throw error;
     }
   }
-  
+
   /**
-   * Generate trial balance using snapshots for performance
+   * Generate trial balance using snapshots for performance.
    */
   async generateTrialBalance(storeId: string, asOfDate: string): Promise<TrialBalance> {
     try {
@@ -356,19 +392,16 @@ export class ReportingService {
         .equals(storeId)
         .filter(account => account.is_active)
         .toArray();
-      
-      const trialBalanceAccounts: TrialBalance['accounts'] = [];
-      let totalDebits = { USD: 0, LBP: 0 };
-      let totalCredits = { USD: 0, LBP: 0 };
-      
+
+      const trialBalanceAccounts: TrialBalanceAccountRow[] = [];
+      const totalDebits: CurrencyTotals = {};
+      const totalCredits: CurrencyTotals = {};
+
       for (const account of accounts) {
-        let accountBalanceUSD = 0;
-        let accountBalanceLBP = 0;
-        
+        const accountBalance: CurrencyTotals = {};
+
         if (account.requires_entity) {
-          // Sum balances across all entities for this account
           const entities = await getDB().entities.where('store_id').equals(storeId).toArray();
-          
           for (const entity of entities) {
             try {
               const balance = await snapshotService.getHistoricalBalance(
@@ -377,14 +410,12 @@ export class ReportingService {
                 entity.id,
                 asOfDate
               );
-              accountBalanceUSD += balance.balanceUSD;
-              accountBalanceLBP += balance.balanceLBP;
+              addInto(accountBalance, balance.byCurrency);
             } catch (error) {
               // Skip entities with no balance
             }
           }
         } else {
-          // Account doesn't require entity - get total balance
           try {
             const balance = await snapshotService.getHistoricalBalance(
               storeId,
@@ -392,24 +423,24 @@ export class ReportingService {
               null,
               asOfDate
             );
-            accountBalanceUSD = balance.balanceUSD;
-            accountBalanceLBP = balance.balanceLBP;
+            addInto(accountBalance, balance.byCurrency);
           } catch (error) {
             console.warn(`Failed to get balance for account ${account.account_code}:`, error);
           }
         }
-        
-        // Determine if balance is debit or credit based on account type and balance sign
-        const isDebitBalance = this.isDebitBalance(account.account_type, accountBalanceUSD, accountBalanceLBP);
-        
-        const debitBalance = isDebitBalance ? 
-          { USD: Math.abs(accountBalanceUSD), LBP: Math.abs(accountBalanceLBP) } :
-          { USD: 0, LBP: 0 };
-          
-        const creditBalance = !isDebitBalance ? 
-          { USD: Math.abs(accountBalanceUSD), LBP: Math.abs(accountBalanceLBP) } :
-          { USD: 0, LBP: 0 };
-        
+
+        const showAsDebit = isDebitBalance(account.account_type, accountBalance);
+        const debitBalance: CurrencyTotals = {};
+        const creditBalance: CurrencyTotals = {};
+        for (const code of Object.keys(accountBalance) as CurrencyCode[]) {
+          const value = Math.abs(accountBalance[code] ?? 0);
+          if (showAsDebit) {
+            debitBalance[code] = value;
+          } else {
+            creditBalance[code] = value;
+          }
+        }
+
         trialBalanceAccounts.push({
           accountCode: account.account_code,
           accountName: account.account_name,
@@ -417,19 +448,24 @@ export class ReportingService {
           debitBalance,
           creditBalance
         });
-        
-        // Add to totals
-        totalDebits.USD += debitBalance.USD;
-        totalDebits.LBP += debitBalance.LBP;
-        totalCredits.USD += creditBalance.USD;
-        totalCredits.LBP += creditBalance.LBP;
+
+        addInto(totalDebits, debitBalance);
+        addInto(totalCredits, creditBalance);
       }
-      
-      // Check if trial balance is balanced
-      const isBalanced = 
-        Math.abs(totalDebits.USD - totalCredits.USD) < 0.01 &&
-        Math.abs(totalDebits.LBP - totalCredits.LBP) < 0.01;
-      
+
+      // Trial balance is balanced when debits == credits for every currency.
+      const codes = new Set<CurrencyCode>([
+        ...(Object.keys(totalDebits) as CurrencyCode[]),
+        ...(Object.keys(totalCredits) as CurrencyCode[]),
+      ]);
+      let isBalanced = true;
+      for (const code of codes) {
+        if (Math.abs((totalDebits[code] ?? 0) - (totalCredits[code] ?? 0)) >= 0.01) {
+          isBalanced = false;
+          break;
+        }
+      }
+
       return {
         storeId,
         asOfDate,
@@ -438,15 +474,15 @@ export class ReportingService {
         totalCredits,
         isBalanced
       };
-      
+
     } catch (error) {
       console.error('Failed to generate trial balance:', error);
       throw error;
     }
   }
-  
+
   /**
-   * Generate aging report for customers or suppliers
+   * Generate aging report for customers or suppliers.
    */
   async generateAgingReport(
     storeId: string,
@@ -455,83 +491,66 @@ export class ReportingService {
   ): Promise<AgingReport> {
     try {
       const accountCode = entityType === 'customer' ? '1200' : '2100'; // AR or AP
-      
+
       const entities = await entityQueryService.getEntitiesByType(storeId, entityType, {
         includeInactive: false
       });
-      
+
       const agingEntities: AgingReport['entities'] = [];
-      const totals = {
-        current: { USD: 0, LBP: 0 },
-        days30: { USD: 0, LBP: 0 },
-        days60: { USD: 0, LBP: 0 },
-        days90: { USD: 0, LBP: 0 },
-        over90: { USD: 0, LBP: 0 }
-      };
-      
+      const totals: AgingBucket = emptyAgingBucket();
+
       for (const entity of entities) {
-        // Get current balance
         const balance = await snapshotService.getHistoricalBalance(
           storeId,
           accountCode,
           entity.id,
           asOfDate
         );
-        
-        if (Math.abs(balance.balanceUSD) < 0.01 && Math.abs(balance.balanceLBP) < 0.01) {
-          continue; // Skip entities with zero balance
-        }
-        
-        // For now, put all balance in "current" - proper aging requires invoice dates
-        // This is a simplified implementation
-        const aging = {
-          current: { USD: balance.balanceUSD, LBP: balance.balanceLBP },
-          days30: { USD: 0, LBP: 0 },
-          days60: { USD: 0, LBP: 0 },
-          days90: { USD: 0, LBP: 0 },
-          over90: { USD: 0, LBP: 0 }
-        };
-        
+
+        if (maxAbs(balance.byCurrency) < 0.01) continue;
+
+        // Simplified aging: all balance lands in "current" until invoice
+        // dates are wired in. The bucket is per-currency.
+        const aging: AgingBucket = emptyAgingBucket();
+        addInto(aging.current, balance.byCurrency);
+
         agingEntities.push({
           entityId: entity.id,
           entityName: entity.name,
-          totalBalance: { USD: balance.balanceUSD, LBP: balance.balanceLBP },
+          totalBalance: { ...balance.byCurrency },
           aging
         });
-        
-        // Add to totals
-        totals.current.USD += balance.balanceUSD;
-        totals.current.LBP += balance.balanceLBP;
+
+        addInto(totals.current, balance.byCurrency);
       }
-      
-      // Sort by total balance descending
-      agingEntities.sort((a, b) => 
-        Math.abs(b.totalBalance.USD) - Math.abs(a.totalBalance.USD)
-      );
-      
+
+      // Sort by largest single-currency balance (use USD if present, else
+      // the dominant currency in the map).
+      agingEntities.sort((a, b) => maxAbs(b.totalBalance) - maxAbs(a.totalBalance));
+
       return {
         entityType,
         asOfDate,
         entities: agingEntities,
         totals
       };
-      
+
     } catch (error) {
       console.error('Failed to generate aging report:', error);
       throw error;
     }
   }
-  
+
   /**
-   * Get financial summary using snapshots for performance
+   * Get financial summary using snapshots for performance.
    */
   async getFinancialSummary(storeId: string, asOfDate: string): Promise<{
-    assets: { USD: number; LBP: number };
-    liabilities: { USD: number; LBP: number };
-    equity: { USD: number; LBP: number };
-    revenue: { USD: number; LBP: number };
-    expenses: { USD: number; LBP: number };
-    netIncome: { USD: number; LBP: number };
+    assets: CurrencyTotals;
+    liabilities: CurrencyTotals;
+    equity: CurrencyTotals;
+    revenue: CurrencyTotals;
+    expenses: CurrencyTotals;
+    netIncome: CurrencyTotals;
   }> {
     try {
       const accounts = await getDB().chart_of_accounts
@@ -539,24 +558,21 @@ export class ReportingService {
         .equals(storeId)
         .filter(account => account.is_active)
         .toArray();
-      
+
       const summary = {
-        assets: { USD: 0, LBP: 0 },
-        liabilities: { USD: 0, LBP: 0 },
-        equity: { USD: 0, LBP: 0 },
-        revenue: { USD: 0, LBP: 0 },
-        expenses: { USD: 0, LBP: 0 },
-        netIncome: { USD: 0, LBP: 0 }
+        assets: {} as CurrencyTotals,
+        liabilities: {} as CurrencyTotals,
+        equity: {} as CurrencyTotals,
+        revenue: {} as CurrencyTotals,
+        expenses: {} as CurrencyTotals,
+        netIncome: {} as CurrencyTotals,
       };
-      
+
       for (const account of accounts) {
-        let accountBalanceUSD = 0;
-        let accountBalanceLBP = 0;
-        
+        const accountBalance: CurrencyTotals = {};
+
         if (account.requires_entity) {
-          // Sum across all entities
           const entities = await getDB().entities.where('store_id').equals(storeId).toArray();
-          
           for (const entity of entities) {
             try {
               const balance = await snapshotService.getHistoricalBalance(
@@ -565,8 +581,7 @@ export class ReportingService {
                 entity.id,
                 asOfDate
               );
-              accountBalanceUSD += balance.balanceUSD;
-              accountBalanceLBP += balance.balanceLBP;
+              addInto(accountBalance, balance.byCurrency);
             } catch (error) {
               // Skip entities with no balance
             }
@@ -579,73 +594,50 @@ export class ReportingService {
               null,
               asOfDate
             );
-            accountBalanceUSD = balance.balanceUSD;
-            accountBalanceLBP = balance.balanceLBP;
+            addInto(accountBalance, balance.byCurrency);
           } catch (error) {
             console.warn(`Failed to get balance for account ${account.account_code}:`, error);
           }
         }
-        
-        // Add to appropriate category
+
+        const absBalance: CurrencyTotals = {};
+        for (const code of Object.keys(accountBalance) as CurrencyCode[]) {
+          absBalance[code] = Math.abs(accountBalance[code] ?? 0);
+        }
+
         switch (account.account_type) {
           case 'asset':
-            summary.assets.USD += accountBalanceUSD;
-            summary.assets.LBP += accountBalanceLBP;
+            addInto(summary.assets, accountBalance);
             break;
           case 'liability':
-            summary.liabilities.USD += Math.abs(accountBalanceUSD);
-            summary.liabilities.LBP += Math.abs(accountBalanceLBP);
+            addInto(summary.liabilities, absBalance);
             break;
           case 'equity':
-            summary.equity.USD += Math.abs(accountBalanceUSD);
-            summary.equity.LBP += Math.abs(accountBalanceLBP);
+            addInto(summary.equity, absBalance);
             break;
           case 'revenue':
-            summary.revenue.USD += Math.abs(accountBalanceUSD);
-            summary.revenue.LBP += Math.abs(accountBalanceLBP);
+            addInto(summary.revenue, absBalance);
             break;
           case 'expense':
-            summary.expenses.USD += accountBalanceUSD;
-            summary.expenses.LBP += accountBalanceLBP;
+            addInto(summary.expenses, accountBalance);
             break;
         }
       }
-      
-      // Calculate net income
-      summary.netIncome.USD = summary.revenue.USD - summary.expenses.USD;
-      summary.netIncome.LBP = summary.revenue.LBP - summary.expenses.LBP;
-      
+
+      // netIncome = revenue - expenses, per currency.
+      const incomeCodes = new Set<CurrencyCode>([
+        ...(Object.keys(summary.revenue) as CurrencyCode[]),
+        ...(Object.keys(summary.expenses) as CurrencyCode[]),
+      ]);
+      for (const code of incomeCodes) {
+        summary.netIncome[code] = (summary.revenue[code] ?? 0) - (summary.expenses[code] ?? 0);
+      }
+
       return summary;
-      
+
     } catch (error) {
       console.error('Failed to get financial summary:', error);
       throw error;
-    }
-  }
-  
-  /**
-   * Helper method to determine if an account balance should be shown as debit
-   */
-  private isDebitBalance(
-    accountType: string,
-    balanceUSD: number,
-    balanceLBP: number
-  ): boolean {
-    const hasBalance = Math.abs(balanceUSD) > 0.01 || Math.abs(balanceLBP) > 0.01;
-    if (!hasBalance) return true; // Show zero balances as debit
-    
-    const isPositive = balanceUSD >= 0 && balanceLBP >= 0;
-    
-    switch (accountType) {
-      case 'asset':
-      case 'expense':
-        return isPositive;
-      case 'liability':
-      case 'equity':
-      case 'revenue':
-        return !isPositive;
-      default:
-        return isPositive;
     }
   }
 }

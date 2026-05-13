@@ -27,6 +27,7 @@ import { auditLogService, AuditLogEntry, AuditQuery } from '../services/auditLog
 import { useCurrency } from '../hooks/useCurrency';
 import { normalizeNameForComparison } from '../utils/nameNormalization';
 import { getLocalDateString, getTodayLocalDate } from '../utils/dateUtils';
+import { formatDateTime } from '../utils/numberFormat';
 
 interface ActivityFeedProps {
   showSearch?: boolean;
@@ -211,7 +212,7 @@ export default function ActivityFeed({
     const csvContent = [
       ['Timestamp', 'User', 'Action', 'Entity', 'Description', 'Severity', 'Tags'].join(','),
       ...filteredActivities.map(activity => [
-        new Date(activity.timestamp).toLocaleString(),
+        formatDateTime(activity.timestamp),
         activity.userName || activity.userEmail || activity.userId,
         formatActionName(activity.action),
         activity.entityName || activity.entityId,
@@ -406,7 +407,7 @@ export default function ActivityFeed({
                       </div>
                       <div className="flex items-center space-x-2">
                         <span className="text-xs text-gray-500">
-                          {new Date(activity.timestamp).toLocaleString()}
+                          {formatDateTime(activity.timestamp)}
                         </span>
                         {(activity.previousData || activity.newData || activity.balanceChange) && (
                           <button

@@ -34,10 +34,24 @@ export const handleImageError = (event: React.SyntheticEvent<HTMLImageElement, E
 };
 
 /**
- * Gets the product image URL with fallback to placeholder
- * 
- * @param imageUrl - The product's image URL (can be null/undefined)
- * @returns The image URL or the placeholder if none provided
+ * True when the value is an offline-safe image source: a data URI, a blob URL,
+ * or an app-relative path. Remote (http/https) URLs return false — used to
+ * decide whether an image still needs to be cached locally.
+ */
+export const isLocalImageSource = (imageUrl: string | null | undefined): imageUrl is string => {
+  if (!imageUrl) return false;
+  return (
+    imageUrl.startsWith('data:') ||
+    imageUrl.startsWith('blob:') ||
+    imageUrl.startsWith('/') ||
+    imageUrl.startsWith('./')
+  );
+};
+
+/**
+ * Gets the product image URL with fallback to placeholder when no source
+ * is set. Remote URLs are passed through so the cache layer can capture them
+ * on first load — see ProductImage.
  */
 export const getProductImageUrl = (imageUrl: string | null | undefined): string => {
   return imageUrl || PRODUCT_PLACEHOLDER_IMAGE;
