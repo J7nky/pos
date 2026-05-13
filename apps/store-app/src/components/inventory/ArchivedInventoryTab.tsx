@@ -130,13 +130,13 @@ const ArchivedInventoryTab: React.FC<ArchivedInventoryTabProps> = ({
       {/* Search + bulk actions bar */}
       <div className="bg-white dark:bg-slate-900 p-4 rounded-lg shadow-sm flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
-          <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <Search className="w-5 h-5 absolute ltr:left-3 rtl:right-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
             placeholder={t('inventory.searchProducts')}
             value={searchTerm}
             onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100 text-sm"
+            className="w-full ltr:pl-10 ltr:pr-4 rtl:pr-10 rtl:pl-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100 text-sm"
           />
         </div>
 
@@ -178,16 +178,16 @@ const ArchivedInventoryTab: React.FC<ArchivedInventoryTabProps> = ({
                   className="rounded border-gray-300 dark:border-slate-600 text-blue-600"
                 />
               </th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-slate-300">
+              <th className="px-4 py-3 ltr:text-left rtl:text-right font-medium text-gray-600 dark:text-slate-300">
                 {t('inventory.products')}
               </th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-slate-300 hidden md:table-cell">
-                {t('inventory.quantity')}
+              <th className="px-4 py-3 ltr:text-left rtl:text-right font-medium text-gray-600 dark:text-slate-300 hidden md:table-cell">
+                {t('common.labels.quantity')}
               </th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-slate-300 hidden md:table-cell">
+              <th className="px-4 py-3 ltr:text-left rtl:text-right font-medium text-gray-600 dark:text-slate-300 hidden md:table-cell">
                 {t('inventory.unit')}
               </th>
-              <th className="px-4 py-3 text-right font-medium text-gray-600 dark:text-slate-300">
+              <th className="px-4 py-3 ltr:text-right rtl:text-left font-medium text-gray-600 dark:text-slate-300">
                 {t('inventory.actions')}
               </th>
             </tr>

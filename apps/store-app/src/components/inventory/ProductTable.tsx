@@ -3,6 +3,7 @@ import { useI18n } from '../../i18n';
 import { Pagination } from '../common/Pagination';
 import { useProductMultilingual } from '../../hooks/useMultilingual';
 import { ProductImage } from '../common/ProductImage';
+import { translateCategory } from './RecentReceivesTable';
 
 interface ProductTableProps {
   products: any[];
@@ -95,7 +96,7 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, onEdit, onDelete,
                   {getProductName(product)}
                 </td>
                 <td className="px-6 py-4 text-gray-700 dark:text-slate-300 rtl:text-right ltr:text-left">
-                  {product.category}
+                  {translateCategory(product.category, t)}
                 </td>
                 <td className="px-6 py-4 rtl:text-right ltr:text-left">
                   <div className="flex space-x-2 rtl:space-x-reverse">
