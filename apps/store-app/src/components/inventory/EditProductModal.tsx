@@ -1,7 +1,11 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { X, Package } from 'lucide-react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { X } from 'lucide-react';
 import { PRODUCT_PLACEHOLDER_IMAGE } from '../../constants/productImages';
 import { ProductImage } from '../common/ProductImage';
+import { useI18n } from '../../i18n';
+import { useOfflineData } from '../../contexts/OfflineDataContext';
+import { getTranslatedString, parseMultilingualString } from '../../utils/multilingual';
+import { useCategoryLookup } from '../../hooks/useCategoryLookup';
 
 interface EditProductModalProps {
   open: boolean;
@@ -11,10 +15,55 @@ interface EditProductModalProps {
 }
 
 const EditProductModal: React.FC<EditProductModalProps> = ({ open, onClose, onSuccess, product }) => {
-  const [form, setForm] = useState({ ...product });
+  const { language } = useI18n();
+  const { categories } = useOfflineData();
+  const categoryLookup = useCategoryLookup();
+  const activeCategories = useMemo(
+    () => categories.filter((c) => c.is_active).slice().sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+    [categories]
+  );
+
+  // Initial form state — also rebuilt whenever the modal is reopened on a
+  // different product (the parent reuses the same component instance).
+  const buildInitialForm = (p: any) => {
+    if (!p) return { id: '', name: '', category_id: '', image: '', capturedPhoto: '' };
+    const initialCategoryId =
+      p.category_id
+      || (p.category ? categoryLookup.byCode[String(p.category).toLowerCase().replace(/[^a-z0-9]+/g, '_')]?.id : '')
+      || '';
+    // name may be a multilingual object on legacy rows — flatten for the
+    // single-input edit. New writes go back as a plain string.
+    const parsedName = parseMultilingualString(p.name);
+    const displayName = getTranslatedString(parsedName, language) || (typeof p.name === 'string' ? p.name : '');
+    return {
+      id: p.id,
+      name: displayName,
+      category_id: initialCategoryId,
+      image: p.image || '',
+      capturedPhoto: '',
+    };
+  };
+
+  const [form, setForm] = useState<any>(buildInitialForm(product));
   const [errors, setErrors] = useState<any>({});
   const [loading, setLoading] = useState(false);
   const firstInputRef = useRef<HTMLInputElement>(null);
+
+  // Resync when the parent re-opens the modal with a different product.
+  useEffect(() => {
+    if (open && product) {
+      setForm(buildInitialForm(product));
+      setErrors({});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, product?.id]);
+
+  // If the categories list was empty when the modal opened, seed once it hydrates.
+  useEffect(() => {
+    if (!form.category_id && activeCategories.length > 0) {
+      setForm((prev: any) => ({ ...prev, category_id: prev.category_id || activeCategories[0].id }));
+    }
+  }, [activeCategories, form.category_id]);
 
   useEffect(() => { 
     if (open && firstInputRef.current) firstInputRef.current.focus(); 
@@ -31,7 +80,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({ open, onClose, onSu
   const validate = () => {
     const errors: any = {};
     if (!form.name) errors.name = 'Product name is required.';
-    if (!form.category) errors.category = 'Category is required.';
+    if (!form.category_id) errors.category = 'Category is required.';
     return errors;
   };
 
@@ -42,10 +91,13 @@ const EditProductModal: React.FC<EditProductModalProps> = ({ open, onClose, onSu
     if (Object.keys(errs).length > 0) return;
     setLoading(true);
     try {
+      const selected = activeCategories.find((c) => c.id === form.category_id);
       await onSuccess({
         id: form.id,
         name: form.name,
-        category: form.category,
+        category_id: form.category_id,
+        // Dual-write the legacy text column so pre-v64 readers still render.
+        category: selected ? getTranslatedString(selected.name, 'en') : form.category,
         image: form.capturedPhoto || form.image || PRODUCT_PLACEHOLDER_IMAGE,
       });
       setErrors({});
@@ -99,15 +151,13 @@ const EditProductModal: React.FC<EditProductModalProps> = ({ open, onClose, onSu
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Category *</label>
               <select
-                value={form.category}
-                onChange={(e) => setForm((prev: any) => ({ ...prev, category: e.target.value }))}
+                value={form.category_id || ''}
+                onChange={(e) => setForm((prev: any) => ({ ...prev, category_id: e.target.value }))}
                 className={`w-full border ${errors.category ? 'border-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
               >
-                <option value="Fruits">Fruits</option>
-                <option value="Vegetables">Vegetables</option>
-                <option value="Herbs">Herbs</option>
-                <option value="Nuts">Nuts</option>
-                <option value="Others">Others</option>
+                {activeCategories.map((c) => (
+                  <option key={c.id} value={c.id}>{getTranslatedString(c.name, language)}</option>
+                ))}
               </select>
               {errors.category && <p className="text-xs text-red-600 mt-1">{errors.category}</p>}
             </div>

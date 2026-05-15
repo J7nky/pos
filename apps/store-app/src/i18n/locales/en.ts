@@ -355,6 +355,8 @@ const en = {
     categoryVegetables: 'Vegetables',
     categoryHerbs: 'Herbs/ Leafy',
     categoryGrains: 'Grains',
+    categoryNuts: 'Nuts',
+    categoryOthers: 'Others',
     productPhotoOptional: 'Product Photo (Optional)',
     uploadImageCta: 'Click to upload image',
     uploadImageHint: 'PNG, JPG up to 5MB',

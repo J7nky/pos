@@ -5,6 +5,7 @@ import { ProductImage } from '../common/ProductImage';
 import { useOfflineData } from '../../contexts/OfflineDataContext';
 import { useI18n } from '../../i18n';
 import type { CurrencyCode } from '@pos-platform/shared';
+import { useCategoryLookup, useUnitLookup } from '../../hooks/useCategoryLookup';
 
 interface StockTableProps {
   filteredStockLevels: any[];
@@ -22,6 +23,8 @@ const StockTable: React.FC<StockTableProps> = ({
   const { getProductName } = useProductMultilingual();
   const { formatAmount, preferredCurrency } = useOfflineData();
   const { t } = useI18n();
+  const categoryLookup = useCategoryLookup();
+  const unitLookup = useUnitLookup();
   // Pagination state
   const [page, setPage] = useState(1);
   const itemsPerPage = 10;
@@ -112,13 +115,13 @@ const StockTable: React.FC<StockTableProps> = ({
                       />
                       <div>
                         <p className="font-medium text-gray-900 dark:text-slate-100">{item.product_name}</p>
-                        <p className="text-sm text-gray-500 dark:text-slate-400">{product?.category}</p>
+                        <p className="text-sm text-gray-500 dark:text-slate-400">{categoryLookup.label(product)}</p>
                       </div>
                     </div>
                   </td>
                   <td className="px-6 py-4">
                     <span className="font-medium text-gray-900 dark:text-slate-100">
-                      {item.current_stock} {item.unit}
+                      {item.current_stock} {unitLookup.label(item) || item.unit}
                     </span>
                   </td>
                   <td className="px-6 py-4">

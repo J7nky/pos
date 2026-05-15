@@ -490,6 +490,27 @@ export default function Settings() {
                   <p className="text-xs text-gray-500 mt-2">{t('settings.currentThreshold', { value: lowStockThreshold })}</p>
                 </div>
               )}
+
+              {/* Categories & Units link (v64) */}
+              <a
+                href="#/settings/categories-units"
+                onClick={(e) => {
+                  if (!window.location.hash) {
+                    e.preventDefault();
+                    window.location.assign('/settings/categories-units');
+                  }
+                }}
+                className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <div className="flex items-center">
+                  <Package className="w-5 h-5 text-blue-500 mr-3" />
+                  <div>
+                    <h3 className="font-medium text-gray-900">{t('settings.categoriesAndUnits') || 'Categories & Units'}</h3>
+                    <p className="text-sm text-gray-600">{t('settings.categoriesAndUnitsDescription') || 'Manage product categories and units of measure for this store.'}</p>
+                  </div>
+                </div>
+                <span className="text-gray-400">›</span>
+              </a>
             </div>
           </div>
         )}

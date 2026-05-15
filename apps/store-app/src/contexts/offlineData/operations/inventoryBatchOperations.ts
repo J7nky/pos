@@ -79,16 +79,13 @@ export async function addInventoryBatch(
   await getDB().transaction('rw', [getDB().inventory_bills, getDB().inventory_items], async () => {
     await getDB().inventory_bills.add(batchRecord);
     const now = new Date().toISOString();
-    const allowedUnits = ['box', 'kg', 'piece', 'bag', 'bundle'] as const;
     const itemCurrencyDefault = batchCurrency || deps.currency;
 
     const mappedItems = items.map((it) => ({
       id: createId(),
       product_id: (it as any).product_id ?? '',
       quantity: (it as any).quantity ?? 0,
-      unit: allowedUnits.includes((it as any).unit as any)
-        ? ((it as any).unit as 'box' | 'kg' | 'piece' | 'bag' | 'bundle')
-        : 'box',
+      unit: ((it as any).unit as string) || 'box',
       store_id: storeId,
       created_at: now,
       _synced: false,

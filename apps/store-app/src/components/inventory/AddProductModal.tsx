@@ -1,7 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Plus, X, Package, Camera, Upload } from 'lucide-react';
 import { useI18n } from '../../i18n';
 import { PRODUCT_PLACEHOLDER_IMAGE } from '../../constants/productImages';
+import { useOfflineData } from '../../contexts/OfflineDataContext';
+import { getTranslatedString } from '../../utils/multilingual';
 interface AddProductModalProps {
   open: boolean;
   onClose: () => void;
@@ -9,13 +11,25 @@ interface AddProductModalProps {
 }
 
 const AddProductModal: React.FC<AddProductModalProps> = ({ open, onClose, onSuccess }) => {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
+  const { categories } = useOfflineData();
+  const activeCategories = useMemo(
+    () => categories.filter((c) => c.is_active).slice().sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+    [categories]
+  );
   const [form, setForm] = useState({
     name: '',
-    category: 'Fruits',
+    category_id: '',
     image: '',
     capturedPhoto: ''
   });
+
+  // Seed the dropdown with the first active category once the list hydrates
+  useEffect(() => {
+    if (!form.category_id && activeCategories.length > 0) {
+      setForm((prev) => ({ ...prev, category_id: activeCategories[0].id }));
+    }
+  }, [activeCategories, form.category_id]);
   const [errors, setErrors] = useState<any>({});
   const [loading, setLoading] = useState(false);
   const [imageLoading, setImageLoading] = useState(false);
@@ -43,7 +57,7 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ open, onClose, onSucc
     } else if (form.name.length < 2) {
       errors.name = 'Product name must be at least 2 characters.';
     }
-    if (!form.category) {
+    if (!form.category_id) {
       errors.category = 'Category is required.';
     }
     return errors;
@@ -57,12 +71,20 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ open, onClose, onSucc
 
     setLoading(true);
     try {
+      const selectedCategory = activeCategories.find((c) => c.id === form.category_id);
       await onSuccess({
         name: form.name.trim(),
-        category: form.category,
+        category_id: form.category_id,
+        // Dual-write the legacy text column so older readers (pre-v64) still render
+        category: selectedCategory ? getTranslatedString(selectedCategory.name, 'en') : undefined,
         image: form.capturedPhoto || form.image || PRODUCT_PLACEHOLDER_IMAGE,
       });
-      setForm({ name: '', category: 'Fruits', image: '', capturedPhoto: '' });
+      setForm({
+        name: '',
+        category_id: activeCategories[0]?.id ?? '',
+        image: '',
+        capturedPhoto: ''
+      });
       setErrors({});
       onClose();
     } catch {
@@ -162,15 +184,16 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ open, onClose, onSucc
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">{t('common.labels.category')} *</label>
                     <select
-                      value={form.category}
-                      onChange={(e) => setForm((prev: any) => ({ ...prev, category: e.target.value }))}
+                      value={form.category_id}
+                      onChange={(e) => setForm((prev: any) => ({ ...prev, category_id: e.target.value }))}
                       className={`w-full border ${errors.category ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500 dark:bg-slate-800 dark:text-slate-100`}
                     >
-                      <option value="Fruits">{t('common.labels.fruits')}</option>
-                      <option value="Vegetables">{t('common.labels.vegetables')}</option>
-                      <option value="Leafy">{t('common.labels.leafy')}</option>
-                      <option value="Nuts">{t('common.labels.nuts')}</option>
-                      <option value="Others">{t('common.labels.others')}</option>
+                      {activeCategories.length === 0 && (
+                        <option value="" disabled>{t('app.loading')}</option>
+                      )}
+                      {activeCategories.map((c) => (
+                        <option key={c.id} value={c.id}>{getTranslatedString(c.name, language)}</option>
+                      ))}
                     </select>
                     {errors.category && <p className="text-xs text-red-600 mt-1">{errors.category}</p>}
                   </div>

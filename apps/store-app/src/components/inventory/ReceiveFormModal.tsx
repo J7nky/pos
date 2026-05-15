@@ -10,6 +10,8 @@ import { useI18n } from '../../i18n';
 import { useProductMultilingual } from '../../hooks/useMultilingual';
 import { saveProductTag, saveNote, getLastThreeNotes, getMatchingNotes, getAllNotes } from '../../utils/productTags';
 import { useOfflineData } from '../../contexts/OfflineDataContext';
+import { getTranslatedString } from '../../utils/multilingual';
+import { useCategoryLookup } from '../../hooks/useCategoryLookup';
 import { useSupabaseAuth } from '../../contexts/SupabaseAuthContext';
 import { inventoryPurchaseService } from '../../services/inventoryPurchaseService';
 import { getTodayLocalDate } from '../../utils/dateUtils';
@@ -69,10 +71,10 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
 }) => {
   const [loading, setLoading] = useState(false);
   const [bulkProducts, setBulkProducts] = useState<string[]>([]);
-  const [bulkItems, setBulkItems] = useState<Record<string, { 
-    product_id?: string; 
-    quantity: string; 
-    unit: 'kg' | 'piece' | 'box' | 'bag' | 'bundle' | 'dozen'; 
+  const [bulkItems, setBulkItems] = useState<Record<string, {
+    product_id?: string;
+    quantity: string;
+    unit: string;
     price?: string;
     price_currency?: CurrencyCode;
     selling_price?: string;
@@ -90,7 +92,25 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
   const notesTextareaRef = useRef<HTMLTextAreaElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
 
-  const { t } = useI18n();
+  const { t, language } = useI18n();
+  const { units, categories } = useOfflineData();
+  const categoryLookup = useCategoryLookup();
+  const activeCategoryLabels = useMemo(
+    () => categories
+      .filter((c) => c.is_active)
+      .slice()
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+      .map((c) => getTranslatedString(c.name, language as 'en' | 'ar' | 'fr')),
+    [categories, language]
+  );
+  const activeUnits = useMemo(
+    () => units
+      .filter((u) => u.is_active)
+      .slice()
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+    [units]
+  );
+  const defaultUnitCode = activeUnits[0]?.code ?? 'box';
   const acList = useMemo(
     () => (acceptedCurrencies.length > 0 ? acceptedCurrencies : [preferredCurrency]),
     [acceptedCurrencies, preferredCurrency]
@@ -179,7 +199,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
         newBulkItems[productId] = {
           product_id: item.product_id || '',
           quantity: (item.received_quantity || item.quantity || '').toString(),
-          unit: item.unit || 'box',
+          unit: item.unit || defaultUnitCode,
           price: item.price ? item.price.toString() : '',
           selling_price: item.selling_price ? item.selling_price.toString() : '',
           weight: item.weight ? item.weight.toString() : '',
@@ -607,11 +627,11 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
     const rowCur = normalizeToAccepted(preferredCurrency, acList, preferredCurrency);
     setBulkItems(prev => ({
       ...prev,
-      [newProductId]: { 
-        product_id: '', 
-        quantity: '', 
-        unit: 'box', 
-        price: '', 
+      [newProductId]: {
+        product_id: '',
+        quantity: '',
+        unit: defaultUnitCode,
+        price: '',
         price_currency: rowCur,
         selling_price: '', 
         selling_price_currency: rowCur,
@@ -1085,7 +1105,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                     </thead>
                     <tbody key={`tbody-instance-${modalInstanceRef.current}`} className="divide-y divide-gray-200">
                       {bulkProducts.map((productId) => {
-                        const item = bulkItems[productId] || { product_id: '', quantity: '', unit: 'box', price: '', selling_price: '', weight: '', sku: '' };
+                        const item = bulkItems[productId] || { product_id: '', quantity: '', unit: defaultUnitCode, price: '', selling_price: '', weight: '', sku: '' };
                         const batchFee = normalizeToAccepted(form.porterage_currency, acList, preferredCurrency);
                         const lineCur = normalizeToAccepted(
                           item.price_currency || item.selling_price_currency,
@@ -1103,35 +1123,23 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                               <div ref={selectRef}>
                                 <div className="flex items-center gap-2">
                                   <SearchableSelect
-                                    options={products.map((product: any) => {
-                                      // Map product categories to translated category labels for filtering
-                                      // Product categories are: 'Fruits', 'Vegetables', 'Herbs', 'Herbs/Leafy', 'Nuts', 'Others'
-                                      let categoryLabel = product.category;
-                                      if (product.category === 'Fruits') {
-                                        categoryLabel = t('inventory.categoryFruits');
-                                      } else if (product.category === 'Vegetables') {
-                                        categoryLabel = t('inventory.categoryVegetables');
-                                      } else if (product.category === 'Herbs' || product.category === 'Herbs/Leafy') {
-                                        categoryLabel = t('inventory.categoryHerbs');
-                                      }
-                                      return {
-                                        id: product.id,
-                                        label: getProductName(product),
-                                        value: product.id,
-                                        category: categoryLabel
-                                      };
-                                    })}
+                                    options={products.map((product: any) => ({
+                                      id: product.id,
+                                      label: getProductName(product),
+                                      value: product.id,
+                                      category: categoryLookup.label(product),
+                                    }))}
                                     value={item.product_id || ''}
                                     onChange={(value: any) => {
                                       const selectedId = value as string;
                                       setBulkItems(prev => ({
                                         ...prev,
-                                        [productId]: { ...prev[productId], product_id: selectedId, unit: 'box' }
+                                        [productId]: { ...prev[productId], product_id: selectedId, unit: prev[productId]?.unit || defaultUnitCode }
                                       }));
                                     }}
                                     placeholder={t('inventory.selectProduct')}
                                     searchPlaceholder={t('inventory.searchProducts')}
-                                    categories={[t('inventory.categoryFruits'), t('inventory.categoryVegetables'), t('inventory.categoryHerbs')]}
+                                    categories={activeCategoryLabels}
                                     showAddOption={true}
                                     addOptionText={t('inventory.addNewProduct')}  
                                     className="w-full min-w-[200px]"
@@ -1173,16 +1181,22 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                 value={item.unit}
                                 onChange={(e) => setBulkItems(prev => ({
                                   ...prev,
-                                  [productId]: { ...prev[productId], unit: e.target.value as any }
+                                  [productId]: { ...prev[productId], unit: e.target.value }
                                 }))}
                                 className="w-24 border border-gray-300 dark:border-slate-700 rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
                               >
-                                <option value="kg">{t('common.labels.kg')}</option>
-                                <option value="piece">{t('common.labels.piece')}</option>
-                                <option value="box">{t('common.labels.box')}</option>
-                                <option value="bag">{t('common.labels.bag')}</option>
-                                <option value="bundle">{t('common.labels.bundle')}</option>
-                                <option value="dozen">{t('common.labels.dozen')}</option>
+                                {activeUnits.length === 0 && (
+                                  <option value="" disabled>{t('app.loading')}</option>
+                                )}
+                                {activeUnits.length > 0 && !activeUnits.some((u) => u.code === item.unit) && item.unit && (
+                                  <option value={item.unit}>{item.unit}</option>
+                                )}
+                                {activeUnits.map((u) => (
+                                  <option key={u.id} value={u.code}>
+                                    {getTranslatedString(u.name, language as 'en' | 'ar' | 'fr')}
+                                    {u.symbol ? ` (${u.symbol})` : ''}
+                                  </option>
+                                ))}
                               </select>
                             </td>
                             <td className="py-3 px-2 w-24">

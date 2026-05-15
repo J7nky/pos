@@ -7,6 +7,7 @@ import { CURRENCY_META } from '@pos-platform/shared';
 import type { CurrencyCode } from '@pos-platform/shared';
 import { assertValidCurrency } from '../../utils/currencyValidation';
 import { currencyService } from '../../services/currencyService';
+import { getTranslatedString } from '../../utils/multilingual';
 
 interface EditInventoryModalProps {
   item: any;
@@ -16,8 +17,15 @@ interface EditInventoryModalProps {
 }
 
 const EditInventoryModal: React.FC<EditInventoryModalProps> = ({ item, onClose, onSave, inventoryBills = [] }) => {
-  const { acceptedCurrencies, preferredCurrency, storeId } = useOfflineData();
-  const { t } = useI18n();
+  const { acceptedCurrencies, preferredCurrency, storeId, units } = useOfflineData();
+  const { t, language } = useI18n();
+  const activeUnits = React.useMemo(
+    () => units
+      .filter((u) => u.is_active)
+      .slice()
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+    [units]
+  );
   const acList = acceptedCurrencies.length > 0 ? acceptedCurrencies : [preferredCurrency];
   const [form, setForm] = useState(() => ({
     ...item,
@@ -173,12 +181,18 @@ const EditInventoryModal: React.FC<EditInventoryModalProps> = ({ item, onClose, 
                       className={`w-full border ${errors.unit ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
                       required
                     >
-                      <option value="kg">Kilogram (kg)</option>
-                      <option value="piece">Piece</option>
-                      <option value="box">Box</option>
-                      <option value="bag">Bag</option>
-                      <option value="bundle">Bundle</option>
-                      <option value="dozen">Dozen</option>
+                      {activeUnits.length === 0 && (
+                        <option value="" disabled>{t('app.loading')}</option>
+                      )}
+                      {activeUnits.length > 0 && form.unit && !activeUnits.some((u) => u.code === form.unit) && (
+                        <option value={form.unit}>{form.unit}</option>
+                      )}
+                      {activeUnits.map((u) => (
+                        <option key={u.id} value={u.code}>
+                          {getTranslatedString(u.name, language as 'en' | 'ar' | 'fr')}
+                          {u.symbol ? ` (${u.symbol})` : ''}
+                        </option>
+                      ))}
                     </select>
                     {errors.unit && <p className="text-xs text-red-600 mt-1">{errors.unit}</p>}
                   </div>

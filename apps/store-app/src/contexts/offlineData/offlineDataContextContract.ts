@@ -20,6 +20,8 @@ import type {
 } from '../../types';
 import type { InventoryItem } from '../../types/inventory';
 import type { BalanceSnapshot, ChartOfAccounts, JournalEntry } from '../../types/accounting';
+import type { ProductCategory, UnitOfMeasure } from '../../types/taxonomy';
+import type { CreateCategoryInput, CreateUnitInput } from '../../services/taxonomyService';
 import type { SyncResult } from '../../services/syncOrchestrator';
 import type { CurrencyCode } from '@pos-platform/shared';
 
@@ -264,6 +266,17 @@ export interface OfflineDataContextType {
   entities: Tables['entities']['Row'][];
   chartOfAccounts: ChartOfAccounts[];
   balanceSnapshots: BalanceSnapshot[];
+
+  /** Configurable, store-scoped product categories (v64). */
+  categories: ProductCategory[];
+  /** Configurable, store-scoped units of measure (v64). */
+  units: UnitOfMeasure[];
+  createCategory: (input: CreateCategoryInput) => Promise<string>;
+  updateCategory: (id: string, updates: Partial<Pick<ProductCategory, 'name' | 'sort_order' | 'is_active' | 'code'>>) => Promise<void>;
+  deleteCategory: (id: string) => Promise<void>;
+  createUnit: (input: CreateUnitInput) => Promise<string>;
+  updateUnit: (id: string, updates: Partial<Omit<UnitOfMeasure, 'id' | 'store_id' | 'created_at' | 'is_system'>>) => Promise<void>;
+  deleteUnit: (id: string) => Promise<void>;
 
   stockLevels: DerivedStockLevel[];
   setStockLevels: (levels: DerivedStockLevel[]) => void;

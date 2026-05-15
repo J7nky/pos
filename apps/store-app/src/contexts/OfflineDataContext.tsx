@@ -42,6 +42,7 @@ import {
   useCashDrawerDataLayer,
   useStoreSettingsDataLayer,
   useNotificationsDataLayer,
+  useTaxonomyDataLayer,
 } from './offlineData';
 import type { OfflineDataContextType, OfflineSyncSessionState } from './offlineData/offlineDataContextContract';
 import { useStoreSwitchLifecycle } from './offlineData/useStoreSwitchLifecycle';
@@ -148,6 +149,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const notificationsLayer = useNotificationsDataLayer({ storeId });
   const accountingLayer = useAccountingDataLayer({});
   const inventoryLayer = useInventoryDataLayer({});
+  const taxonomyLayer = useTaxonomyDataLayer({
+    storeId,
+    resetAutoSyncTimer: stableResetAutoSyncTimer,
+    debouncedSync: stableDebouncedSync,
+  });
 
   // Layers that need pushUndo + resetAutoSyncTimer
   const productLayer = useProductDataLayer({
@@ -410,6 +416,18 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       await billLayer.hydrate(billsData, billLineItemsData);
       inventoryLayer.hydrate(inventoryData, batchesData);
       accountingLayer.hydrate(journalEntriesData || [], chartOfAccountsData || [], balanceSnapshotsData || []);
+      // Categories + units (v64) — direct Dexie reads, no crudHelperService bundling yet
+      try {
+        const [cats, us] = await Promise.all([
+          getDB().product_categories.where('store_id').equals(storeId).filter((r) => !r._deleted).toArray(),
+          getDB().units_of_measure.where('store_id').equals(storeId).filter((r) => !r._deleted).toArray(),
+        ]);
+        cats.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+        us.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+        taxonomyLayer.hydrate(cats, us);
+      } catch (err) {
+        console.warn('⚠️ Could not hydrate taxonomies (likely first run pre-migration):', err);
+      }
 
       // Derive expense categories from chart_of_accounts (account_type === 'expense')
       setExpenseCategories(
@@ -456,6 +474,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     productLayer.hydrate, entityLayer.hydrate, employeeLayer.hydrate,
     transactionLayer.hydrate, billLayer.hydrate, inventoryLayer.hydrate,
     accountingLayer.hydrate, branchLayer.hydrate,
+    taxonomyLayer.hydrate,
     reloadCurrencyState, notificationsLayer.loadNotifications,
     cashDrawerLayer.refreshCashDrawerStatus,
   ]);
@@ -956,6 +975,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         entities: [],
         chartOfAccounts: [],
         balanceSnapshots: [],
+        categories: [],
+        units: [],
+        createCategory: async () => '',
+        updateCategory: async () => {},
+        deleteCategory: async () => {},
+        createUnit: async () => '',
+        updateUnit: async () => {},
+        deleteUnit: async () => {},
         stockLevels: [],
         setStockLevels: () => {},
         lowStockAlertsEnabled: false,
@@ -1101,6 +1128,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       entities: entityLayer.entities,
       chartOfAccounts: accountingLayer.chartOfAccounts,
       balanceSnapshots: accountingLayer.balanceSnapshots,
+
+      // Configurable taxonomies (v64)
+      categories: taxonomyLayer.categories,
+      units: taxonomyLayer.units,
+      createCategory: taxonomyLayer.createCategory,
+      updateCategory: taxonomyLayer.updateCategory,
+      deleteCategory: taxonomyLayer.deleteCategory,
+      createUnit: taxonomyLayer.createUnit,
+      updateUnit: taxonomyLayer.updateUnit,
+      deleteUnit: taxonomyLayer.deleteUnit,
 
       // Settings from settingsLayer
       stockLevels,

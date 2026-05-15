@@ -157,7 +157,10 @@ export interface GlobalLogo {
 export interface Product {
   id: string;
   name: MultilingualString; // Supports both string (backwards compatible) and multilingual object { en: "apple", ar: "تفاح", fr: "pomme" }
-  category: string;
+  /** FK into `product_categories.id` (v64+). */
+  category_id?: string;
+  /** @deprecated Legacy text category. Use `category_id`. */
+  category?: string;
   image: string;
   is_global?: boolean; // True for predefined global products, false/undefined for store-specific
   created_at: string;
@@ -198,7 +201,10 @@ export interface InventoryItem {
   supplier_id?: string; // Optional: can be obtained from inventory_bills via batch_id, but may exist for legacy data
   quantity: number;
   received_quantity: number;
-  unit: 'kg' | 'piece' | 'box' | 'bag'|'bundle';
+  /** FK into `units_of_measure.id` (v64+). */
+  unit_id?: string;
+  /** @deprecated Legacy unit code; dual-written. */
+  unit?: string;
   weight?: number | null;
   price?: number | null;
   currency?: CurrencyCode;

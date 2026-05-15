@@ -8,6 +8,7 @@ import { useOfflineData } from '../../contexts/OfflineDataContext';
 import type { CurrencyCode } from '@pos-platform/shared';
 import { parseMultilingualString } from '../../utils/multilingual';
 import { normalizeNameForComparison } from '../../utils/nameNormalization';
+import { useCategoryLookup, useUnitLookup } from '../../hooks/useCategoryLookup';
 
 // Function to translate product categories
 export const translateCategory = (category: string | undefined, t: (key: string) => string): string => {
@@ -54,6 +55,8 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
   const { t } = useI18n();
   const { formatAmount, preferredCurrency } = useOfflineData();
   const { getProductName } = useProductMultilingual();
+  const categoryLookup = useCategoryLookup();
+  const unitLookup = useUnitLookup();
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
   const itemsPerPage = 15;
@@ -182,26 +185,11 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
     return filteredReceives.slice(startIndex, startIndex + itemsPerPage);
   }, [filteredReceives, currentPage]);
 
-  // Function to translate units
-  const translateUnit = (unit: string) => {
-    switch (unit?.toLowerCase()) {
-      case 'kg':
-        return t('common.labels.kg');
-      case 'box':
-        return t('common.labels.box');
-      case 'bag':
-        return t('common.labels.bag');
-      case 'bundle':
-        return t('common.labels.bundle');
-      case 'dozen':
-        return t('common.labels.dozen');
-      case 'piece':
-        return t('common.labels.piece');
-      case 'units':
-        return t('common.labels.units');
-      default:
-        return unit;
-    }
+  // Data-driven unit display: resolves `unit_id` first, falls back to legacy `unit` text.
+  const translateUnit = (item: { unit_id?: string | null; unit?: string | null } | string | null | undefined) => {
+    if (item == null) return '';
+    if (typeof item === 'string') return unitLookup.label({ unit: item });
+    return unitLookup.label(item);
   };
   return (
     <div className="bg-white dark:bg-slate-900 rounded-lg shadow-sm">
@@ -280,7 +268,7 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
                           />
                           <div>
                             <p className="font-medium text-gray-900 dark:text-slate-100">{getProductName(product)}</p>
-                            <p className="text-sm text-gray-500 dark:text-slate-400">{translateCategory(product?.category, t)}</p>
+                            <p className="text-sm text-gray-500 dark:text-slate-400">{categoryLookup.label(product)}</p>
                           </div>
                         </div>
                       </td>
@@ -295,7 +283,7 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
                         </span>
                       </td>
                       <td className="px-6 py-4 text-gray-900 dark:text-slate-100 rtl:text-right ltr:text-left">
-                        {item.quantity} {translateUnit(item.unit)}
+                        {item.quantity} {translateUnit(item)}
                       </td>
                       <td className="px-6 py-4 text-gray-900 dark:text-slate-100 rtl:text-right ltr:text-left">
                         <div className="inline-flex items-center gap-1.5">

@@ -1,31 +1,39 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Plus, Edit, Trash2, X, Loader2, Upload } from 'lucide-react';
 import { Product, getTranslatedString, type MultilingualString } from '@pos-platform/shared';
 import { supabase } from '../lib/supabase';
 import { v4 as uuidv4 } from 'uuid';
+import type { TenantTypeTemplate } from '../types';
 
-type ProductCategory = 'Fruits' | 'Vegetables' | 'Herbs/Leafy' | 'Nuts' | 'Others' | 'Tropical Fruits';
+const DEFAULT_TENANT_TYPE = 'produce_market';
 
 interface ProductFormData {
   nameEn: string;
   nameAr: string;
   nameFr: string;
-  category: ProductCategory;
+  tenantType: string;
+  category: string;
   image: string;
   imageFile: File | null;
 }
 
+interface GlobalProductRow extends Product {
+  tenant_type?: string | null;
+}
+
 export default function GlobalProducts() {
-  const [products, setProducts] = useState<Product[]>([]);
+  const [products, setProducts] = useState<GlobalProductRow[]>([]);
+  const [tenantTemplates, setTenantTemplates] = useState<TenantTypeTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [editingProduct, setEditingProduct] = useState<GlobalProductRow | null>(null);
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
   const [formData, setFormData] = useState<ProductFormData>({
     nameEn: '',
     nameAr: '',
     nameFr: '',
-    category: 'Fruits',
+    tenantType: DEFAULT_TENANT_TYPE,
+    category: '',
     image: '',
     imageFile: null,
   });
@@ -34,10 +42,48 @@ export default function GlobalProducts() {
   const [formError, setFormError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Fetch global products
+  const selectedTemplate = useMemo(
+    () => tenantTemplates.find((tt) => tt.tenant_type === formData.tenantType),
+    [tenantTemplates, formData.tenantType]
+  );
+  const availableCategories = useMemo(() => {
+    if (!selectedTemplate) return [];
+    return selectedTemplate.default_categories
+      .slice()
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  }, [selectedTemplate]);
+
+  // Fetch global products + tenant templates
   useEffect(() => {
     fetchProducts();
+    fetchTenantTemplates();
   }, []);
+
+  // When the chosen tenant changes (or templates hydrate), default the category to the
+  // first option if the current value doesn't belong to the selected tenant's template.
+  useEffect(() => {
+    if (!showForm) return;
+    if (availableCategories.length === 0) return;
+    const matches = availableCategories.some(
+      (c) => c.name.en === formData.category || c.code === formData.category
+    );
+    if (!matches) {
+      setFormData((prev) => ({ ...prev, category: availableCategories[0].name.en }));
+    }
+  }, [availableCategories, showForm, formData.category]);
+
+  const fetchTenantTemplates = async () => {
+    const { data, error } = await supabase
+      .from('tenant_type_templates')
+      .select('*')
+      .eq('is_active', true)
+      .order('display_name');
+    if (error) {
+      console.error('Error fetching tenant type templates:', error);
+      return;
+    }
+    setTenantTemplates((data || []) as TenantTypeTemplate[]);
+  };
 
   const fetchProducts = async () => {
     try {
@@ -51,7 +97,7 @@ export default function GlobalProducts() {
       if (error) throw error;
 
       // Transform database products to Product type
-      const transformedProducts: Product[] = (data || []).map((p) => {
+      const transformedProducts: GlobalProductRow[] = (data || []).map((p) => {
         // Parse name if it's a JSON string, otherwise use as-is
         let name: MultilingualString;
         if (typeof p.name === 'string') {
@@ -66,13 +112,14 @@ export default function GlobalProducts() {
         } else {
           name = { en: String(p.name || '') };
         }
-        
+
         return {
           id: p.id,
           name,
           category: p.category,
           image: p.image || '',
           is_global: p.is_global,
+          tenant_type: (p as { tenant_type?: string | null }).tenant_type ?? null,
           createdAt: p.created_at,
         };
       });
@@ -86,12 +133,12 @@ export default function GlobalProducts() {
     }
   };
 
-  const handleOpenForm = (product?: Product) => {
+  const handleOpenForm = (product?: GlobalProductRow) => {
     if (product) {
       setEditingProduct(product);
       // Extract multilingual name values
       let nameObj: MultilingualString | Record<string, string>;
-      
+
       if (typeof product.name === 'string') {
         // Try to parse if it's a JSON string
         try {
@@ -107,12 +154,13 @@ export default function GlobalProducts() {
         // Fallback
         nameObj = { en: String(product.name || '') };
       }
-      
+
       setFormData({
         nameEn: nameObj.en || '',
         nameAr: nameObj.ar || '',
         nameFr: nameObj.fr || '',
-        category: product.category as ProductCategory,
+        tenantType: product.tenant_type || DEFAULT_TENANT_TYPE,
+        category: product.category || '',
         image: product.image || '',
         imageFile: null,
       });
@@ -122,7 +170,8 @@ export default function GlobalProducts() {
         nameEn: '',
         nameAr: '',
         nameFr: '',
-        category: 'Fruits',
+        tenantType: DEFAULT_TENANT_TYPE,
+        category: '',
         image: '',
         imageFile: null,
       });
@@ -139,7 +188,8 @@ export default function GlobalProducts() {
       nameEn: '',
       nameAr: '',
       nameFr: '',
-      category: 'Fruits',
+      tenantType: DEFAULT_TENANT_TYPE,
+      category: '',
       image: '',
       imageFile: null,
     });
@@ -285,6 +335,7 @@ export default function GlobalProducts() {
       const productData: any = {
         name: nameObj,
         category: formData.category,
+        tenant_type: formData.tenantType || DEFAULT_TENANT_TYPE,
         image: imageUrl,
         is_global: true,
         store_id: null, // Global products have no store_id (null)
@@ -537,6 +588,32 @@ export default function GlobalProducts() {
                 />
               </div>
 
+              {/* Tenant Type */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Tenant Type <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={formData.tenantType}
+                  onChange={(e) => setFormData({ ...formData, tenantType: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  required
+                  disabled={formLoading}
+                >
+                  {tenantTemplates.length === 0 && (
+                    <option value={formData.tenantType}>{formData.tenantType}</option>
+                  )}
+                  {tenantTemplates.map((tt) => (
+                    <option key={tt.id} value={tt.tenant_type}>
+                      {getTranslatedString(tt.display_name, 'en')}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-gray-500">
+                  Stores of this tenant type will see this product in their catalog.
+                </p>
+              </div>
+
               {/* Category */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -544,17 +621,28 @@ export default function GlobalProducts() {
                 </label>
                 <select
                   value={formData.category}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value as ProductCategory })}
+                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                   required
                   disabled={formLoading}
                 >
-                  <option value="Fruits">Fruits</option>
-                  <option value="Vegetables">Vegetables</option>
-                  <option value="Herbs/Leafy">Herbs/Leafy</option>
-                  <option value="Nuts">Nuts</option>
-                  <option value="Others">Others</option>
-                  <option value="Tropical Fruits">Tropical Fruits</option>
+                  {availableCategories.length === 0 && (
+                    <option value="" disabled>
+                      {selectedTemplate ? 'No categories defined for this tenant type' : 'Loading…'}
+                    </option>
+                  )}
+                  {availableCategories.length > 0 &&
+                    formData.category &&
+                    !availableCategories.some(
+                      (c) => c.name.en === formData.category || c.code === formData.category
+                    ) && (
+                      <option value={formData.category}>{formData.category} (legacy)</option>
+                    )}
+                  {availableCategories.map((c) => (
+                    <option key={c.code} value={c.name.en}>
+                      {getTranslatedString(c.name, 'en')}
+                    </option>
+                  ))}
                 </select>
               </div>
 

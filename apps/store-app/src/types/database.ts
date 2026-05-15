@@ -216,6 +216,8 @@ export interface Database {
           email: string | null;
           logo: string | null;
           status: 'active' | 'suspended' | 'archived';
+          /** Tenant vertical (v64) — drives admin-side seeding of categories + units. */
+          tenant_type?: string;
         };
         Insert: {
           id?: string;
@@ -233,6 +235,7 @@ export interface Database {
           email?: string | null;
           logo?: string | null;
           status?: 'active' | 'suspended' | 'archived';
+          tenant_type?: string;
           created_at?: string;
           updated_at?: string;
         };
@@ -252,6 +255,7 @@ export interface Database {
           email?: string | null;
           logo?: string | null;
           status?: 'active' | 'suspended' | 'archived';
+          tenant_type?: string;
           updated_at?: string;
         };
       };
@@ -289,29 +293,116 @@ export interface Database {
         Row: {
           id: string;
           name: string;
-          category: string;
+          /** FK into `product_categories.id` (v64+). Source of truth. */
+          category_id?: string | null;
+          /** @deprecated Legacy text category. */
+          category?: string | null;
           image: string;
           store_id: string | null; // null for global products
           is_global: boolean;
+          /** Tenant vertical tag (v65+). Only meaningful when is_global=true. */
+          tenant_type?: string | null;
           created_at: string;
           updated_at: string;
         };
         Insert: {
           id?: string;
           name: string;
-          category: string;
+          category_id?: string | null;
+          /** @deprecated Legacy text category. */
+          category?: string | null;
           image: string;
           store_id: string | null; // null for global products
           is_global?: boolean;
+          tenant_type?: string | null;
           created_at?: string;
           updated_at?: string;
         };
         Update: {
           id?: string;
           name?: string;
-          category?: string;
+          category_id?: string | null;
+          /** @deprecated Legacy text category. */
+          category?: string | null;
           image?: string;
           is_global?: boolean;
+          tenant_type?: string | null;
+          updated_at?: string;
+        };
+      };
+      product_categories: {
+        Row: {
+          id: string;
+          store_id: string;
+          code: string;
+          name: import('../utils/multilingual').MultilingualString;
+          sort_order: number;
+          is_active: boolean;
+          is_system: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          code: string;
+          name: import('../utils/multilingual').MultilingualString;
+          sort_order?: number;
+          is_active?: boolean;
+          is_system?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          code?: string;
+          name?: import('../utils/multilingual').MultilingualString;
+          sort_order?: number;
+          is_active?: boolean;
+          updated_at?: string;
+        };
+      };
+      units_of_measure: {
+        Row: {
+          id: string;
+          store_id: string;
+          code: string;
+          name: import('../utils/multilingual').MultilingualString;
+          symbol?: string | null;
+          system_role?: import('./taxonomy').UnitSystemRole | null;
+          conversion_to_base?: number | null;
+          base_unit_code?: string | null;
+          sort_order: number;
+          is_active: boolean;
+          is_system: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          code: string;
+          name: import('../utils/multilingual').MultilingualString;
+          symbol?: string | null;
+          system_role?: import('./taxonomy').UnitSystemRole | null;
+          conversion_to_base?: number | null;
+          base_unit_code?: string | null;
+          sort_order?: number;
+          is_active?: boolean;
+          is_system?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          code?: string;
+          name?: import('../utils/multilingual').MultilingualString;
+          symbol?: string | null;
+          system_role?: import('./taxonomy').UnitSystemRole | null;
+          conversion_to_base?: number | null;
+          base_unit_code?: string | null;
+          sort_order?: number;
+          is_active?: boolean;
           updated_at?: string;
         };
       };
@@ -448,7 +539,10 @@ export interface Database {
           product_id: string;
           quantity: number;
           selling_price: number | null;
+          /** @deprecated Legacy unit code. Use `unit_id`. */
           unit: string;
+          /** FK into `units_of_measure.id` (v64+). */
+          unit_id?: string | null;
           weight: number | null;
           price: number | null;
           store_id: string;
@@ -466,6 +560,7 @@ export interface Database {
           quantity?: number;
           selling_price?: number | null;
           unit?: string;
+          unit_id?: string | null;
           weight?: number | null;
           price?: number | null;
           store_id?: string;
@@ -483,6 +578,7 @@ export interface Database {
           quantity?: number;
           selling_price?: number | null;
           unit?: string;
+          unit_id?: string | null;
           weight?: number | null;
           price?: number | null;
           store_id?: string;

@@ -11,6 +11,8 @@ import {
   V60_STORES,
   V62_STORES,
   V63_STORES,
+  V64_STORES,
+  V65_STORES,
   upgradeV54,
   upgradeV55,
   upgradeV56,
@@ -21,6 +23,8 @@ import {
   upgradeV61,
   upgradeV62,
   upgradeV63,
+  upgradeV64,
+  upgradeV65,
 } from './dbSchema';
 import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
 import { 
@@ -55,6 +59,7 @@ import {
   Entity,
   ChartOfAccounts
 } from '../types/accounting';
+import type { ProductCategory, UnitOfMeasure } from '../types/taxonomy';
 import { calculateBothCurrencies } from '../utils/balanceCalculation';
 import { changeTracker } from '../services/changeTracker';
 
@@ -134,6 +139,10 @@ class POSDatabase extends Dexie {
   balance_snapshots!: Table<BalanceSnapshot, string>;
   entities!: Table<Entity, string>;
   chart_of_accounts!: Table<ChartOfAccounts, string>;
+
+  // Configurable taxonomies (v64) — store-scoped, multilingual, tier-1 synced
+  product_categories!: Table<ProductCategory, string>;
+  units_of_measure!: Table<UnitOfMeasure, string>;
   
   // RBAC tables (Role-Based Access Control)
   role_permissions!: Table<RolePermission, string>;
@@ -185,6 +194,8 @@ class POSDatabase extends Dexie {
     this.version(61).upgrade(upgradeV61);
     this.version(62).stores(V62_STORES).upgrade(upgradeV62);
     this.version(63).stores(V63_STORES).upgrade(upgradeV63);
+    this.version(64).stores(V64_STORES).upgrade(upgradeV64);
+    this.version(65).stores(V65_STORES).upgrade(upgradeV65);
 
     // Add hooks for cash drawer tables
     this.cash_drawer_accounts.hook('creating', this.addCreateFieldsWithUpdatedAt);
@@ -229,7 +240,8 @@ class POSDatabase extends Dexie {
       'bills', 'bill_line_items', 'bill_audit_logs',
       'cash_drawer_accounts', 'cash_drawer_sessions',
       'missed_products', 'reminders', 'chart_of_accounts',
-      'role_permissions', 'user_permissions', 'balance_snapshots'
+      'role_permissions', 'user_permissions', 'balance_snapshots',
+      'product_categories', 'units_of_measure'
     ];
 
     // Register sync trigger hooks for all tables
@@ -1160,13 +1172,27 @@ class POSDatabase extends Dexie {
    */
   async getAvailableProducts(storeId: string): Promise<Product[]> {
     return this.withDb(async () => {
-      // Get global products - defensive approach to handle different value types
+      // Resolve the calling store's tenant_type so we can filter globals.
+      // A store sees a global product only when:
+      //   - the global has no tenant_type set (legacy / universal), OR
+      //   - the global's tenant_type matches the store's tenant_type.
+      // This prevents e.g. legacy produce globals from leaking into Electronics
+      // or Pharmacy stores (v64+).
+      const store = await this.stores.get(storeId);
+      const storeTenantType = (store as { tenant_type?: string } | undefined)?.tenant_type ?? null;
+
       const globalProducts = await this.products
         .where('is_global')
         .anyOf(1, true, '1', 'true')
-        .filter(p => !p._deleted)
+        .filter(p => {
+          if (p._deleted) return false;
+          const globalTenant = (p as { tenant_type?: string | null }).tenant_type ?? null;
+          if (!globalTenant) return true;                         // universal global
+          if (!storeTenantType) return true;                      // store has no tenant_type yet
+          return globalTenant === storeTenantType;                // tenant-matched global
+        })
         .toArray();
-      
+
       // Get store-specific products (excluding global)
       const storeProducts = await this.products
         .where('store_id')
@@ -1177,7 +1203,7 @@ class POSDatabase extends Dexie {
           return notDeleted && notGlobal;
         })
         .toArray();
-      
+
       // Combine and return
       return [...globalProducts, ...storeProducts];
     });

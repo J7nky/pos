@@ -433,6 +433,8 @@ const ar = {
     categoryVegetables: 'خضروات',
     categoryHerbs: 'حشائش',
     categoryGrains: 'حبوب',
+    categoryNuts: 'مكسرات',
+    categoryOthers: 'أخرى',
     productPhotoOptional: 'صورة المنتج (اختياري)',
     uploadImageCta: 'انقر لرفع الصورة',
     uploadImageHint: 'PNG, JPG حتى 5MB',

@@ -2,7 +2,7 @@ import type { Transaction as DexieTransaction } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
 import type { SyncMetadata, PendingSync } from '../types';
 
-export const CURRENT_DB_VERSION = 62;
+export const CURRENT_DB_VERSION = 65;
 
 export const V54_STORES = {
   stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
@@ -136,6 +136,47 @@ export const V62_STORES = {
  */
 export const V63_STORES = {
   product_image_cache: 'product_id, source_url, cached_at',
+} as const;
+
+/**
+ * v64: configurable, store-scoped taxonomies — product categories and units of
+ * measure replace the hardcoded TypeScript literal unions on `products.category`
+ * and `inventory_items.unit`. Both tables are multilingual (`name` is a
+ * JSONB { en, ar, fr } map), tier-1-synced, and seeded per `stores.tenant_type`
+ * (`produce_market` for existing stores).
+ *
+ * Re-indexes `products` (adds `category_id`), `inventory_items` (adds `unit_id`),
+ * and `stores` (adds `tenant_type`). Legacy `products.category` and
+ * `inventory_items.unit` text fields remain readable during the transition and
+ * are dual-written by services.
+ */
+export const V64_STORES = {
+  product_categories:
+    'id, store_id, code, is_active, is_system, sort_order, updated_at, [store_id+code], [store_id+is_active], _synced, _deleted',
+  units_of_measure:
+    'id, store_id, code, system_role, is_active, is_system, sort_order, updated_at, [store_id+code], [store_id+is_active], _synced, _deleted',
+  products:
+    'id, store_id, branch_id, name, category, category_id, is_global, updated_at, _synced, _deleted',
+  inventory_items:
+    'id, store_id, branch_id, product_id, unit, unit_id, quantity, weight, price, created_at, received_quantity, batch_id, selling_price, type, received_at, sku, currency, is_archived, [store_id+branch_id], _synced, _deleted',
+  stores:
+    'id, name, country, tenant_type, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
+} as const;
+
+/**
+ * v65: tenant-scoped globals — adds `products.tenant_type` so a global
+ * product (is_global=true) can be tagged with a specific tenant_type. The
+ * store-app's `getAvailableProducts` filters globals where the tag is
+ * non-NULL and does not match the calling store's tenant_type — preventing
+ * legacy produce globals from leaking into Electronics / Pharmacy stores.
+ *
+ * Schema change: index `tenant_type` on products so filtered globals queries
+ * can use a where-clause if we add one later. (Today the filter uses a JS
+ * predicate, but indexing is cheap and future-proof.)
+ */
+export const V65_STORES = {
+  products:
+    'id, store_id, branch_id, name, category, category_id, tenant_type, is_global, updated_at, _synced, _deleted',
 } as const;
 
 export async function upgradeV54(_tx: DexieTransaction): Promise<void> {
@@ -360,4 +401,215 @@ export async function upgradeV62(tx: DexieTransaction): Promise<void> {
 export async function upgradeV63(_tx: DexieTransaction): Promise<void> {
   console.log('🔧 Migrating database schema v62 → v63 (product_image_cache local-only table)');
   console.log('   ✅ v63 migration complete');
+}
+
+/** Default tenant type assigned to every legacy store on v64 upgrade. */
+export const DEFAULT_TENANT_TYPE = 'produce_market';
+
+/** Multilingual labels for the legacy produce-market category superset. */
+const PRODUCE_MARKET_CATEGORY_SEED: Array<{
+  code: string;
+  name: { en: string; ar: string; fr: string };
+  sort_order: number;
+}> = [
+  { code: 'fruits',          name: { en: 'Fruits',          ar: 'فواكه',          fr: 'Fruits' },         sort_order: 10 },
+  { code: 'tropical_fruits', name: { en: 'Tropical Fruits', ar: 'فواكه استوائية', fr: 'Fruits tropicaux' }, sort_order: 20 },
+  { code: 'vegetables',      name: { en: 'Vegetables',      ar: 'خضروات',         fr: 'Légumes' },        sort_order: 30 },
+  { code: 'herbs',           name: { en: 'Herbs/ Leafy',    ar: 'حشائش',          fr: 'Herbes' },         sort_order: 40 },
+  { code: 'grains',          name: { en: 'Grains',          ar: 'حبوب',           fr: 'Céréales' },       sort_order: 50 },
+  { code: 'nuts',            name: { en: 'Nuts',            ar: 'مكسرات',         fr: 'Noix' },           sort_order: 60 },
+  { code: 'others',          name: { en: 'Others',          ar: 'أخرى',           fr: 'Autres' },         sort_order: 70 },
+];
+
+/** Multilingual labels + system_role for the legacy produce-market unit set. */
+const PRODUCE_MARKET_UNIT_SEED: Array<{
+  code: string;
+  name: { en: string; ar: string; fr: string };
+  system_role: 'mass' | 'count' | 'volume' | 'length' | 'pack';
+  sort_order: number;
+}> = [
+  { code: 'kg',     name: { en: 'Kilogram', ar: 'كيلوغرام', fr: 'Kilogramme' }, system_role: 'mass',  sort_order: 10 },
+  { code: 'piece',  name: { en: 'Piece',    ar: 'قطعة',     fr: 'Pièce' },      system_role: 'count', sort_order: 20 },
+  { code: 'box',    name: { en: 'Box',      ar: 'صندوق',    fr: 'Boîte' },      system_role: 'pack',  sort_order: 30 },
+  { code: 'bag',    name: { en: 'Bag',      ar: 'كيس',      fr: 'Sac' },        system_role: 'pack',  sort_order: 40 },
+  { code: 'bundle', name: { en: 'Bundle',   ar: 'حزمة',     fr: 'Botte' },      system_role: 'pack',  sort_order: 50 },
+  { code: 'dozen',  name: { en: 'Dozen',    ar: 'دزينة',    fr: 'Douzaine' },   system_role: 'count', sort_order: 60 },
+];
+
+/**
+ * Maps legacy category strings (including drifted variants stored in real
+ * product rows) to the seeded category `code`. Unknown values fall back to
+ * `others`.
+ */
+function legacyCategoryToCode(raw: unknown): string {
+  if (!raw || typeof raw !== 'string') return 'others';
+  const norm = raw.trim().toLowerCase();
+  if (norm === 'fruits') return 'fruits';
+  if (norm === 'tropical fruits' || norm === 'tropical_fruits') return 'tropical_fruits';
+  if (norm === 'vegetables') return 'vegetables';
+  if (norm === 'herbs' || norm === 'herbs/leafy' || norm === 'herbs/ leafy' || norm === 'leafy') return 'herbs';
+  if (norm === 'grains') return 'grains';
+  if (norm === 'nuts') return 'nuts';
+  if (norm === 'others') return 'others';
+  return 'others';
+}
+
+function legacyUnitToCode(raw: unknown): string {
+  if (!raw || typeof raw !== 'string') return 'piece';
+  const norm = raw.trim().toLowerCase();
+  if (norm === 'kg' || norm === 'kilogram' || norm === 'kilogram (kg)') return 'kg';
+  if (norm === 'piece' || norm === 'pieces' || norm === 'pc') return 'piece';
+  if (norm === 'box' || norm === 'boxes') return 'box';
+  if (norm === 'bag' || norm === 'bags') return 'bag';
+  if (norm === 'bundle' || norm === 'bundles') return 'bundle';
+  if (norm === 'dozen' || norm === 'dozens') return 'dozen';
+  return 'piece';
+}
+
+/**
+ * Build a deterministic UUIDv5-shaped id from (storeId, kind, code) so that
+ * re-running the migration on a device that previously synced down rows does
+ * not create duplicates. Pure local — Supabase rows get their own gen_random_uuid.
+ */
+function deterministicId(storeId: string, kind: 'cat' | 'unit', code: string): string {
+  const seed = `${storeId}:${kind}:${code}`;
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < seed.length; i++) {
+    const ch = seed.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  const toHex = (n: number) => (n >>> 0).toString(16).padStart(8, '0');
+  const a = toHex(h1);
+  const b = toHex(h2);
+  const c = toHex(Math.imul(h1, 16807));
+  const d = toHex(Math.imul(h2, 48271));
+  // 8-4-4-4-12 layout; force version nibble to 5 + variant nibble to 8 so the
+  // string passes basic UUID validators that may inspect it.
+  return `${a}-${b.slice(0, 4)}-5${b.slice(4, 7)}-8${c.slice(0, 3)}-${c.slice(3, 8)}${d.slice(0, 7)}`;
+}
+
+/**
+ * v64 (configurable categories + units):
+ * 1. Default tenant_type=produce_market on every store row.
+ * 2. Idempotently seed produce_market categories and units per store.
+ * 3. Backfill products.category_id from the legacy category text.
+ * 4. Backfill inventory_items.unit_id from the legacy unit text.
+ * Legacy text columns (`products.category`, `inventory_items.unit`) are left
+ * intact for one transition cycle so older readers keep working.
+ */
+export async function upgradeV64(tx: DexieTransaction): Promise<void> {
+  console.log('🔧 Migrating database schema v63 → v64 (configurable categories + units)');
+
+  // (1) Default tenant_type on stores
+  await tx
+    .table('stores')
+    .toCollection()
+    .modify((store: Record<string, unknown>) => {
+      if (!store.tenant_type) store.tenant_type = DEFAULT_TENANT_TYPE;
+    });
+
+  const stores = await tx.table('stores').toArray();
+  const nowIso = new Date().toISOString();
+
+  // (2) Seed categories + units per store (idempotent on [store_id+code])
+  for (const store of stores) {
+    const storeId = store.id as string;
+    if (!storeId) continue;
+
+    for (const seed of PRODUCE_MARKET_CATEGORY_SEED) {
+      const existing = await tx
+        .table('product_categories')
+        .where('[store_id+code]')
+        .equals([storeId, seed.code])
+        .first();
+      if (existing) continue;
+
+      await tx.table('product_categories').add({
+        id: deterministicId(storeId, 'cat', seed.code),
+        store_id: storeId,
+        code: seed.code,
+        name: seed.name,
+        sort_order: seed.sort_order,
+        is_active: true,
+        is_system: true,
+        created_at: nowIso,
+        updated_at: nowIso,
+        _synced: false,
+        _deleted: false,
+      });
+    }
+
+    for (const seed of PRODUCE_MARKET_UNIT_SEED) {
+      const existing = await tx
+        .table('units_of_measure')
+        .where('[store_id+code]')
+        .equals([storeId, seed.code])
+        .first();
+      if (existing) continue;
+
+      await tx.table('units_of_measure').add({
+        id: deterministicId(storeId, 'unit', seed.code),
+        store_id: storeId,
+        code: seed.code,
+        name: seed.name,
+        system_role: seed.system_role,
+        sort_order: seed.sort_order,
+        is_active: true,
+        is_system: true,
+        created_at: nowIso,
+        updated_at: nowIso,
+        _synced: false,
+        _deleted: false,
+      });
+    }
+  }
+
+  // (3) Backfill products.category_id from legacy text
+  await tx
+    .table('products')
+    .toCollection()
+    .modify((product: Record<string, unknown>) => {
+      if (product.category_id) return;
+      const storeId = product.store_id as string;
+      if (!storeId) return;
+      const code = legacyCategoryToCode(product.category);
+      product.category_id = deterministicId(storeId, 'cat', code);
+      product._synced = false;
+    });
+
+  // (4) Backfill inventory_items.unit_id from legacy text
+  await tx
+    .table('inventory_items')
+    .toCollection()
+    .modify((item: Record<string, unknown>) => {
+      if (item.unit_id) return;
+      const storeId = item.store_id as string;
+      if (!storeId) return;
+      const code = legacyUnitToCode(item.unit);
+      item.unit_id = deterministicId(storeId, 'unit', code);
+      item._synced = false;
+    });
+
+  console.log('   ✅ v64 migration complete');
+}
+
+/**
+ * v65 (tenant-scoped globals): backfill existing global products in the
+ * local Dexie copy with `tenant_type='produce_market'`. Mirrors the SQL
+ * migration. Idempotent.
+ */
+export async function upgradeV65(tx: DexieTransaction): Promise<void> {
+  console.log('🔧 Migrating database schema v64 → v65 (products.tenant_type for tenant-scoped globals)');
+  await tx
+    .table('products')
+    .toCollection()
+    .modify((p: Record<string, unknown>) => {
+      const isGlobal =
+        p.is_global === true || p.is_global === 1 || p.is_global === '1' || p.is_global === 'true';
+      if (isGlobal && !p.tenant_type) {
+        p.tenant_type = 'produce_market';
+      }
+    });
+  console.log('   ✅ v65 migration complete');
 }

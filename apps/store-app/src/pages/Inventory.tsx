@@ -212,10 +212,12 @@ const Inventory: React.FC = () => {
 
   const handleProductUpdate = async (data: any) => {
     try {
-      await updateProduct(data.id, { 
-        name: data.name, 
-        category: data.category, 
-        image: data.image 
+      if (!data?.id) throw new Error('Missing product id');
+      await updateProduct(data.id, {
+        name: data.name,
+        category_id: data.category_id,
+        category: data.category,
+        image: data.image,
       });
       showToast('success', 'Product updated successfully!');
     } catch (error) {

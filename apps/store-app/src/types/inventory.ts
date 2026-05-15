@@ -4,7 +4,11 @@ import type { CurrencyCode } from '@pos-platform/shared';
 export interface Product {
   id: string;
   name: MultilingualString; // Supports both string (backwards compatible) and multilingual object { en: "apple", ar: "تفاح", fr: "pomme" }
-  category: 'Fruits' | 'Vegetables' | 'Herbs' | 'Nuts' | 'Others';
+  /** FK into `product_categories` (v64+). Source of truth. */
+  category_id?: string;
+  /** @deprecated Legacy text category. Kept readable during the transition;
+   *  new writes go through `category_id`. Removed in a future release. */
+  category?: string;
   image: string;
   is_global?: boolean; // True for predefined global products, false/undefined for store-specific
   created_at: string;
@@ -30,7 +34,10 @@ export interface InventoryItem {
   // supplier_id REMOVED - resolve via inventory_bills batch_id
   quantity: number;
   received_quantity: number;
-  unit: 'kg' | 'piece' | 'box' | 'bag' | 'bundle' | 'dozen';
+  /** FK into `units_of_measure` (v64+). Source of truth. */
+  unit_id?: string;
+  /** @deprecated Legacy unit code. Dual-written during the transition. */
+  unit?: string;
   weight?: number;
   price?: number;
   currency: CurrencyCode;
@@ -60,7 +67,8 @@ export interface StockLevel {
 
 export interface ProductForm {
   name: string;
-  category: 'Fruits' | 'Vegetables' | 'Herbs' | 'Nuts' | 'Others';
+  /** FK into `product_categories.id` for the current store. */
+  category_id: string;
   image: string;
   capturedPhoto: string;
 }
@@ -88,7 +96,10 @@ export interface ReceiveForm {
 export interface BulkItem {
   product_id?: string;
   quantity: string;
-  unit: 'kg' | 'piece' | 'box' | 'bag' | 'bundle' | 'dozen';
+  /** FK into `units_of_measure.id`. */
+  unit_id: string;
+  /** @deprecated Legacy unit code; preserved on existing draft items. */
+  unit?: string;
   price?: string;
   weight?: string;
 }
@@ -108,7 +119,10 @@ export interface InventoryBatch {
     type: 'commission' | 'cash';
     quantity: number;
     received_quantity: number;
-    unit: 'kg' | 'piece' | 'box' | 'bag' | 'bundle' | 'dozen';
+    /** FK into `units_of_measure.id`. */
+    unit_id: string;
+    /** @deprecated Legacy unit code; dual-written during the transition. */
+    unit?: string;
     weight?: number;
     price?: number;
     status?: string;

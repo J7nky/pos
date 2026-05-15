@@ -76,6 +76,7 @@ export default function StoreForm({
     preferred_commission_rate: store?.preferred_commission_rate?.toString() || '10',
     rate_inputs: initialRateInputs as Partial<Record<CurrencyCode, string>>,
     subscription_plan: 'premium' as SubscriptionPlan,
+    tenant_type: (store as any)?.tenant_type || 'produce_market',
   });
 
   const [countryQuery, setCountryQuery] = useState('');
@@ -252,6 +253,7 @@ export default function StoreForm({
       preferred_commission_rate: parseFloat(formData.preferred_commission_rate),
       exchange_rate: scalarRate,
       exchange_rates: exchangeRatesMap,
+      tenant_type: formData.tenant_type,
     };
 
     const data: CreateStoreInput | UpdateStoreInput = isEditing
@@ -378,6 +380,19 @@ export default function StoreForm({
                   { value: 'ar', label: 'العربية (Arabic)' },
                   { value: 'fr', label: 'Français (French)' },
                 ]}
+              />
+              <Select
+                label="Tenant Type"
+                value={formData.tenant_type}
+                onChange={(e) => handleChange('tenant_type', e.target.value)}
+                options={[
+                  { value: 'produce_market', label: 'Produce Market' },
+                  { value: 'supermarket', label: 'Supermarket' },
+                  { value: 'pharmacy', label: 'Pharmacy' },
+                  { value: 'electronics', label: 'Electronics' },
+                  { value: 'general', label: 'General' },
+                ]}
+                helperText="Drives default categories + units seeded on store creation"
               />
               <Input
                 label="Commission Rate (%)"

@@ -9,6 +9,7 @@ import Reports from './pages/Reports';
 import Customers from './pages/Customers';
 import Accounting from './pages/Accounting';
 import Settings from './pages/Settings';
+import CategoriesAndUnitsSettings from './pages/CategoriesAndUnitsSettings';
 import Employees from './pages/Employees';
 import UnsyncedItems from './pages/UnsyncedItems';
 import PublicCustomerStatement from './pages/PublicCustomerStatement';
@@ -80,6 +81,15 @@ export const router = createRouter([
             element: (
               <ProtectedRoute module="settings">
                 <Settings />
+              </ProtectedRoute>
+            ),
+            errorElement: <ErrorPage />,
+          },
+          {
+            path: "settings/categories-units",
+            element: (
+              <ProtectedRoute module="settings">
+                <CategoriesAndUnitsSettings />
               </ProtectedRoute>
             ),
             errorElement: <ErrorPage />,

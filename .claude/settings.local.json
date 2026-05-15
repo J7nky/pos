@@ -88,7 +88,15 @@
       "Bash(grep -rn \"initial\\\\${code}Balance\\\\|max\\\\${code}Balance\\\\|advance\\\\${code}\\\\|totalAdvances\\\\${code}\" /home/janky/Desktop/pos-1/apps/store-app/src --include=\"*.ts\" --include=\"*.tsx\")",
       "Bash(grep -nE \"interpolation|\\\\\\\\{\\\\\\\\{|t\\\\\\\\\\(.+,\\\\\\\\s*\\\\\\\\{\" /home/janky/Desktop/pos-1/apps/store-app/src/i18n/index.tsx)",
       "Bash(pnpm test:run src/services/__tests__/journalAmounts.test.ts)",
-      "Bash(pnpm tsc *)"
+      "Bash(pnpm tsc *)",
+      "Bash(pnpm --filter ./apps/store-app exec tsc --noEmit)",
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(/home/janky/Desktop/pos-1/apps/store-app/node_modules/.bin/tsc --noEmit -p /home/janky/Desktop/pos-1/apps/store-app)",
+      "Bash(node ./node_modules/typescript/bin/tsc --noEmit)",
+      "Bash(node ./node_modules/eslint/bin/eslint.js --no-eslintrc --resolve-plugins-relative-to . --rule '{}' src/lib/dbSchema.ts src/services/taxonomyService.ts src/contexts/offlineData/useTaxonomyDataLayer.ts src/hooks/useCategoryLookup.ts src/pages/CategoriesAndUnitsSettings.tsx)",
+      "Bash(node ./node_modules/eslint/bin/eslint.js src/lib/dbSchema.ts src/services/taxonomyService.ts src/contexts/offlineData/useTaxonomyDataLayer.ts src/hooks/useCategoryLookup.ts src/pages/CategoriesAndUnitsSettings.tsx)",
+      "Bash(node ./node_modules/eslint/bin/eslint.js src/lib/dbSchema.ts)",
+      "Bash(node ./node_modules/eslint/bin/eslint.js src/lib/dbSchema.ts src/services/taxonomyService.ts src/contexts/offlineData/useTaxonomyDataLayer.ts src/hooks/useCategoryLookup.ts src/pages/CategoriesAndUnitsSettings.tsx src/types/taxonomy.ts src/contexts/OfflineDataContext.tsx)"
     ]
   }
 }

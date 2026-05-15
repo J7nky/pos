@@ -22,6 +22,8 @@ export interface Store extends StoreCore {
   preferred_commission_rate: number;
   low_stock_alert: boolean;
   status: 'active' | 'suspended' | 'archived';
+  /** Tenant vertical (v64) — drives default categories/units seeded on creation. */
+  tenant_type?: string;
   // Soft-delete fields (industry standard - stores should NEVER be hard-deleted)
   is_deleted?: boolean;
   deleted_at?: string | null;
@@ -46,6 +48,8 @@ export interface CreateStoreInput {
   preferred_commission_rate?: number;
   exchange_rate?: number;
   exchange_rates?: ExchangeRatesMap;
+  /** Tenant vertical (v64). Defaults server-side to 'produce_market'. */
+  tenant_type?: string;
   subscription_plan?: 'starter' | 'professional' | 'premium';
 }
 
@@ -64,6 +68,28 @@ export interface UpdateStoreInput {
   exchange_rates?: ExchangeRatesMap;
   low_stock_alert?: boolean;
   status?: 'active' | 'suspended' | 'archived';
+  tenant_type?: string;
+}
+
+/** Tenant type template (v64). Stored in `tenant_type_templates`. */
+export interface TenantTypeTemplate {
+  id: string;
+  tenant_type: string;
+  display_name: { en: string; ar: string; fr: string };
+  default_categories: Array<{
+    code: string;
+    name: { en: string; ar: string; fr: string };
+    sort_order?: number;
+  }>;
+  default_units: Array<{
+    code: string;
+    name: { en: string; ar: string; fr: string };
+    system_role?: 'mass' | 'count' | 'volume' | 'length' | 'pack';
+    sort_order?: number;
+  }>;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 // ============================================================================

@@ -3,7 +3,7 @@ import { useI18n } from '../../i18n';
 import { Pagination } from '../common/Pagination';
 import { useProductMultilingual } from '../../hooks/useMultilingual';
 import { ProductImage } from '../common/ProductImage';
-import { translateCategory } from './RecentReceivesTable';
+import { useCategoryLookup } from '../../hooks/useCategoryLookup';
 
 interface ProductTableProps {
   products: any[];
@@ -13,8 +13,9 @@ interface ProductTableProps {
 }
 
 const ProductTable: React.FC<ProductTableProps> = ({ products, onEdit, onDelete, loading = false }) => {
-  const { t, language } = useI18n();
+  const { t } = useI18n();
   const { getProductName } = useProductMultilingual();
+  const categoryLookup = useCategoryLookup();
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
 
@@ -96,7 +97,7 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, onEdit, onDelete,
                   {getProductName(product)}
                 </td>
                 <td className="px-6 py-4 text-gray-700 dark:text-slate-300 rtl:text-right ltr:text-left">
-                  {translateCategory(product.category, t)}
+                  {categoryLookup.label(product)}
                 </td>
                 <td className="px-6 py-4 rtl:text-right ltr:text-left">
                   <div className="flex space-x-2 rtl:space-x-reverse">

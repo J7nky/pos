@@ -29,6 +29,11 @@ export const SYNC_CONFIG = {
 export const SYNC_TABLES = [
   'stores',
   'branches',
+  // Configurable taxonomies (v64) — must sync before products / inventory_items
+  // so the FK columns (`products.category_id`, `inventory_items.unit_id`) can be
+  // resolved without dangling references.
+  'product_categories',
+  'units_of_measure',
   'products',
   // 'suppliers', // REMOVED - migrated to entities table
   // 'customers', // REMOVED - migrated to entities table
@@ -62,6 +67,8 @@ export const SYNC_TIERS: Record<DataTierName, readonly SyncTable[]> = {
   tier1: [
     'stores',
     'branches',
+    'product_categories',
+    'units_of_measure',
     'products',
     'users',
     'cash_drawer_accounts',
@@ -85,7 +92,9 @@ export const SYNC_TIERS: Record<DataTierName, readonly SyncTable[]> = {
 } as const;
 
 const SYNC_DEPENDENCIES: Record<SyncTable, SyncTable[]> = {
-  'products': [],
+  'product_categories': ['stores'],
+  'units_of_measure': ['stores'],
+  'products': ['product_categories'],
   'stores': [],
   'branches': ['stores'], // Branches belong to stores
   // 'suppliers': [], // REMOVED - migrated to entities
@@ -100,7 +109,7 @@ const SYNC_DEPENDENCIES: Record<SyncTable, SyncTable[]> = {
   'balance_snapshots': ['stores', 'entities'], // Balance snapshots reference entities
   'inventory_bills': ['entities'], // supplier_id references entity.id
   // supplier_id was removed from inventory_items; depend on batch linkage only
-  'inventory_items': ['products', 'inventory_bills'],
+  'inventory_items': ['products', 'inventory_bills', 'units_of_measure'],
   'transactions': [],
   'bill_line_items': ['bills', 'products', 'entities', 'inventory_items'], // supplier_id references entity.id
   'bill_audit_logs': ['bills'],

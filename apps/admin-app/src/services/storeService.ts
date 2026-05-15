@@ -168,6 +168,7 @@ export async function createStore(input: CreateStoreInput): Promise<Store> {
     exchange_rates: input.exchange_rates ?? {},
     low_stock_alert: true,
     status: 'active' as const,
+    tenant_type: input.tenant_type || 'produce_market',
   };
 
   const { data, error } = await supabase
@@ -225,12 +226,24 @@ export async function createStoreWithInitialization(
   const store = await createStore(input);
 
   // 2. Initialize accounting foundation (includes cash drawer accounts)
-  // Note: create_default_chart_of_accounts() automatically calls 
+  // Note: create_default_chart_of_accounts() automatically calls
   // initialize_cash_drawer_accounts() which creates the cash drawer
   // account linked to the Main Branch
   await initializeAccountingFoundation(store.id);
 
-  // 3. Return store with stats
+  // 3. Seed default categories + units of measure from the tenant_type template (v64).
+  //    Idempotent server-side; safe to retry.
+  const tenantType = input.tenant_type || 'produce_market';
+  const { error: seedError } = await supabase.rpc('seed_store_defaults_from_tenant_type', {
+    store_uuid: store.id,
+    tenant_type_code: tenantType,
+  });
+  if (seedError) {
+    // Non-fatal: store still works; user can add categories/units manually.
+    console.warn('⚠️ Failed to seed taxonomy defaults for store:', seedError.message);
+  }
+
+  // 4. Return store with stats
   return {
     ...store,
     branches_count: 1, // Default branch created by trigger

@@ -16,6 +16,11 @@ export { useAccountingDataLayer } from './useAccountingDataLayer';
 export { useCashDrawerDataLayer } from './useCashDrawerDataLayer';
 export { useStoreSettingsDataLayer } from './useStoreSettingsDataLayer';
 export { useNotificationsDataLayer } from './useNotificationsDataLayer';
+export { useTaxonomyDataLayer } from './useTaxonomyDataLayer';
+export type {
+  TaxonomyDataLayerAdapter,
+  TaxonomyDataLayerResult,
+} from './useTaxonomyDataLayer';
 export type {
   ProductDataLayerAdapter,
   ProductDataLayerResult,
