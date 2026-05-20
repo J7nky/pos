@@ -9,6 +9,7 @@ import { TRANSACTION_CATEGORIES } from '../../../constants/transactionCategories
 import { isPaymentCategory } from '../../../constants/paymentCategories';
 import { 
   Search, 
+  
   User,
   DollarSign,
   RefreshCw,
