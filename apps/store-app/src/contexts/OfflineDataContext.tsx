@@ -406,6 +406,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         entitiesData,
         chartOfAccountsData,
         balanceSnapshotsData,
+        categoriesData,
+        unitsOfMeasureData,
       } = await crudHelperService.loadAllStoreData(storeId, currentBranchId);
 
       // Hydrate each domain layer
@@ -416,14 +418,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       await billLayer.hydrate(billsData, billLineItemsData);
       inventoryLayer.hydrate(inventoryData, batchesData);
       accountingLayer.hydrate(journalEntriesData || [], chartOfAccountsData || [], balanceSnapshotsData || []);
-      // Categories + units (v64) — direct Dexie reads, no crudHelperService bundling yet
+      // Categories + units (v64) — bundled into loadAllStoreData's shared read
+      // transaction. Sort happens here because the bundle returns raw arrays.
       try {
-        const [cats, us] = await Promise.all([
-          getDB().product_categories.where('store_id').equals(storeId).filter((r) => !r._deleted).toArray(),
-          getDB().units_of_measure.where('store_id').equals(storeId).filter((r) => !r._deleted).toArray(),
-        ]);
-        cats.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-        us.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+        const cats = [...(categoriesData ?? [])].sort(
+          (a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
+        );
+        const us = [...(unitsOfMeasureData ?? [])].sort(
+          (a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
+        );
         taxonomyLayer.hydrate(cats, us);
       } catch (err) {
         console.warn('⚠️ Could not hydrate taxonomies (likely first run pre-migration):', err);

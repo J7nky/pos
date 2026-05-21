@@ -406,6 +406,10 @@ export class CRUDHelperService {
       () => Promise.resolve<any[]>([]), // journal_entries — not hydrated (§5.1)
       () => this.getEntitiesByStore('entities', storeId),
       () => Promise.resolve<any[]>([]), // balance_snapshots — not hydrated (§5.1)
+      // Taxonomies (categories + units of measure) — joined into the shared
+      // read transaction so they aren't a second round-trip on every refresh.
+      () => this.getEntitiesByStore('product_categories' as any, storeId),
+      () => this.getEntitiesByStore('units_of_measure' as any, storeId),
     ];
 
     const startTime = Date.now();
@@ -437,6 +441,8 @@ export class CRUDHelperService {
       journalEntriesData: results[14] || [],
       entitiesData: results[15] || [],
       balanceSnapshotsData: results[16] || [],
+      categoriesData: results[17] || [],
+      unitsOfMeasureData: results[18] || [],
     };
     
   }

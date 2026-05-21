@@ -312,11 +312,14 @@ export default function Customers() {
       if (result.success) {
         // Force immediate refresh to ensure UI updates with new balances
         await raw.refreshData();
-        // Refresh balance hooks to update UI immediately
+        // Refresh only the affected entity's balance — one cache invalidation,
+        // one notify, one refetch. Previously this called refreshAll() which
+        // looped invalidate(entityType, id) per entity, firing N notifies and
+        // re-running every subscriber N times.
         if (entityType === 'customer') {
-          await customerBalances.refreshAll();
+          await customerBalances.refreshBalance(entityId);
         } else {
-          await supplierBalances.refreshAll();
+          await supplierBalances.refreshBalance(entityId);
         }
         // Show success message
         const action = entityType === 'customer' ? 'received' : 'sent';

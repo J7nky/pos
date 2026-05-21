@@ -96,7 +96,9 @@
       "Bash(node ./node_modules/eslint/bin/eslint.js --no-eslintrc --resolve-plugins-relative-to . --rule '{}' src/lib/dbSchema.ts src/services/taxonomyService.ts src/contexts/offlineData/useTaxonomyDataLayer.ts src/hooks/useCategoryLookup.ts src/pages/CategoriesAndUnitsSettings.tsx)",
       "Bash(node ./node_modules/eslint/bin/eslint.js src/lib/dbSchema.ts src/services/taxonomyService.ts src/contexts/offlineData/useTaxonomyDataLayer.ts src/hooks/useCategoryLookup.ts src/pages/CategoriesAndUnitsSettings.tsx)",
       "Bash(node ./node_modules/eslint/bin/eslint.js src/lib/dbSchema.ts)",
-      "Bash(node ./node_modules/eslint/bin/eslint.js src/lib/dbSchema.ts src/services/taxonomyService.ts src/contexts/offlineData/useTaxonomyDataLayer.ts src/hooks/useCategoryLookup.ts src/pages/CategoriesAndUnitsSettings.tsx src/types/taxonomy.ts src/contexts/OfflineDataContext.tsx)"
+      "Bash(node ./node_modules/eslint/bin/eslint.js src/lib/dbSchema.ts src/services/taxonomyService.ts src/contexts/offlineData/useTaxonomyDataLayer.ts src/hooks/useCategoryLookup.ts src/pages/CategoriesAndUnitsSettings.tsx src/types/taxonomy.ts src/contexts/OfflineDataContext.tsx)",
+      "Bash(git show *)",
+      "Bash(pnpm --filter @pos-platform/store-app exec tsc --noEmit)"
     ]
   }
 }

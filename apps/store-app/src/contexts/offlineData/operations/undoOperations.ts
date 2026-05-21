@@ -188,9 +188,15 @@ export async function undoLastAction(deps: UndoDeps): Promise<boolean> {
 
       sessionStorage.removeItem(UNDO_STORAGE_KEY);
       setCanUndo(false);
-      entityBalanceCache.invalidateAll();
-      await refreshData();
+
+      // The DB transaction above already deleted the pending_syncs rows and
+      // reset _synced flags, so the new unsynced count is correct without
+      // waiting on context layer rehydration. Update the badge first so the
+      // user sees immediate confirmation, then fan out cache invalidations,
+      // events, and the heavier refreshData() in the background.
       await updateUnsyncedCount();
+
+      entityBalanceCache.invalidateAll();
 
       const affectedTables: string[] = Array.isArray(action.affected)
         ? action.affected.map((a: any) => (typeof a === 'string' ? a : a.table)).filter(Boolean)
@@ -209,7 +215,9 @@ export async function undoLastAction(deps: UndoDeps): Promise<boolean> {
           );
         }
         // Always dispatch undo-completed so listeners (e.g. Accounting page) can
-        // refresh balance hooks that rely on snapshot-cached values.
+        // refresh balance hooks that rely on snapshot-cached values. Listeners
+        // read from journal_entries directly, so they don't need refreshData
+        // to have finished.
         window.dispatchEvent(
           new CustomEvent('undo-completed', {
             detail: {
@@ -220,6 +228,10 @@ export async function undoLastAction(deps: UndoDeps): Promise<boolean> {
           })
         );
       }
+
+      // Hydrate context layers in the background — undoLastAction's promise
+      // resolves now so the caller (UndoToastManager) can drop its busy state.
+      void refreshData();
 
       return true;
     });

@@ -90,6 +90,20 @@ export const entityBalanceCache = {
     return removed;
   },
 
+  /**
+   * Invalidate a batch of entity ids with a single `notify()` at the end.
+   * Subscribers are O(subscribers × entityIds) when called via a per-id
+   * `invalidate` loop — this collapses that to O(subscribers) so the
+   * subscriber's refetch logic only runs once for the whole set.
+   */
+  invalidateMany(entityType: EntityType, entityIds: readonly string[]): void {
+    let removed = false;
+    for (const id of entityIds) {
+      if (store.delete(key(entityType, id))) removed = true;
+    }
+    if (removed) notify();
+  },
+
   invalidateAll(): void {
     if (store.size === 0) return;
     store.clear();

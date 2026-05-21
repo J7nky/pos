@@ -290,7 +290,10 @@ export function useEntityBalances(
   const refreshAll = useCallback(async (): Promise<void> => {
     if (entityIds.length === 0) return;
     setIsLoading(true);
-    for (const id of entityIds) entityBalanceCache.invalidate(entityType, id);
+    // Single batched invalidate — fires one notify() instead of N. Without
+    // this, every subscriber's refresh logic would re-run N times during
+    // this call, each time kicking off another fan-out of fetchBalance.
+    entityBalanceCache.invalidateMany(entityType, entityIds);
     const results = await Promise.all(
       entityIds.map(id =>
         fetchBalance(id, entityType, useSnapshot, accountCode).then(r => ({ id, r })),

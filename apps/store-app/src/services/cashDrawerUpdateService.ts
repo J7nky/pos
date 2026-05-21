@@ -1,4 +1,4 @@
-import { getDB } from '../lib/db';
+import { getDB, invalidateCashDrawerStatusCache } from '../lib/db';
 import { currencyService } from './currencyService';
 import { QueryHelpers, DateFilters } from '../utils/queryHelpers';
 import { CacheManager, CacheKeys } from '../utils/cacheManager';
@@ -123,9 +123,11 @@ export class CashDrawerUpdateService {
 
         // Open new session using database method
         const sessionId = await getDB().openCashDrawerSession(storeId, branchId, account.id, openingAmount, openedBy);
-        
+
+        invalidateCashDrawerStatusCache(storeId, branchId);
+
         console.log(`💰 Cash drawer session opened: ${sessionId} with opening amount: $${openingAmount.toFixed(2)}`);
-        
+
         return {
           success: true,
           sessionId

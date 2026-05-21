@@ -97,9 +97,34 @@ interface BaseEntity {
 // Transaction interface moved to /types/index.ts
 
 // All remaining interfaces moved to centralized type files:
-// - /types/database.ts (Supabase-generated types)  
+// - /types/database.ts (Supabase-generated types)
 // - /types/index.ts (business logic types)
 
+
+// ─── Cash drawer status short-TTL cache ────────────────────────────────────
+//
+// `getCurrentCashDrawerStatus` scans every posted journal entry on account
+// 1100 within the active session window — an O(n) read that is invoked
+// repeatedly during a single refresh cascade: refreshData() →
+// refreshCashDrawerStatus(), then again from the `cash-drawer-updated`
+// event listener in `CurrentCashDrawerStatus`, then again on payment
+// completion. A 2-second TTL collapses those near-simultaneous calls into
+// a single DB read without changing semantics from the UI's perspective.
+//
+// Mutations call `invalidateCashDrawerStatusCache(storeId, branchId)` (or
+// the unscoped variant) to force a fresh read.
+const cashDrawerStatusCache = new Map<string, { result: any; expiresAt: number }>();
+const CASH_DRAWER_STATUS_TTL_MS = 2000;
+function cashDrawerStatusCacheKey(storeId: string, branchId: string): string {
+  return `${storeId}|${branchId}`;
+}
+export function invalidateCashDrawerStatusCache(storeId?: string, branchId?: string): void {
+  if (storeId && branchId) {
+    cashDrawerStatusCache.delete(cashDrawerStatusCacheKey(storeId, branchId));
+  } else {
+    cashDrawerStatusCache.clear();
+  }
+}
 
 
 class POSDatabase extends Dexie {
@@ -712,14 +737,22 @@ class POSDatabase extends Dexie {
   }
 
   async getCurrentCashDrawerStatus(storeId: string, branchId: string): Promise<any> {
+    const cacheKey = cashDrawerStatusCacheKey(storeId, branchId);
+    const cached = cashDrawerStatusCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.result;
+    }
+
     try {
       const currentSession = await this.getCurrentCashDrawerSession(storeId, branchId);
 
       if (!currentSession) {
-        return {
+        const result = {
           status: 'no_session',
           message: 'No active cash drawer session'
         };
+        cashDrawerStatusCache.set(cacheKey, { result, expiresAt: Date.now() + CASH_DRAWER_STATUS_TTL_MS });
+        return result;
       }
 
       // Get account for currency info
@@ -729,10 +762,12 @@ class POSDatabase extends Dexie {
         .first();
 
       if (!account) {
-        return {
+        const result = {
           status: 'no_account',
           message: 'No cash drawer account found'
         };
+        cashDrawerStatusCache.set(cacheKey, { result, expiresAt: Date.now() + CASH_DRAWER_STATUS_TTL_MS });
+        return result;
       }
 
       // Session-scoped balance (same formula as cashDrawerUpdateService.getCurrentCashDrawerBalances; inlined to avoid db↔service circular import)
@@ -777,7 +812,7 @@ class POSDatabase extends Dexie {
       };
       const currentBalance = currency === 'LBP' ? balances.LBP : balances.USD;
 
-      return {
+      const result = {
         status: 'active',
         sessionId: currentSession.id,
         openedBy: currentSession.opened_by,
@@ -786,6 +821,8 @@ class POSDatabase extends Dexie {
         currentBalance,
         sessionDuration: Date.now() - new Date(currentSession.opened_at).getTime()
       };
+      cashDrawerStatusCache.set(cacheKey, { result, expiresAt: Date.now() + CASH_DRAWER_STATUS_TTL_MS });
+      return result;
     } catch (error) {
       console.error('Error getting current cash drawer status:', error);
       return {
