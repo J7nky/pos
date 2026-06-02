@@ -1465,7 +1465,7 @@ const ar = {
     transaction: {
       amount_required: 'المبلغ مطلوب.',
       amount_non_positive: 'يجب أن يكون المبلغ أكبر من الصفر.',
-      currency_invalid: 'يجب أن تكون العملة دولارًا أمريكيًا أو ليرة لبنانية.',
+      currency_invalid: 'رمز العملة غير معروف.',
       category_invalid: 'فئة المعاملة غير صالحة.',
       description_required: 'الوصف مطلوب.',
       store_id_required: 'معلومات المتجر مفقودة. يرجى إعادة تحميل التطبيق.',

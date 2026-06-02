@@ -27,11 +27,21 @@ export class SyncDebugger {
    * Analyze sync discrepancies for all tables
    */
   static async analyzeSyncDiscrepancies(storeId: string): Promise<SyncDiscrepancy[]> {
+    // Keep in sync with SYNC_TABLES in services/syncConfig.ts. Customers and
+    // suppliers live in the `entities` table (entity_type discriminator), not
+    // separate Dexie tables — listing them here would silently skip via the
+    // `if (!table) continue` guard below and hide real discrepancies.
     const SYNC_TABLES = [
-      'stores', 'products', 'suppliers', 'customers', 'users',
-      'cash_drawer_accounts', 'inventory_bills', 'inventory_items', 
-      'transactions', 'bills', 'bill_line_items', 'bill_audit_logs', 
-      'cash_drawer_sessions', 'missed_products', 'reminders'
+      'stores', 'fiscal_periods', 'branches',
+      'product_categories', 'units_of_measure',
+      'products', 'users',
+      'cash_drawer_accounts', 'cash_drawer_sessions',
+      'chart_of_accounts', 'entities',
+      'inventory_bills', 'inventory_items',
+      'transactions', 'journal_entries', 'balance_snapshots',
+      'bills', 'bill_line_items', 'bill_audit_logs',
+      'missed_products', 'reminders',
+      'role_permissions', 'user_permissions'
     ];
 
     const discrepancies: SyncDiscrepancy[] = [];

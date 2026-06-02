@@ -2,7 +2,7 @@ import type { Transaction as DexieTransaction } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
 import type { SyncMetadata, PendingSync } from '../types';
 
-export const CURRENT_DB_VERSION = 65;
+export const CURRENT_DB_VERSION = 67;
 
 export const V54_STORES = {
   stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
@@ -178,6 +178,36 @@ export const V65_STORES = {
   products:
     'id, store_id, branch_id, name, category, category_id, tenant_type, is_global, updated_at, _synced, _deleted',
 } as const;
+
+/**
+ * v66 (Plan A — Fiscal Year): introduces the `fiscal_periods` table. One row
+ * per (store, fiscal year) tracking the FY range, closing state, and (later,
+ * via Plan C) the archive manifest URL.
+ *
+ * New columns on `stores` (`fiscal_year_start_month`, `fiscal_year_start_day`)
+ * are not indexed — they travel transparently in the JSON blob. Only the
+ * indexed surface of `stores` is unchanged; the schema row is not bumped.
+ *
+ * See OFFLINE_HISTORY_ARCHITECTURE.md §5.1.
+ */
+export const V66_STORES = {
+  fiscal_periods:
+    'id, store_id, fy_label, start_date, end_date, is_closed, created_at, updated_at, [store_id+fy_label], [store_id+is_closed], [store_id+start_date], _synced, _deleted',
+} as const;
+
+/**
+ * v67 (Plan B — Snapshot Correctness): adds `stale`, `is_closing`, `source`
+ * columns to `balance_snapshots`. None are indexed — Dexie cannot range-query
+ * them efficiently and the existing compound indexes on (store_id +
+ * account_code + entity_id + snapshot_date) already locate candidate rows;
+ * the new columns are filtered in memory on the small result set.
+ *
+ * Upgrade-only version (no schema row) — see `upgradeV67` for the backfill.
+ *
+ * See OFFLINE_HISTORY_ARCHITECTURE.md §5.2 and the Plan B hybrid offline
+ * strategy: existing local snapshots are attributed `source='client'` so the
+ * server-driven generator (Plan B / B3) can later replace them on conflict.
+ */
 
 export async function upgradeV54(_tx: DexieTransaction): Promise<void> {
   console.log('🔧 Initializing database schema v54');
@@ -592,6 +622,53 @@ export async function upgradeV64(tx: DexieTransaction): Promise<void> {
     });
 
   console.log('   ✅ v64 migration complete');
+}
+
+/**
+ * v67 (Plan B — Snapshot Correctness): backfill `stale`, `is_closing`, and
+ * `source` on existing balance_snapshots rows. All existing rows were
+ * written by the client scheduler, so attribute them `source='client'`.
+ * Server-generated snapshots will arrive via paged sync once B3 is live.
+ */
+export async function upgradeV67(tx: DexieTransaction): Promise<void> {
+  console.log('🔧 Migrating database schema v66 → v67 (balance_snapshots stale/source/is_closing)');
+  await tx
+    .table('balance_snapshots')
+    .toCollection()
+    .modify((row: Record<string, unknown>) => {
+      if (row.source === undefined || row.source === null || row.source === '') {
+        row.source = 'client';
+      }
+      if (row.stale === undefined || row.stale === null) {
+        row.stale = false;
+      }
+      if (row.is_closing === undefined || row.is_closing === null) {
+        row.is_closing = false;
+      }
+    });
+  console.log('   ✅ v67 migration complete');
+}
+
+/**
+ * v66 (Plan A — Fiscal Year): default `fiscal_year_start_month` / `_day` on
+ * legacy local store rows to (1, 1) so the UI never reads undefined. New
+ * `fiscal_periods` table starts empty; rows arrive via paged sync (A5) or
+ * via the year-end close action (Plan C).
+ */
+export async function upgradeV66(tx: DexieTransaction): Promise<void> {
+  console.log('🔧 Migrating database schema v65 → v66 (fiscal year config + fiscal_periods)');
+  await tx
+    .table('stores')
+    .toCollection()
+    .modify((store: Record<string, unknown>) => {
+      if (store.fiscal_year_start_month === undefined || store.fiscal_year_start_month === null) {
+        store.fiscal_year_start_month = 1;
+      }
+      if (store.fiscal_year_start_day === undefined || store.fiscal_year_start_day === null) {
+        store.fiscal_year_start_day = 1;
+      }
+    });
+  console.log('   ✅ v66 migration complete');
 }
 
 /**

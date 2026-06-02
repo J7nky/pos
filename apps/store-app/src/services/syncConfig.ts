@@ -28,6 +28,10 @@ export const SYNC_CONFIG = {
 // Table sync order (respects foreign key dependencies)
 export const SYNC_TABLES = [
   'stores',
+  // Fiscal periods (v66, Plan A) — one row per (store, fiscal year).
+  // Syncs immediately after `stores` so its FK is satisfied; downstream
+  // statement-rendering code reads it from Dexie.
+  'fiscal_periods',
   'branches',
   // Configurable taxonomies (v64) — must sync before products / inventory_items
   // so the FK columns (`products.category_id`, `inventory_items.unit_id`) can be
@@ -66,6 +70,7 @@ export type DataTierName = 'tier1' | 'tier2' | 'tier3';
 export const SYNC_TIERS: Record<DataTierName, readonly SyncTable[]> = {
   tier1: [
     'stores',
+    'fiscal_periods',
     'branches',
     'product_categories',
     'units_of_measure',
@@ -84,6 +89,12 @@ export const SYNC_TIERS: Record<DataTierName, readonly SyncTable[]> = {
     'transactions',
     'bills',
     'journal_entries',
+    // balance_snapshots: deliberately Tier 2, not Tier 1. An existing store
+    // can carry hundreds of pages of snapshots that would otherwise block
+    // app boot on a fresh device. The Plan B hybrid model fills the gap:
+    // the client-side scheduler generates local snapshots until the server
+    // ones arrive, and getHistoricalBalance falls back to journal scan if
+    // neither is present yet.
     'balance_snapshots',
     'bill_line_items',
     'bill_audit_logs',
@@ -92,6 +103,7 @@ export const SYNC_TIERS: Record<DataTierName, readonly SyncTable[]> = {
 } as const;
 
 const SYNC_DEPENDENCIES: Record<SyncTable, SyncTable[]> = {
+  'fiscal_periods': ['stores'],
   'product_categories': ['stores'],
   'units_of_measure': ['stores'],
   'products': ['product_categories'],

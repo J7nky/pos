@@ -13,6 +13,7 @@ import {
   V63_STORES,
   V64_STORES,
   V65_STORES,
+  V66_STORES,
   upgradeV54,
   upgradeV55,
   upgradeV56,
@@ -25,6 +26,8 @@ import {
   upgradeV63,
   upgradeV64,
   upgradeV65,
+  upgradeV66,
+  upgradeV67,
 } from './dbSchema';
 import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
 import { 
@@ -51,6 +54,7 @@ import {
   EmployeeAttendance,
   RolePermission,
   UserPermission,
+  FiscalYearPeriod,
   UserModuleAccess // @deprecated - kept for migration
 } from '../types';
 import {
@@ -168,6 +172,9 @@ class POSDatabase extends Dexie {
   // Configurable taxonomies (v64) — store-scoped, multilingual, tier-1 synced
   product_categories!: Table<ProductCategory, string>;
   units_of_measure!: Table<UnitOfMeasure, string>;
+
+  // Fiscal periods (v66, Plan A) — one row per (store, fiscal year), tier-1 synced.
+  fiscal_periods!: Table<FiscalYearPeriod, string>;
   
   // RBAC tables (Role-Based Access Control)
   role_permissions!: Table<RolePermission, string>;
@@ -221,6 +228,8 @@ class POSDatabase extends Dexie {
     this.version(63).stores(V63_STORES).upgrade(upgradeV63);
     this.version(64).stores(V64_STORES).upgrade(upgradeV64);
     this.version(65).stores(V65_STORES).upgrade(upgradeV65);
+    this.version(66).stores(V66_STORES).upgrade(upgradeV66);
+    this.version(67).upgrade(upgradeV67);
 
     // Add hooks for cash drawer tables
     this.cash_drawer_accounts.hook('creating', this.addCreateFieldsWithUpdatedAt);

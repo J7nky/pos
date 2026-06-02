@@ -86,6 +86,19 @@ export function useOfflineSyncLifecycle({
             debug('🔄 Connection restored with local data - performing regular sync...');
             void performSync(true);
           }
+          // Plan C / C8: reconnect-after-long-gap. If FYs closed on the server
+          // while this device was offline, pull their archives in the background.
+          // hydrateAllMissingArchives() is a no-op when nothing is missing.
+          void import('../../services/archiveHydrationService')
+            .then(({ archiveHydrationService }) =>
+              archiveHydrationService.hydrateAllMissingArchives({ storeId }),
+            )
+            .then((res) => {
+              if (res.fiscal_years.length > 0) {
+                debug(`📦 Reconnect archive catch-up: ${res.fiscal_years.length} FY(s) loaded`);
+              }
+            })
+            .catch((err) => console.warn('Reconnect archive hydration:', err));
         } catch (error) {
           console.error('❌ Connection restore sync error:', error);
           void performSync(true);

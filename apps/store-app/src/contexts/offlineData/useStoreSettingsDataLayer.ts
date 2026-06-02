@@ -63,6 +63,8 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
     }
   });
   const [defaultCommissionRate, setDefaultCommissionRate] = useState(10);
+  const [fiscalYearStartMonth, setFiscalYearStartMonth] = useState(1);
+  const [fiscalYearStartDay, setFiscalYearStartDay] = useState(1);
 
   const hydrate = useCallback(async (storeData: any) => {
     if (!storeData) {
@@ -70,6 +72,8 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
       setDefaultCommissionRate(10);
       setExchangeRate(89500);
       setLowStockAlertsEnabled(false);
+      setFiscalYearStartMonth(1);
+      setFiscalYearStartDay(1);
       return;
     }
     if (storeData.preferred_currency) setCurrency(storeData.preferred_currency);
@@ -79,6 +83,12 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
       setExchangeRate(storeData.exchange_rate);
     }
     if (storeData.preferred_language) setLanguage(storeData.preferred_language);
+    setFiscalYearStartMonth(
+      typeof storeData.fiscal_year_start_month === 'number' ? storeData.fiscal_year_start_month : 1
+    );
+    setFiscalYearStartDay(
+      typeof storeData.fiscal_year_start_day === 'number' ? storeData.fiscal_year_start_day : 1
+    );
     setReceiptSettings((prev: any) => {
       const merged = mergeStoreDataIntoReceiptSettings(storeData, prev);
       if (typeof localStorage !== 'undefined') {
@@ -364,6 +374,36 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
     [storeId, language, isOnline, isSyncing, updateUnsyncedCount, performSync, debouncedSync]
   );
 
+  const updateFiscalYearStart = useCallback(
+    async (month: number, day: number) => {
+      if (!storeId) return;
+      const prevMonth = fiscalYearStartMonth;
+      const prevDay = fiscalYearStartDay;
+      const clampedMonth = Math.max(1, Math.min(12, Math.floor(month)));
+      const clampedDay = Math.max(1, Math.min(31, Math.floor(day)));
+      try {
+        setFiscalYearStartMonth(clampedMonth);
+        setFiscalYearStartDay(clampedDay);
+        await getDB().stores.update(storeId, {
+          fiscal_year_start_month: clampedMonth,
+          fiscal_year_start_day: clampedDay,
+          _synced: false,
+          updated_at: new Date().toISOString(),
+        });
+        await updateUnsyncedCount();
+        resetAutoSyncTimer();
+        if (isOnline && !isSyncing) performSync(true);
+        else debouncedSync();
+      } catch (error) {
+        console.error('Error updating fiscal year start:', error);
+        setFiscalYearStartMonth(prevMonth);
+        setFiscalYearStartDay(prevDay);
+        throw error;
+      }
+    },
+    [storeId, fiscalYearStartMonth, fiscalYearStartDay, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync]
+  );
+
   const updateReceiptSettings = useCallback(async (newSettings: any) => {
     const prev = receiptSettings;
     try {
@@ -394,5 +434,8 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
     removeAcceptedCurrency,
     updateLanguage,
     updateReceiptSettings,
+    fiscalYearStartMonth,
+    fiscalYearStartDay,
+    updateFiscalYearStart,
   };
 }

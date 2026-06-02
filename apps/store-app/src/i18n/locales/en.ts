@@ -1353,7 +1353,7 @@ const en = {
     transaction: {
       amount_required: 'Amount is required.',
       amount_non_positive: 'Amount must be greater than zero.',
-      currency_invalid: 'Currency must be USD or LBP.',
+      currency_invalid: 'Currency is not a recognised currency code.',
       category_invalid: 'Transaction category is not valid.',
       description_required: 'Description is required.',
       store_id_required: 'Store information is missing. Please reload the app.',

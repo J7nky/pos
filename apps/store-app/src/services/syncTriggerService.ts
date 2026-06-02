@@ -17,6 +17,7 @@ import { crudHelperService } from './crudHelperService';
 class SyncTriggerService {
   private syncTriggered = false;
   private syncTimeout: NodeJS.Timeout | null = null;
+  private onlineListener: (() => void) | null = null;
   private readonly DEBOUNCE_MS = 30000; // 30 seconds debounce
 
   /**
@@ -25,7 +26,11 @@ class SyncTriggerService {
    */
   triggerSync(): void {
     console.log('🔄 [SyncTrigger] triggerSync() called');
-    
+
+    // Refresh the unsynced badge right away — it's a cheap local Dexie count,
+    // works offline, and must not wait for the 30s upload debounce.
+    this.refreshUnsyncedCount();
+
     // Clear existing timeout
     if (this.syncTimeout) {
       clearTimeout(this.syncTimeout);
@@ -44,10 +49,59 @@ class SyncTriggerService {
   }
 
   /**
+   * Update the unsynced-count badge immediately. Runs on every write trigger
+   * regardless of online state. If the lifecycle host isn't bound yet, retries
+   * once shortly after — the count is local-only so this is cheap and safe.
+   */
+  private refreshUnsyncedCount(): void {
+    // setTimeout(0) ensures the calling Dexie transaction commits before we
+    // count, otherwise the freshly-written row may not yet be visible.
+    setTimeout(() => {
+      const callbacks = (crudHelperService as any).host;
+      if (callbacks?.onUpdateUnsyncedCount) {
+        Promise.resolve(callbacks.onUpdateUnsyncedCount()).catch((err) => {
+          console.warn('⚠️ [SyncTrigger] Immediate unsynced-count update failed:', err);
+        });
+        return;
+      }
+      // Host not bound yet (early startup) — retry once.
+      setTimeout(() => {
+        const retry = (crudHelperService as any).host;
+        if (retry?.onUpdateUnsyncedCount) {
+          Promise.resolve(retry.onUpdateUnsyncedCount()).catch(() => { /* ignore */ });
+        }
+      }, 500);
+    }, 0);
+  }
+
+  /**
+   * Defer pending sync until the browser fires 'online'. Idempotent — only
+   * one listener is registered at a time. The flag stays armed so the deferred
+   * run still happens.
+   */
+  private deferUntilOnline(): void {
+    if (this.onlineListener) return;
+    const listener = () => {
+      window.removeEventListener('online', listener);
+      this.onlineListener = null;
+      console.log('🔄 [SyncTrigger] Network back online — running deferred sync');
+      void this.executeSync();
+    };
+    this.onlineListener = listener;
+    window.addEventListener('online', listener);
+  }
+
+  /**
    * Execute sync using callbacks from crudHelperService
    */
   private async executeSync(): Promise<void> {
     if (!this.syncTriggered) {
+      return;
+    }
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      console.log('🔄 [SyncTrigger] Offline — deferring sync until network returns');
+      this.deferUntilOnline();
       return;
     }
 
@@ -109,6 +163,10 @@ class SyncTriggerService {
     if (this.syncTimeout) {
       clearTimeout(this.syncTimeout);
       this.syncTimeout = null;
+    }
+    if (this.onlineListener) {
+      window.removeEventListener('online', this.onlineListener);
+      this.onlineListener = null;
     }
     this.syncTriggered = false;
   }

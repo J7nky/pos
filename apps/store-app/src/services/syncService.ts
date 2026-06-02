@@ -916,6 +916,49 @@ export class SyncService {
     };
   }
 
+  /**
+   * Plan B reconciliation: delete any local source='client' fallback snapshot
+   * whose (store_id, account_code, entity_id, snapshot_date) matches an
+   * incoming canonical row (source='server' or 'closing'). Server-authoritative
+   * rows always win; the client fallback was only there to bridge the offline
+   * gap. Without this eviction, the composite-index lookup in
+   * `snapshotService.getHistoricalBalance` would see both rows and return
+   * whichever Dexie's internal ordering surfaces first — not necessarily the
+   * canonical one.
+   */
+  private async evictClientSnapshotsSupersededBy(
+    incoming: Record<string, unknown>[],
+  ): Promise<void> {
+    const authoritative = incoming.filter(
+      (r) => r.source === 'server' || r.source === 'closing',
+    );
+    if (authoritative.length === 0) return;
+
+    for (const row of authoritative) {
+      const storeId = row.store_id as string | undefined;
+      const accountCode = row.account_code as string | undefined;
+      const snapshotDate = row.snapshot_date as string | undefined;
+      const entityId = (row.entity_id ?? null) as string | null;
+      if (!storeId || !accountCode || !snapshotDate) continue;
+
+      const supersededIds: string[] = [];
+      await getDB().balance_snapshots
+        .where('store_id')
+        .equals(storeId)
+        .filter((s: { account_code?: string; entity_id?: string | null; snapshot_date?: string; source?: string; id?: string }) =>
+          s.account_code === accountCode
+          && s.snapshot_date === snapshotDate
+          && (s.entity_id ?? null) === entityId
+          && s.source === 'client'
+        )
+        .each((s: { id: string }) => { supersededIds.push(s.id); });
+
+      if (supersededIds.length > 0) {
+        await getDB().balance_snapshots.bulkDelete(supersededIds);
+      }
+    }
+  }
+
   async downloadTablePaged(
     tableName: SyncTable,
     storeId: string,
@@ -984,6 +1027,14 @@ export class SyncService {
 
       if (rows.length > 0) {
         const bulk = rows.map((r) => this.normalizeRemoteRecordForDexie(tableName, r));
+        if (tableName === 'balance_snapshots') {
+          // Plan B reconciliation: when a server-authoritative row arrives for
+          // a (store, account, entity, snapshot_date) tuple, evict any local
+          // source='client' fallback row for the same tuple. Without this,
+          // `getHistoricalBalance` sees two rows on the composite index and
+          // `.first()` is index-order-arbitrary rather than precedence-aware.
+          await this.evictClientSnapshotsSupersededBy(bulk);
+        }
         await (db as any)[tableName].bulkPut(bulk);
       }
 

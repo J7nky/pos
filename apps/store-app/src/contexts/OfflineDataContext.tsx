@@ -96,6 +96,52 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [isInitializing, setIsInitializing] = useState(false);
   const [initializationError, setInitializationError] = useState<string | null>(null);
   const [syncSession, setSyncSession] = useState<OfflineSyncSessionState | null>(null);
+  // Plan D / D4: archive coverage snapshot + manual backfill trigger.
+  const [archiveCoverage, setArchiveCoverage] = useState<import('./offlineData/offlineDataContextContract').ArchiveCoverageStatus | null>(null);
+  const triggerArchiveBackfill = useCallback(
+    async (opts?: { fyLabels?: string[]; signal?: AbortSignal }) => {
+      const sid = storeId;
+      if (!sid) return;
+      const { archiveHydrationService } = await import('../services/archiveHydrationService');
+      try {
+        await archiveHydrationService.hydrateAllMissingArchives({
+          storeId: sid,
+          fyLabels: opts?.fyLabels,
+          signal: opts?.signal,
+        });
+      } catch (err) {
+        if ((err as Error)?.name !== 'AbortError') {
+          console.warn('Manual archive backfill failed:', err);
+        }
+      } finally {
+        // Recompute coverage from local Dexie state. Avoids a second manifest
+        // round-trip on the happy path — the trigger above already fetched it.
+        try {
+          const localPeriods = await getDB().fiscal_periods
+            .where('store_id').equals(sid).toArray();
+          const closed = localPeriods.filter((p) => p.is_closed && !p._deleted);
+          const local = closed.filter((p) => !!p.archive_hydrated_at).map((p) => p.fy_label);
+          const partial = closed
+            .filter((p) => !p.archive_hydrated_at && Object.keys(p.archive_hydrated_tables ?? {}).length > 0)
+            .map((p) => p.fy_label);
+          local.sort();
+          partial.sort();
+          setArchiveCoverage({
+            localFyLabels: local,
+            missingFyLabels: [],
+            partialFyLabels: partial,
+            earliestLocalFy: local[0] ?? null,
+            latestLocalFy: local[local.length - 1] ?? null,
+            currentFyLabel: localPeriods.find((p) => !p.is_closed)?.fy_label ?? null,
+            computedAt: new Date().toISOString(),
+          });
+        } catch (statusErr) {
+          console.warn('Archive coverage recompute failed:', statusErr);
+        }
+      }
+    },
+    [storeId],
+  );
 
   const [loading, setLoading] = useState({
     sync: false, products: false, suppliers: false, customers: false,
@@ -958,6 +1004,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         isInitializing: false,
         initializationError: null,
         syncSession: null,
+        archiveCoverage: null,
+        triggerArchiveBackfill: async () => {},
         getPermanentlyFailedOutboxItems: async () => [],
         discardPermanentlyFailedOutboxItem: async () => {},
         products: [],
@@ -1063,6 +1111,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         addAcceptedCurrency: async () => {},
         removeAcceptedCurrency: async () => {},
         updateLanguage: async () => {},
+        fiscalYearStartMonth: 1,
+        fiscalYearStartDay: 1,
+        updateFiscalYearStart: async () => {},
         sync: async () => ({ success: false, errors: ['No store ID'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 }),
         fullResync: async () => ({ success: false, errors: ['No store ID'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 }),
         debouncedSync: () => {},
@@ -1107,6 +1158,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       isInitializing,
       initializationError,
       syncSession,
+      archiveCoverage,
+      triggerArchiveBackfill,
       getPermanentlyFailedOutboxItems: () => syncService.getPermanentlyFailedItems(),
       discardPermanentlyFailedOutboxItem: async (id: string) => {
         await getDB().removePendingSync(id);
@@ -1167,6 +1220,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       addAcceptedCurrency: settingsLayer.addAcceptedCurrency,
       removeAcceptedCurrency: settingsLayer.removeAcceptedCurrency,
       updateLanguage: settingsLayer.updateLanguage,
+      fiscalYearStartMonth: settingsLayer.fiscalYearStartMonth,
+      fiscalYearStartDay: settingsLayer.fiscalYearStartDay,
+      updateFiscalYearStart: settingsLayer.updateFiscalYearStart,
 
       // Cash drawer from cashDrawerLayer
       cashDrawer: cashDrawerLayer.cashDrawer,

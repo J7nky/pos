@@ -446,8 +446,19 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
         console.error(`❌ [syncUpload] Table '${tableName}' not found in local DB — skipping`);
         continue;
       }
-      const activeRecords = await table.filter((record: any) => !record._synced && !record._deleted).toArray();
-      const deletedRecords = await table.filter((record: any) => record._deleted && !record._synced).toArray();
+      const activeRecords = await table.filter((record: any) => {
+        if (record._synced || record._deleted) return false;
+        // Plan B: client-generated balance snapshots are LOCAL-ONLY. Server-
+        // generated snapshots are canonical; uploading a local fallback would
+        // overwrite the canonical row with a partial view.
+        if (tableName === 'balance_snapshots' && record.source === 'client') return false;
+        return true;
+      }).toArray();
+      const deletedRecords = await table.filter((record: any) => {
+        if (!record._deleted || record._synced) return false;
+        if (tableName === 'balance_snapshots' && record.source === 'client') return false;
+        return true;
+      }).toArray();
 
       // Special logging for branches
       if (tableName === 'branches' && activeRecords.length > 0) {

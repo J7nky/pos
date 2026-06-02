@@ -230,6 +230,52 @@ export type OfflineSyncSessionState = {
   tier3Complete: boolean;
   connectivity: 'online' | 'offline';
   startedAt: number;
+  /**
+   * Plan C / C9 archive hydration observability. NULL while no archive
+   * activity has been observed; otherwise summarizes the most recent run.
+   */
+  archiveHydration?: ArchiveHydrationStatus | null;
+};
+
+/**
+ * Plan D / D4 — derived view of local FY archive coverage. The UI can
+ * render "History available from FY 2022 → present" by reading
+ * `earliestLocalFy` and `latestLocalFy`, and show a manual-download
+ * affordance when `missingFyLabels` is non-empty.
+ */
+export type ArchiveCoverageStatus = {
+  /** Closed-FY labels (oldest → newest) that are fully local. */
+  localFyLabels: string[];
+  /** Closed FYs the server has archived but this device hasn't downloaded. */
+  missingFyLabels: string[];
+  /** Closed FYs partially downloaded (some tables done, others pending). */
+  partialFyLabels: string[];
+  earliestLocalFy?: string | null;
+  latestLocalFy?: string | null;
+  /** Open FY identifier, if the server manifest carries one. */
+  currentFyLabel?: string | null;
+  /** ISO timestamp of the manifest read this status was derived from. */
+  computedAt: string;
+};
+
+/** Snapshot of archive-hydration state surfaced to the sync status UI. */
+export type ArchiveHydrationStatus = {
+  /** 'idle' before any run; 'running' once kicked off; 'completed' / 'failed' once finished. */
+  state: 'idle' | 'running' | 'completed' | 'failed';
+  /** FY currently being downloaded, if state === 'running'. */
+  currentFy?: string | null;
+  /** Table currently being downloaded inside the FY, if state === 'running'. */
+  currentTable?: string | null;
+  /** Per-FY summary of completed runs in this session. */
+  loadedFyLabels: string[];
+  /** FY labels skipped because their archive was already local. */
+  skippedFyLabels: string[];
+  /** Total uncompressed rows bulk-put across all tables this session. */
+  rowsLoaded: number;
+  /** Tables whose sha256 didn't match the manifest's value (still bulk-put). */
+  shaMismatches: { fy: string; table: string; expected: string }[];
+  elapsedMs?: number;
+  errorMessage?: string;
 };
 
 export interface OfflineDataContextType {
@@ -245,6 +291,21 @@ export interface OfflineDataContextType {
   isInitializing: boolean;
   initializationError: string | null;
   syncSession: OfflineSyncSessionState | null;
+  /**
+   * Plan D / D4: snapshot of local archive coverage. Tells the UI which
+   * closed FYs are fully local and which are still missing. NULL until
+   * the manifest has been fetched once in this session.
+   */
+  archiveCoverage: ArchiveCoverageStatus | null;
+  /**
+   * Plan D / D4: manual trigger for `archiveHydrationService` — useful as
+   * the "Download older FYs" button hook. Resolves with the per-FY summary;
+   * onProgress lets the UI render a progress bar. No-op when offline.
+   */
+  triggerArchiveBackfill: (opts?: {
+    fyLabels?: string[];
+    signal?: AbortSignal;
+  }) => Promise<void>;
   getPermanentlyFailedOutboxItems: () => Promise<PendingSync[]>;
   discardPermanentlyFailedOutboxItem: (id: string) => Promise<void>;
   products: Tables['products']['Row'][];
@@ -400,6 +461,10 @@ export interface OfflineDataContextType {
   updateLanguage: (language: 'en' | 'ar' | 'fr') => Promise<void>;
   receiptSettings: Partial<ReceiptSettings>;
   updateReceiptSettings: (settings: Partial<ReceiptSettings>) => Promise<void>;
+  /** Plan A: fiscal year start (month 1-12, day 1-31). Defaults to (1, 1). */
+  fiscalYearStartMonth: number;
+  fiscalYearStartDay: number;
+  updateFiscalYearStart: (month: number, day: number) => Promise<void>;
 
   sync: (isAutomatic?: boolean) => Promise<SyncResult>;
   fullResync: () => Promise<SyncResult>;

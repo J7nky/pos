@@ -1,5 +1,6 @@
 // Centralized validation service to eliminate redundancy across syncService and OfflineDataContext
 import { getDB } from '../lib/db';
+import { CURRENCY_META } from '@pos-platform/shared';
 
 // Get singleton database instance
 const db = getDB();
@@ -67,7 +68,7 @@ const VALIDATION_RULES: Record<string, ValidationRule[]> = {
     { field: 'store_id', required: true, type: 'uuid' },
     { field: 'account_code', required: true, type: 'string' },
     { field: 'name', required: true, type: 'string' },
-    { field: 'currency', required: true, enum: ['USD', 'LBP'] },
+    { field: 'currency', required: true, enum: Object.keys(CURRENCY_META) },
     { field: 'current_balance', type: 'number' },
   ],
   cash_drawer_sessions: [

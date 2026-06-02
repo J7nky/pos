@@ -285,15 +285,82 @@ export function useOfflineInitialization(params: UseOfflineInitializationParams)
             // when both complete (instead of once per tier). Saves a redundant
             // full Dexie hydration on cold start.
             void (async () => {
-              const [t2, t3] = await Promise.allSettled([
+              // Plan C / C7: hydrate closed-FY archives in parallel with the
+              // paged tier 2/3 sync. Archives cover historical data (closed
+              // fiscal years); paged sync covers the live tail. They overlap
+              // only at the seam, which Dexie bulkPut() reconciles by primary
+              // key — idempotent.
+              // C9: surface archive progress in syncSession so the UI's sync
+              // status panel can render history-download state.
+              const archiveStatus: import('./offlineDataContextContract').ArchiveHydrationStatus = {
+                state: 'running',
+                currentFy: null,
+                currentTable: null,
+                loadedFyLabels: [],
+                skippedFyLabels: [],
+                rowsLoaded: 0,
+                shaMismatches: [],
+              };
+              setSyncSession((s) => (s ? { ...s, archiveHydration: archiveStatus } : s));
+              const archiveTask = import('../../services/archiveHydrationService')
+                .then(({ archiveHydrationService }) =>
+                  archiveHydrationService.hydrateAllMissingArchives({
+                    storeId: capturedStoreId,
+                    signal: bgController.signal,
+                    onProgress: (ev) => {
+                      if (ev.type === 'fy_started') {
+                        archiveStatus.currentFy = ev.fy_label ?? null;
+                      } else if (ev.type === 'table_started') {
+                        archiveStatus.currentTable = ev.table ?? null;
+                      } else if (ev.type === 'table_completed') {
+                        archiveStatus.rowsLoaded += ev.rows_loaded ?? 0;
+                      } else if (ev.type === 'sha_mismatch') {
+                        archiveStatus.shaMismatches.push({
+                          fy: ev.fy_label ?? '',
+                          table: ev.table ?? '',
+                          expected: ev.expected_sha256 ?? '',
+                        });
+                      } else if (ev.type === 'fy_completed' && ev.fy_label) {
+                        archiveStatus.loadedFyLabels.push(ev.fy_label);
+                      } else if (ev.type === 'skip_local_already_hydrated' && ev.fy_label) {
+                        archiveStatus.skippedFyLabels.push(ev.fy_label);
+                      }
+                      setSyncSession((s) =>
+                        s ? { ...s, archiveHydration: { ...archiveStatus } } : s,
+                      );
+                    },
+                  }),
+                );
+              const [t2, t3, archive] = await Promise.allSettled([
                 syncService.downloadTier('tier2', capturedStoreId, capturedBranchId, { signal: bgController.signal }),
                 syncService.downloadTier('tier3', capturedStoreId, capturedBranchId, { signal: bgController.signal }),
+                archiveTask,
               ]);
               if (t2.status === 'rejected' && (t2.reason as Error)?.name !== 'AbortError') {
                 console.warn('Tier 2 background sync:', t2.reason);
               }
               if (t3.status === 'rejected' && (t3.reason as Error)?.name !== 'AbortError') {
                 console.warn('Tier 3 background sync:', t3.reason);
+              }
+              if (archive.status === 'rejected' && (archive.reason as Error)?.name !== 'AbortError') {
+                console.warn('Archive hydration:', archive.reason);
+                archiveStatus.state = 'failed';
+                archiveStatus.errorMessage = (archive.reason as Error)?.message ?? String(archive.reason);
+                setSyncSession((s) =>
+                  s ? { ...s, archiveHydration: { ...archiveStatus } } : s,
+                );
+              } else if (archive.status === 'fulfilled') {
+                debug(
+                  `📦 Archive hydration: ${archive.value.fiscal_years.length} FY(s) loaded, ` +
+                  `${archive.value.skipped.length} already local, ${archive.value.elapsed_ms}ms`,
+                );
+                archiveStatus.state = 'completed';
+                archiveStatus.currentFy = null;
+                archiveStatus.currentTable = null;
+                archiveStatus.elapsedMs = archive.value.elapsed_ms;
+                setSyncSession((s) =>
+                  s ? { ...s, archiveHydration: { ...archiveStatus } } : s,
+                );
               }
               try {
                 await refreshData();
@@ -352,6 +419,22 @@ export function useOfflineInitialization(params: UseOfflineInitializationParams)
                 const { entityBalanceCache } = await import('../../services/entityBalanceCache');
                 entityBalanceCache.invalidateAll();
               }
+              // Plan C / C8: reconnect-after-long-gap. The manifest RPC is one
+              // cheap query; if every FY in the manifest is already locally
+              // hydrated (the warm-warm path), the diff inside hydrateAllMissing
+              // is a no-op. If the device was offline while one or more FYs
+              // closed on the server, those archives stream in here before
+              // the user opens a statement for a historical period.
+              void import('../../services/archiveHydrationService')
+                .then(({ archiveHydrationService }) =>
+                  archiveHydrationService.hydrateAllMissingArchives({ storeId }),
+                )
+                .then((res) => {
+                  if (res.fiscal_years.length > 0) {
+                    debug(`📦 Warm-start archive catch-up: ${res.fiscal_years.length} FY(s) loaded`);
+                  }
+                })
+                .catch((err) => console.warn('Warm-start archive hydration:', err));
               await refreshData();
             } catch (e) {
               console.warn('Background Tier 1 sync:', e);

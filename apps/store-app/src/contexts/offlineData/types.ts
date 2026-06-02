@@ -264,6 +264,12 @@ export interface StoreSettingsDataLayerResult {
   removeAcceptedCurrency: (currency: CurrencyCode) => Promise<void>;
   updateLanguage: (newLanguage: 'en' | 'ar' | 'fr') => Promise<void>;
   updateReceiptSettings: (newSettings: any) => Promise<void>;
+  /** Plan A: fiscal year start month (1-12). Defaults to 1 (Jan). */
+  fiscalYearStartMonth: number;
+  /** Plan A: fiscal year start day (1-31, clamped to month length). Defaults to 1. */
+  fiscalYearStartDay: number;
+  /** Plan A: persist fiscal-year start. Restricted to admin role at the UI layer. */
+  updateFiscalYearStart: (month: number, day: number) => Promise<void>;
 }
 
 /** Adapter for NotificationsDataLayer: only storeId needed. */

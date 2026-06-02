@@ -48,15 +48,19 @@ export const supabase = createClient<Database>(safeSupabaseUrl, safeSupabaseAnon
       // This prevents ERR_NAME_NOT_RESOLVED errors when there's no internet
       if (!navigator.onLine) {
         const url = typeof input === 'string' ? input : input.toString();
-        
-        // Block ALL requests when offline, including token refresh
-        // The app will use local authentication instead
-        if (url.includes('/auth/v1/token') || url.includes('/auth/v1/')) {
-          console.log('🚫 Blocking auth token refresh while offline - using local authentication');
-          // Return a mock response to prevent errors, but the app should handle this gracefully
-          throw new Error('Offline - authentication unavailable. Please use local credentials.');
+
+        // Auth token refresh: return a synthetic 503 instead of throwing.
+        // Supabase's _handleRequest3 logs thrown errors to console.error, which
+        // turned the background refresh loop into a stream of noisy errors.
+        // A 503 Response triggers the SDK's normal retryable-error path and
+        // stays silent. The app falls back to local auth in the meantime.
+        if (url.includes('/auth/v1/')) {
+          return new Response(
+            JSON.stringify({ error: 'offline', message: 'Offline — auth refresh deferred' }),
+            { status: 503, headers: { 'Content-Type': 'application/json' } }
+          );
         }
-        
+
         // Block all other requests when offline
         console.log('🚫 Blocking Supabase request while offline:', url);
         throw new Error('Offline - request blocked');

@@ -608,6 +608,80 @@ export interface Store {
   preferred_commission_rate: number;
   exchange_rate: number;
   low_stock_alert: boolean;
+  // Fiscal year start (v66). Defaults to (1, 1) = Jan 1. See
+  // OFFLINE_HISTORY_ARCHITECTURE.md — drives statement date defaults,
+  // FY-end snapshots, and FY-partitioned archives.
+  fiscal_year_start_month?: number;
+  fiscal_year_start_day?: number;
+  created_at: string;
+  updated_at: string;
+  _synced: boolean;
+  _lastSyncedAt?: string;
+  _deleted?: boolean;
+}
+
+/**
+ * One row per fiscal year per store (v66, Plan A).
+ *
+ * Note: the existing `FiscalPeriod` type in `types/accounting.ts` is a
+ * different concept (a monthly accounting period like "2026-05"). This type
+ * — a row in the `fiscal_periods` DB table — represents a whole fiscal YEAR.
+ *
+ * Open periods exist as soon as a fiscal year starts; they are closed by an
+ * admin action (Plan C) which records `closed_at` / `closed_by` and triggers
+ * the FY archive job which populates the `archive_*` fields.
+ */
+/**
+ * Per-table archive metadata written by the C3 Edge Function and consumed
+ * by C4/C5 RPCs + C6 client downloader. Mirrors the `TableArchiveResult`
+ * type in `supabase/functions/export_fiscal_year_archive/index.ts`.
+ */
+export interface ArchiveTableMeta {
+  /** Storage path under the `archives` bucket. */
+  path: string;
+  row_count: number;
+  byte_size_gz: number;
+  /** SHA-256 of the gzipped archive bytes. */
+  sha256: string;
+}
+
+export interface FiscalYearPeriod {
+  id: string;
+  store_id: string;
+  /** Plain-text identifier, e.g. "FY 2024" or "2024-25". Not multilingual. */
+  fy_label: string;
+  /** ISO date (YYYY-MM-DD) of the first day of the fiscal year. */
+  start_date: string;
+  /** ISO date (YYYY-MM-DD) of the last day of the fiscal year. */
+  end_date: string;
+  is_closed: boolean;
+  closed_at?: string | null;
+  closed_by?: string | null;
+  /** Populated by Plan C archive job; NULL while open or pre-archive. */
+  archive_url?: string | null;
+  /** SHA-256 of the manifest.json blob written at export time. */
+  archive_sha256?: string | null;
+  /**
+   * Per-table archive metadata written by the C3 Edge Function:
+   * `{ [table]: { path, row_count, byte_size_gz, sha256 } }`. The manifest
+   * RPC (C4) derives the manifest from this map.
+   */
+  archive_row_counts?: Record<string, ArchiveTableMeta> | null;
+  /**
+   * Local-only timestamp (never synced to Supabase). Set by the C6
+   * `archiveHydrationService` when every table named in the manifest's
+   * `tables` map has a corresponding entry in `archive_hydrated_tables`.
+   * Acts as the "FY fully local" flag for `hydrateAllMissingArchives`.
+   */
+  archive_hydrated_at?: string | null;
+  /**
+   * Plan D / D1: durable per-table checkpoint. Map of `table_name → ISO
+   * timestamp` recording when each archived table in the FY finished
+   * streaming into Dexie. Lets a mid-FY interrupt (network drop, store
+   * switch, app close) resume by skipping tables already downloaded.
+   * Local-only — never uploaded.
+   */
+  archive_hydrated_tables?: Record<string, string> | null;
   created_at: string;
   updated_at: string;
   _synced: boolean;

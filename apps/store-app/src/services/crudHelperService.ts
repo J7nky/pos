@@ -451,12 +451,17 @@ export class CRUDHelperService {
    * Get unsynced count across all tables
    */
   async getUnsyncedCount(): Promise<{ total: number; byTable: Record<string, number> }> {
+    // Customers and suppliers are stored in the `entities` table (entity_type
+    // discriminator), not in separate Dexie tables — counting 'customers' /
+    // 'suppliers' here would silently return 0 and the badge would never tick
+    // up after an addCustomer/addSupplier. journal_entries is also written by
+    // the initial-balance flow and must be counted.
     const tableNames = [
-      'stores', 'branches', 'products', 'suppliers', 'customers', 'users',
+      'branches', 'products', 'entities', 'users',
       'cash_drawer_accounts',
-      'inventory_bills', 'inventory_items', 'transactions', 'bills',
-      'bill_line_items', 'bill_audit_logs', 'cash_drawer_sessions',
-      'missed_products', 'reminders' // Include all tables that sync processes
+      'inventory_bills', 'inventory_items', 'transactions', 'journal_entries',
+      'bills', 'bill_line_items', 'bill_audit_logs', 'cash_drawer_sessions',
+      'missed_products', 'reminders'
     ];
 
     // Get all table references first
@@ -501,10 +506,10 @@ export class CRUDHelperService {
     summary: string;
   }> {
     const tableNames = [
-      'stores', 'branches', 'products', 'suppliers', 'customers', 'users',
+      'branches', 'products', 'entities', 'users',
       'cash_drawer_accounts',
-      'inventory_bills', 'inventory_items', 'transactions', 'bills',
-      'bill_line_items', 'bill_audit_logs', 'cash_drawer_sessions',
+      'inventory_bills', 'inventory_items', 'transactions', 'journal_entries',
+      'bills', 'bill_line_items', 'bill_audit_logs', 'cash_drawer_sessions',
       'missed_products', 'reminders'
     ];
 

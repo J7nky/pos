@@ -191,30 +191,46 @@ export class SnapshotService {
         snapshotDate
       );
       
-      // Only create snapshot if there's a balance or journal activity
-      if (balance.USD === 0 && balance.LBP === 0) {
-        // Check if there are any journal entries for this account-entity combination
+      // Skip the snapshot if every currency balance is zero AND the account
+      // has no journal activity at all. Plan B fix: the previous check only
+      // inspected USD / LBP and would mis-skip stores that transact in other
+      // currencies (e.g. AED-only stores).
+      const allBalancesZero = Object.values(balance).every(v => (v ?? 0) === 0);
+      if (allBalancesZero) {
         const hasActivity = await this.hasJournalActivity(storeId, accountCode, entityId, snapshotDate);
         if (!hasActivity) {
-          return null; // Skip creating snapshot for accounts with no activity
+          return null;
         }
       }
-      
+
+      // Build the per-currency map from every currency present in the
+      // balance computation rather than hardcoding USD/LBP. buildBalances
+      // tolerates an array of {currency, balance} entries.
+      const balancesEntries = (Object.keys(balance) as CurrencyCode[]).map(c => ({
+        currency: c,
+        balance: balance[c] ?? 0,
+      }));
+
       const snapshot: BalanceSnapshot = {
         id: createId(),
         store_id: storeId,
         branch_id: branchId,
         account_code: accountCode,
         entity_id: entityId,
-        balances: buildBalances([
-          { currency: 'USD', balance: balance.USD },
-          { currency: 'LBP', balance: balance.LBP },
-        ]),
+        balances: buildBalances(balancesEntries),
         snapshot_date: snapshotDate,
         snapshot_type: 'daily',
         verified: false, // Will be verified later
+        // Plan B: locally-generated snapshots are attributed to 'client' so the
+        // server-side generator (B3) can later supersede them on conflict.
+        // Marked `_synced: true` because client snapshots are LOCAL-ONLY and
+        // never upload — keeping them out of the unsynced count. The upload
+        // path also filters on source as a safety net.
+        source: 'client',
+        stale: false,
+        is_closing: false,
         created_at: new Date().toISOString(),
-        _synced: false
+        _synced: true
       };
 
       return snapshot;
@@ -301,9 +317,13 @@ export class SnapshotService {
     const isToday = asOfDate === today;
 
     if (!isToday) {
+      // Plan B (B6): exact-date lookup must skip stale rows — a stale snapshot
+      // has had its underlying journal entries edited and the value is no
+      // longer trusted until the recompute pass clears the flag.
       const exact = await getDB().balance_snapshots
         .where('[store_id+account_code+entity_id+snapshot_date]')
         .equals([storeId, accountCode, entityId, asOfDate])
+        .filter(s => !s.stale && !s._deleted)
         .first()
         .catch((error) => { throw error; });
 
@@ -321,12 +341,19 @@ export class SnapshotService {
       }
     }
 
-    // Try to find the most recent snapshot before the requested date.
-    // For "today", require strictly-before so today's stale snapshot is not picked.
+    // Try to find the most recent non-stale snapshot before the requested
+    // date. For "today", require strictly-before so today's snapshot (which
+    // may have been written before today's later entries) is not used as the
+    // final answer. Stale rows are skipped — the recompute pass will clear
+    // them; until then, we fall through to journal-derived calculation.
     const recentSnapshot = await getDB().balance_snapshots
       .where('[store_id+account_code+entity_id]')
       .equals([storeId, accountCode, entityId])
-      .filter(s => isToday ? s.snapshot_date < asOfDate : s.snapshot_date <= asOfDate)
+      .filter(s =>
+        !s.stale &&
+        !s._deleted &&
+        (isToday ? s.snapshot_date < asOfDate : s.snapshot_date <= asOfDate)
+      )
       .reverse()
       .first();
     
@@ -551,10 +578,13 @@ export class SnapshotService {
     cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
     const cutoffDateStr = getLocalDateString(cutoffDate.toISOString());
     
+    // Plan B (B6): closing snapshots are immutable FY anchors — never
+    // garbage-collected even if older than the retention horizon. They're
+    // load-bearing for any statement that opens at a past fiscal year start.
     const oldSnapshots = await getDB().balance_snapshots
       .where('store_id')
       .equals(storeId)
-      .filter(snapshot => snapshot.snapshot_date < cutoffDateStr)
+      .filter(snapshot => snapshot.snapshot_date < cutoffDateStr && !snapshot.is_closing)
       .toArray();
     
     if (oldSnapshots.length > 0) {

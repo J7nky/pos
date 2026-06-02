@@ -29,6 +29,13 @@ export class EventEmissionService {
    * Uses Supabase RPC function for atomic version increment
    */
   async emitEvent(params: EventEmissionParams): Promise<string> {
+    // Skip RPC when offline. Local writes already carry `_synced: false`,
+    // so the next online sync will reconcile and emit any catch-up events
+    // server-side as part of upload.
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return 'offline-skipped';
+    }
+
     const { data, error } = await supabase.rpc('emit_branch_event', {
       p_store_id: params.store_id,
       p_branch_id: params.branch_id,

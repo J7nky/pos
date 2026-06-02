@@ -223,7 +223,7 @@ Wholesale produce market ERP and Point of Sale (POS): inventory, sales (bills/li
 ## 9. Testing Strategy
 
 ### Unit vs integration coverage
-- **Store-app:** Vitest (package.json: test, test:run, test:coverage); tests under `services/__tests__/`: balanceVerificationService.test.ts, transactionService.refactored.test.ts, atomicTransactions.test.ts, syncService.optimizations.test.ts, syncService.performance.test.ts, downloadOptimization.test.ts; constants/__tests__/transactionCategories.test.ts. No app-wide coverage metric observed.
+- **Store-app:** Vitest (package.json: test, test:run, test:coverage); tests under `services/__tests__/`: balanceVerificationService.test.ts, transactionService.refactored.test.ts, atomicTransactions.test.ts, syncService.optimizations.test.ts, syncService.performance.test.ts; constants/__tests__/transactionCategories.test.ts. No app-wide coverage metric observed.
 - **Admin-app:** No test script or test files found.
 - **Shared:** No tests found.
 

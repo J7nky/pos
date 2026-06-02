@@ -1,0 +1,11 @@
+# Supabase project configuration.
+# Generated incrementally — only the sections we need are populated.
+
+[functions.export_fiscal_year_archive]
+# Disable platform-level JWT verification so the CORS preflight (OPTIONS)
+# can reach the function. The function itself still requires + validates a
+# Bearer token in code (`Authorization: Bearer <user-jwt>`), so security
+# is unchanged. Without this, the preflight gets rejected at the edge with
+# a 401 that has no CORS headers, and the browser reports a CORS failure
+# even though the actual POST would succeed.
+verify_jwt = false

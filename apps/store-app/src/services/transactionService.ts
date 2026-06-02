@@ -175,6 +175,35 @@ export class TransactionService {
         };
       }
 
+      // 1.4. REJECT POSTS INTO CLOSED FISCAL YEARS (Plan C / C2 client-side mirror).
+      // The server has a BEFORE trigger that rejects journal_entries inside a
+      // closed period, but a long-offline device would only discover this on
+      // upload — by which time the local Dexie state has already diverged.
+      // Mirror the check here using the locally-synced fiscal_periods rows so
+      // the user gets an immediate, actionable error.
+      {
+        const postedDate = getLocalDateString(
+          params.postedDate ?? new Date().toISOString(),
+        );
+        const closedPeriods = await getDB().fiscal_periods
+          .where('store_id')
+          .equals(params.context.storeId)
+          .filter((p) => p.is_closed === true && !p._deleted)
+          .toArray();
+        const conflict = closedPeriods.find(
+          (p) => postedDate >= p.start_date && postedDate <= p.end_date,
+        );
+        if (conflict) {
+          return {
+            success: false,
+            error: `Cannot post into closed fiscal year "${conflict.fy_label}" (${conflict.start_date} → ${conflict.end_date}). Ask an admin to reopen the period before recording adjustments.`,
+            balanceBefore: 0,
+            balanceAfter: 0,
+            affectedRecords: [],
+          };
+        }
+      }
+
       // 1.5. VERIFY CASH DRAWER ACCOUNT EXISTS (no balance validation - negative balances allowed)
       const isCashExpense = params.category === TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE ||
                            params.category === TRANSACTION_CATEGORIES.INVENTORY_CASH_PURCHASE;

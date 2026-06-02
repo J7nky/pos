@@ -28,6 +28,7 @@ import { currencyService } from '../services/currencyService';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import type { CurrencyCode } from '@pos-platform/shared';
 import { getTodayLocalDate } from '../utils/dateUtils';
+import { getFiscalYearForDate } from '../services/fiscalYearService';
 import type { AccountStatementPrintPayload } from '../types/electron';
 
 interface AccountStatementModalProps {
@@ -52,7 +53,7 @@ export default function AccountStatementModal({
   isSyncing = false
 }: AccountStatementModalProps) {
   const { t, language } = useI18n();
-  const { preferredCurrency } = useOfflineData();
+  const { preferredCurrency, fiscalYearStartMonth, fiscalYearStartDay } = useOfflineData();
 
   // Convert a per-currency balance map to a single number in the preferred currency.
   // Used for the running-balance column and current-balance summary card so users
@@ -76,13 +77,17 @@ export default function AccountStatementModal({
   const [statement, setStatement] = useState<AccountStatement | null>(null);
   const [viewMode, setViewMode] = useState<'summary' | 'detailed'>('summary');
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>(() => {
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const day = String(today.getDate()).padStart(2, '0');
+    // Default the statement period to the store's CURRENT FISCAL YEAR.
+    // For stores running a calendar FY (Jan 1) this is equivalent to the
+    // old "Jan 1 of current year" hardcode; for non-calendar FYs (Apr 1,
+    // Jul 1, etc.) it tracks the configured boundary. See Plan A / A6.
+    const fy = getFiscalYearForDate(new Date(), {
+      fiscal_year_start_month: fiscalYearStartMonth,
+      fiscal_year_start_day: fiscalYearStartDay,
+    });
     return {
-      start: `${year}-01-01`, // Start of year
-      end: `${year}-${month}-${day}` // Today in local timezone
+      start: fy.start_date,
+      end: getTodayLocalDate(),
     };
   });
   const [isLoading, setIsLoading] = useState(false);

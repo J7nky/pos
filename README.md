@@ -249,7 +249,7 @@ Auth model: JWT from Supabase Auth; anon key for normal client; service role key
 **Store app**
 
 - Vitest. Scripts: `test`, `test:run`, `test:ui`, `test:coverage` (from `apps/store-app/package.json`).
-- Tests live under `src/services/__tests__/` and `src/constants/__tests__/` (e.g. balanceVerificationService, transactionService, syncService optimizations/performance, downloadOptimization, transactionCategories). `src/test/setup.ts` is used for test setup.
+- Tests live under `src/services/__tests__/` and `src/constants/__tests__/` (e.g. balanceVerificationService, transactionService, syncService optimizations/performance, transactionCategories). `src/test/setup.ts` is used for test setup.
 - Run from store-app: `pnpm test` or `pnpm test:run`. No root-level test script that runs all apps.
 
 **Admin app**

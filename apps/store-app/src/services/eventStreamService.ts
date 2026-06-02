@@ -126,6 +126,16 @@ export class EventStreamService {
   resumeAfterSync(branchId: string, storeId: string): void {
     this.syncSuspendedBranches.delete(branchId);
     evLog(`[EventStream] Event processing resumed after sync on branch ${branchId}`);
+
+    // Skip the deferred catchUp when offline — uploadOnly can be invoked while
+    // offline to drain the local queue, but there is nothing to pull until the
+    // network returns. The periodic safety-net catch-up (or the next online
+    // sync trigger) will handle it.
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      evLog(`[EventStream] Post-sync catchUp skipped — offline (branch ${branchId})`);
+      return;
+    }
+
     // Defer so initializeSyncState (called by useSyncStateLayer after sync)
     // has a chance to advance last_seen_event_version first.
     setTimeout(() => {
@@ -347,6 +357,13 @@ export class EventStreamService {
    * This is the core sync algorithm - pull-based, sequential, idempotent
    */
   async catchUp(branchId: string, storeId: string): Promise<EventProcessingResult> {
+    // Skip while offline — pullEvents would otherwise throw inside the
+    // supabase fetch interceptor and surface as a noisy console error.
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      evLog(`[EventStream] catchUp skipped — offline (branch ${branchId})`);
+      return { processed: 0, errors: [], last_version: 0 };
+    }
+
     // Suppress during sync — events emitted by our own upload will be
     // replayed by a deferred catchUp once sync finishes (see resumeAfterSync).
     if (this.syncSuspendedBranches.has(branchId)) {

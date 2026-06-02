@@ -12,6 +12,7 @@ import type { CreateTransactionParams } from './transactionService';
 import type { CreateJournalEntryParams } from '../types/accounting';
 import { TRANSACTION_CATEGORIES } from '../constants/transactionCategories';
 import { getDB } from '../lib/db';
+import { CURRENCY_META } from '@pos-platform/shared';
 
 // ---------------------------------------------------------------------------
 // Category lookup map
@@ -73,7 +74,7 @@ const MESSAGE_KEYS: Record<AppErrorCode, string> = {
 const FALLBACK_MESSAGES: Record<AppErrorCode, string> = {
   TRANSACTION_AMOUNT_REQUIRED: 'Amount is required.',
   TRANSACTION_AMOUNT_NON_POSITIVE: 'Amount must be greater than zero.',
-  TRANSACTION_CURRENCY_INVALID: 'Currency must be USD or LBP.',
+  TRANSACTION_CURRENCY_INVALID: 'Currency is not a recognised currency code.',
   TRANSACTION_CATEGORY_INVALID: 'Transaction category is not valid.',
   TRANSACTION_DESCRIPTION_REQUIRED: 'Description is required.',
   TRANSACTION_STORE_ID_REQUIRED: 'Store information is missing. Please reload the app.',
@@ -137,7 +138,7 @@ export async function validateTransactionCreation(
     violations.push(violation('amount', 'TRANSACTION_AMOUNT_NON_POSITIVE'));
   }
 
-  if (!params.currency || !['USD', 'LBP'].includes(params.currency)) {
+  if (!params.currency || !(params.currency in CURRENCY_META)) {
     violations.push(violation('currency', 'TRANSACTION_CURRENCY_INVALID'));
   }
 

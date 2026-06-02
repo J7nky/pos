@@ -412,7 +412,6 @@ close, which matches the intended lifetime exactly. This boundary was establishe
 | `missedProductsService.ts` | 610 | Out-of-stock product tracking |
 | `weightManagementService.ts` | 596 | Weight-based inventory management |
 | `entityQueryService.ts` | 578 | Entity lookup/queries |
-| `downloadOptimizationService.ts` | 572 | Sync download deduplication and change detection |
 | `reminderMonitoringService.ts` | 551 | Reminder due-date monitoring |
 | `snapshotService.ts` | 547 | Balance snapshot creation |
 | `auditLogService.ts` | 543 | Audit trail |

@@ -12,25 +12,34 @@
 
 import { supabase } from '../lib/supabase';
 
-// Tables that have updated_at field for incremental sync
-// Exported for use in other services (e.g., syncService)
+// Tables that have updated_at field for incremental sync. Consumed by
+// syncDownload.getTimestampField() and crudHelperService — any sync-eligible
+// table omitted here falls back to created_at, which silently drops every
+// UPDATE during incremental download (only INSERTs come through). Conversely,
+// names listed here that don't exist as Dexie/Supabase tables are harmless
+// noise but cause confusion. The append-only ledger tables (journal_entries,
+// balance_snapshots) are intentionally excluded — they have no updated_at.
 export const TABLES_WITH_UPDATED_AT = [
-  'products',
-  'suppliers',
-  'customers',
-  'users',
   'stores',
+  'fiscal_periods',
+  'branches',
+  'product_categories',
+  'units_of_measure',
+  'products',
+  'users',
   'cash_drawer_accounts',
   'cash_drawer_sessions',
+  'chart_of_accounts',
+  'entities',
   'inventory_bills',
+  'inventory_items',
   'bills',
   'bill_line_items',
   'bill_audit_logs',
   'missed_products',
   'reminders',
-  'branches',
-  'entities',
-  'inventory_items' // ✅ FIXED: Has updated_at in Supabase (was incorrectly in created_at only list)
+  'role_permissions',
+  'user_permissions',
 ] as const;
 
 export interface ChangeDetectionResult {

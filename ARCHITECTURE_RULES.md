@@ -115,7 +115,7 @@ The store-app has a layered data/sync stack. Read top-down: each layer only depe
 | `eventEmissionService` | Emits to `branch_event_log` after upload |
 | `eventStreamService` | Realtime subscription + version catch-up |
 | `employeeService` | Admin-API operations via `supabaseAdmin` |
-| `qrCodeService`, `downloadOptimizationService`, `universalChangeDetectionService`, `publicStatementService` | Narrow, justified Supabase uses |
+| `qrCodeService`, `universalChangeDetectionService`, `publicStatementService` | Narrow, justified Supabase uses |
 
 No other module in `src/` should import `supabase` directly. ESLint's `no-restricted-imports` rule enforces this for `pages/`, `components/`, `layouts/`.
 

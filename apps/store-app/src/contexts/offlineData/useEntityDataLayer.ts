@@ -70,6 +70,8 @@ function coerceAdvanceBalanceMap(
  * Post one journal entry per non-zero currency in the balance map. The
  * direction (Debit AR vs Credit AR for customers; Debit AP vs Credit AP
  * for suppliers) is determined per-currency by the sign of the amount.
+ * Returns the synthetic transaction_id used to tag all entries — undo
+ * uses it to wipe the whole group in one shot.
  */
 async function postInitialBalanceEntries(
   entityId: string,
@@ -78,10 +80,10 @@ async function postInitialBalanceEntries(
   branchId: string,
   userProfileId: string | undefined,
   now: string
-): Promise<void> {
+): Promise<string | null> {
   const codes = (Object.keys(initialBalances) as CurrencyCode[])
     .filter(code => (initialBalances[code] ?? 0) !== 0);
-  if (codes.length === 0) return;
+  if (codes.length === 0) return null;
 
   const transactionId = createId();
   const postedDate = getLocalDateString(now);
@@ -110,6 +112,8 @@ async function postInitialBalanceEntries(
       branchId,
     });
   }
+
+  return transactionId;
 }
 
 export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataLayerResult {
@@ -156,9 +160,10 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
 
       await getDB().entities.add(entity);
 
+      let initialBalanceTxnId: string | null = null;
       if (Object.keys(initialBalances).length > 0 && currentBranchId) {
         try {
-          await postInitialBalanceEntries(
+          initialBalanceTxnId = await postInitialBalanceEntries(
             supplierId,
             'supplier',
             initialBalances,
@@ -171,10 +176,22 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
         }
       }
 
+      const undoSteps: Array<{ op: string; table: string; id: string; transaction_id?: string }> = [
+        { op: 'delete', table: 'entities', id: supplierId },
+      ];
+      if (initialBalanceTxnId) {
+        undoSteps.push({
+          op: 'delete',
+          table: 'journal_entries',
+          id: `initial-balance-${supplierId}`,
+          transaction_id: initialBalanceTxnId,
+        });
+      }
+
       pushUndo({
         type: 'add_supplier',
         affected: [{ table: 'entities', id: supplierId }],
-        steps: [{ op: 'update', table: 'entities', id: supplierId, changes: { _deleted: true, _synced: false } }],
+        steps: undoSteps,
       });
 
       await refreshData();
@@ -227,9 +244,10 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
 
       await getDB().entities.add(entity);
 
+      let initialBalanceTxnId: string | null = null;
       if (Object.keys(initialBalances).length > 0 && currentBranchId) {
         try {
-          await postInitialBalanceEntries(
+          initialBalanceTxnId = await postInitialBalanceEntries(
             customerId,
             'customer',
             initialBalances,
@@ -242,10 +260,22 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
         }
       }
 
+      const undoSteps: Array<{ op: string; table: string; id: string; transaction_id?: string }> = [
+        { op: 'delete', table: 'entities', id: customerId },
+      ];
+      if (initialBalanceTxnId) {
+        undoSteps.push({
+          op: 'delete',
+          table: 'journal_entries',
+          id: `initial-balance-${customerId}`,
+          transaction_id: initialBalanceTxnId,
+        });
+      }
+
       pushUndo({
         type: 'add_customer',
         affected: [{ table: 'entities', id: customerId }],
-        steps: [{ op: 'update', table: 'entities', id: customerId, changes: { _deleted: true, _synced: false } }],
+        steps: undoSteps,
       });
 
       await refreshData();

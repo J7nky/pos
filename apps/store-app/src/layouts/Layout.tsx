@@ -1,5 +1,6 @@
 import { OfflineIndicator } from '../components/OfflineIndicator';
 import { SyncProgressIndicator } from '../components/SyncProgressIndicator';
+import { FiscalYearCloseReminder } from '../components/FiscalYearCloseReminder';
 import { ErrorToastContainer } from '../components/common/ErrorToastContainer';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import KeyboardShortcutsHelp from '../components/common/KeyboardShortcutsHelp';
@@ -541,6 +542,7 @@ export default function Layout() {
       </div>
       <OfflineIndicator />
       <SyncProgressIndicator />
+      <FiscalYearCloseReminder />
       <UndoToastManager />
       <ErrorToastContainer />
       {showNonPricedReminder && nonPricedCount > 0 && (

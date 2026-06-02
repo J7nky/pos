@@ -685,7 +685,7 @@ const fr = {
     transaction: {
       amount_required: 'Le montant est obligatoire.',
       amount_non_positive: 'Le montant doit être supérieur à zéro.',
-      currency_invalid: 'La devise doit être USD ou LBP.',
+      currency_invalid: 'Le code de devise n\'est pas reconnu.',
       category_invalid: 'La catégorie de transaction n\'est pas valide.',
       description_required: 'La description est obligatoire.',
       store_id_required: 'Informations du magasin manquantes. Veuillez recharger l\'application.',

@@ -98,7 +98,10 @@
       "Bash(node ./node_modules/eslint/bin/eslint.js src/lib/dbSchema.ts)",
       "Bash(node ./node_modules/eslint/bin/eslint.js src/lib/dbSchema.ts src/services/taxonomyService.ts src/contexts/offlineData/useTaxonomyDataLayer.ts src/hooks/useCategoryLookup.ts src/pages/CategoriesAndUnitsSettings.tsx src/types/taxonomy.ts src/contexts/OfflineDataContext.tsx)",
       "Bash(git show *)",
-      "Bash(pnpm --filter @pos-platform/store-app exec tsc --noEmit)"
+      "Bash(pnpm --filter @pos-platform/store-app exec tsc --noEmit)",
+      "Bash(supabase --version)",
+      "Bash(echo \"exit $?\")",
+      "Bash(pnpm test:run --reporter=basic src/contexts/offlineData/operations/__tests__/withUndoOperation.test.ts)"
     ]
   }
 }

@@ -4,6 +4,8 @@ import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useI18n } from '../i18n';
 import { useErrorHandler } from '../hooks/useErrorHandler';
 import BranchSelectionScreen from '../components/BranchSelectionScreen';
+import { OfflineHistoryPanel } from '../components/OfflineHistoryPanel';
+import { FiscalYearCloseSection } from '../components/FiscalYearCloseSection';
 import packageJson from '../../package.json';
 import { CURRENCY_META, type CurrencyCode } from '@pos-platform/shared';
 import { formatDateTime } from '../utils/numberFormat';
@@ -27,7 +29,9 @@ import {
   Trash2,
   Plus,
   X,
+  Calendar,
 } from 'lucide-react';
+import { getFiscalYearForDate } from '../services/fiscalYearService';
 
 type SettingsTab = 'account' | 'business' | 'inventory' | 'receipt' | 'preferences';
 
@@ -67,13 +71,16 @@ export default function Settings() {
   const lowStockAlertsEnabled = offlineData?.lowStockAlertsEnabled ?? true;
   const lowStockThreshold = offlineData?.lowStockThreshold ?? 10;
   const exchangeRate = offlineData?.exchangeRate ?? 89500;
-  
+  const fiscalYearStartMonth = offlineData?.fiscalYearStartMonth ?? 1;
+  const fiscalYearStartDay = offlineData?.fiscalYearStartDay ?? 1;
+
   // Get update functions from offline context
   const updateDefaultCommissionRate = offlineData?.updateDefaultCommissionRate ?? (() => {});
   const updateCurrency = offlineData?.updateCurrency ?? (() => {});
   const toggleLowStockAlerts = offlineData?.toggleLowStockAlerts ?? (() => {});
   const updateLowStockThreshold = offlineData?.updateLowStockThreshold ?? (() => {});
   const updateExchangeRate = offlineData?.updateExchangeRate ?? (() => {});
+  const updateFiscalYearStart = offlineData?.updateFiscalYearStart ?? (async () => {});
   
   const { t, language, setLanguage } = useI18n();
   const { handleError } = useErrorHandler();
@@ -82,6 +89,8 @@ export default function Settings() {
   const [tempCommissionRate, setTempCommissionRate] = useState(defaultCommissionRate?.toString() || '10');
   const [tempCurrency, setTempCurrency] = useState<CurrencyCode>(currency);
   const [tempExchangeRate, setTempExchangeRate] = useState(exchangeRate?.toString() || '89500');
+  const [tempFiscalYearStartMonth, setTempFiscalYearStartMonth] = useState<number>(fiscalYearStartMonth);
+  const [tempFiscalYearStartDay, setTempFiscalYearStartDay] = useState<number>(fiscalYearStartDay);
   const [showSaveMessage, setShowSaveMessage] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showBranchSelection, setShowBranchSelection] = useState(false);
@@ -110,6 +119,11 @@ export default function Settings() {
     console.log(`[Settings] Syncing tempThreshold from context: ${lowStockThreshold} -> ${newValue}`);
     setTempThreshold(newValue);
   }, [lowStockThreshold]);
+
+  useEffect(() => {
+    setTempFiscalYearStartMonth(fiscalYearStartMonth);
+    setTempFiscalYearStartDay(fiscalYearStartDay);
+  }, [fiscalYearStartMonth, fiscalYearStartDay]);
 
   // Language change is now handled by the I18nProvider through OfflineDataContext
   // No need for custom handling here
@@ -151,6 +165,21 @@ export default function Settings() {
       setTimeout(() => setSaveError(null), 3000);
       // Fallback to local storage - update the temp state to reflect the change
       setTempCurrency(tempCurrency);
+    }
+  };
+
+  const handleFiscalYearStartSave = async () => {
+    try {
+      const month = Math.max(1, Math.min(12, Math.floor(tempFiscalYearStartMonth)));
+      const day = Math.max(1, Math.min(31, Math.floor(tempFiscalYearStartDay)));
+      await updateFiscalYearStart(month, day);
+      setShowSaveMessage(true);
+      setSaveError(null);
+      setTimeout(() => setShowSaveMessage(false), 2000);
+    } catch (error) {
+      handleError(error);
+      setSaveError('Failed to save fiscal year start');
+      setTimeout(() => setSaveError(null), 3000);
     }
   };
 
@@ -425,6 +454,97 @@ export default function Settings() {
                 <CurrencyManagerSection />
               </div>
             </div>
+
+            {/* Fiscal Year Settings (Plan A) — admin-only */}
+            {isAdmin && (
+              <div className="bg-white rounded-lg shadow-sm p-6">
+                <div className="flex items-center mb-4">
+                  <Calendar className="w-6 h-6 text-gray-600 mr-3" />
+                  <h2 className="text-xl font-semibold text-gray-900">
+                    Fiscal Year
+                  </h2>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="p-4 border border-gray-200 rounded-lg">
+                    <h3 className="font-medium text-gray-900 mb-1">
+                      Fiscal year starts on
+                    </h3>
+                    <p className="text-sm text-gray-600 mb-3">
+                      Drives statement date defaults, year-end closing snapshots,
+                      and FY-partitioned history archives. Changing this mid-year
+                      affects historical reporting — change with care.
+                    </p>
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      <label className="text-sm text-gray-700">Month</label>
+                      <select
+                        value={tempFiscalYearStartMonth}
+                        onChange={(e) =>
+                          setTempFiscalYearStartMonth(parseInt(e.target.value, 10))
+                        }
+                        className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                          <option key={m} value={m}>
+                            {new Date(2000, m - 1, 1).toLocaleString(undefined, {
+                              month: 'long',
+                            })}
+                          </option>
+                        ))}
+                      </select>
+
+                      <label className="text-sm text-gray-700">Day</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={31}
+                        value={tempFiscalYearStartDay}
+                        onChange={(e) =>
+                          setTempFiscalYearStartDay(
+                            Math.max(1, Math.min(31, parseInt(e.target.value, 10) || 1))
+                          )
+                        }
+                        className="w-20 border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                      />
+
+                      <button
+                        onClick={handleFiscalYearStartSave}
+                        disabled={
+                          tempFiscalYearStartMonth === fiscalYearStartMonth &&
+                          tempFiscalYearStartDay === fiscalYearStartDay
+                        }
+                        className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center"
+                      >
+                        <Save className="w-4 h-4 mr-2" />
+                        {t('settings.save')}
+                      </button>
+                    </div>
+
+                    <p className="text-xs text-gray-500 mt-3">
+                      Current fiscal year:{' '}
+                      <span className="font-medium text-gray-700">
+                        {(() => {
+                          const fy = getFiscalYearForDate(new Date(), {
+                            fiscal_year_start_month: fiscalYearStartMonth,
+                            fiscal_year_start_day: fiscalYearStartDay,
+                          });
+                          return `${fy.label} (${fy.start_date} → ${fy.end_date})`;
+                        })()}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Year-end close — list of fiscal_periods + Close/Reopen/Export
+                buttons. Server-side actions, online-only. Admin-only. */}
+            {isAdmin && <FiscalYearCloseSection />}
+
+            {/* Plan D / D4 — Offline history archives. Admin-only since archive
+                operations are admin-level even though anyone can read them. */}
+            {isAdmin && <OfflineHistoryPanel />}
           </>
         )}
 
