@@ -6,6 +6,7 @@ import { useI18n } from '../../i18n';
 import { useOfflineData } from '../../contexts/OfflineDataContext';
 import { getTranslatedString, parseMultilingualString } from '../../utils/multilingual';
 import { useCategoryLookup } from '../../hooks/useCategoryLookup';
+import { EntityAuditHistory } from '../audit/EntityAuditHistory';
 
 interface EditProductModalProps {
   open: boolean;
@@ -111,8 +112,8 @@ const EditProductModal: React.FC<EditProductModalProps> = ({ open, onClose, onSu
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white dark:bg-slate-900 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl ring-1 ring-black/5 dark:ring-white/10">
+    <div className="animate-modal-fade fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="animate-modal-pop bg-white dark:bg-slate-900 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl ring-1 ring-black/5 dark:ring-white/10">
         <div className="p-6 border-b border-gray-200 dark:border-slate-800 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-slate-800 dark:to-slate-800">
           <div className="flex items-center justify-between">
             <div>
@@ -189,7 +190,13 @@ const EditProductModal: React.FC<EditProductModalProps> = ({ open, onClose, onSu
           </div>
           
           {errors.form && <p className="text-xs text-red-600 mt-1">{errors.form}</p>}
-          
+
+          {product?.id && (
+            <div className="border-t border-gray-200 dark:border-slate-800 pt-4">
+              <EntityAuditHistory entityType="product" entityId={product.id} />
+            </div>
+          )}
+
           <div className="flex justify-end space-x-3 pt-4">
             <button 
               type="button" 

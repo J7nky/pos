@@ -597,7 +597,7 @@ export default function Home() {
   ];
 
   return (
-    <div className="p-6">
+    <div className="p-6 stagger">
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-900">{t('home.welcome', { name: userProfile?.name || '' })} 🔥</h1>
         <p className="text-gray-600 mt-2">
@@ -725,8 +725,8 @@ export default function Home() {
         isOpen={showRecordExpenseModal}
         onClose={() => setShowRecordExpenseModal(false)}
         onSuccess={() => {
-          // Refresh data to update today's expenses
-          raw.refreshData();
+          // No refresh needed: RecordExpenseModal already reloads context data
+          // after the expense posts, which updates today's expenses shown here.
         }}
       />
 

@@ -65,11 +65,14 @@ describe('entityBalanceCache', () => {
   });
 
   describe('subscribe', () => {
-    it('notifies subscribers on set', () => {
+    it('does NOT notify subscribers on set (notification is invalidate-driven)', () => {
       const fn = vi.fn();
       entityBalanceCache.subscribe(fn);
       entityBalanceCache.set('customer', 'c-1', { USD: 100, LBP: 0 });
-      expect(fn).toHaveBeenCalledTimes(1);
+      // set() is intentionally silent: it only runs inside a hook's own fetch
+      // path, which updates its React state directly. Notifying here made a
+      // fresh load of N entities fire N notifications → O(N²) re-renders.
+      expect(fn).not.toHaveBeenCalled();
     });
 
     it('notifies subscribers on invalidate (only when something was removed)', () => {
@@ -83,11 +86,13 @@ describe('entityBalanceCache', () => {
     });
 
     it('unsubscribe stops further notifications', () => {
+      entityBalanceCache.set('customer', 'c-1', { USD: 1, LBP: 0 });
+      entityBalanceCache.set('customer', 'c-2', { USD: 2, LBP: 0 });
       const fn = vi.fn();
       const unsubscribe = entityBalanceCache.subscribe(fn);
-      entityBalanceCache.set('customer', 'c-1', { USD: 1, LBP: 0 });
+      entityBalanceCache.invalidate('customer', 'c-1'); // notifies
       unsubscribe();
-      entityBalanceCache.set('customer', 'c-1', { USD: 2, LBP: 0 });
+      entityBalanceCache.invalidate('customer', 'c-2'); // would notify, but unsubscribed
       expect(fn).toHaveBeenCalledTimes(1);
     });
 
@@ -103,13 +108,14 @@ describe('entityBalanceCache', () => {
     });
 
     it('a throwing subscriber does not break other subscribers (failure path)', () => {
+      entityBalanceCache.set('customer', 'c-1', { USD: 1, LBP: 0 });
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const good = vi.fn();
       entityBalanceCache.subscribe(() => {
         throw new Error('boom');
       });
       entityBalanceCache.subscribe(good);
-      entityBalanceCache.set('customer', 'c-1', { USD: 1, LBP: 0 });
+      entityBalanceCache.invalidate('customer', 'c-1'); // notifies subscribers
       expect(good).toHaveBeenCalledTimes(1);
       expect(consoleSpy).toHaveBeenCalled();
       consoleSpy.mockRestore();

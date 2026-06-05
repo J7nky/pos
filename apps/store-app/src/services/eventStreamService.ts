@@ -20,6 +20,7 @@ import { supabase } from '../lib/supabase';
 import { getDB } from '../lib/db';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { normalizeBillDateFromRemote } from '../utils/dateUtils';
+import { getClientId, ORIGIN_CLIENT_METADATA_KEY } from '../utils/clientId';
 
 // Get singleton database instance
 const db = getDB();
@@ -75,6 +76,27 @@ interface ChildCaches {
   journalByTxId: Map<string, unknown[]>;
 }
 
+/**
+ * Summary of what a batch of processed (foreign) events actually touched.
+ * Lets the post-sync callback react surgically — invalidate only the affected
+ * entity balances and recompute the cash drawer only when money moved — instead
+ * of wiping every cache and recomputing everything on each sync.
+ */
+export interface AffectedSummary {
+  /** Distinct event entity_type values seen (e.g. 'bill', 'transaction', 'product'). */
+  entityTypes: string[];
+  /** A journal-affecting event occurred (sale/payment/journal/reversal). */
+  balanceAffected: boolean;
+  /** An event that can change the cash drawer (account 1100) occurred. */
+  cashAffected: boolean;
+  /** Transaction ids whose journal entries resolve which entities' balances moved. */
+  transactionIds: string[];
+  /** Bill ids (sale_posted) used to resolve the affected customer for balance invalidation. */
+  billIds: string[];
+  /** Entity ids named directly by the events (entity_updated etc.). */
+  entityIds: string[];
+}
+
 export interface EventProcessingResult {
   processed: number;
   errors: string[];
@@ -83,7 +105,28 @@ export interface EventProcessingResult {
   skipped_missing?: number;
   /** true when catchUp was a no-op because another catch-up was already in progress */
   skipped?: boolean;
+  /** What the processed foreign events touched (drives targeted post-sync refresh). */
+  affected?: AffectedSummary;
 }
+
+/** Event types that post journal entries and thus can change an entity balance. */
+const BALANCE_AFFECTING_EVENT_TYPES = new Set<string>([
+  'sale_posted',
+  'payment_posted',
+  'journal_entry_created',
+  'transaction_reversed',
+]);
+
+/** Event types that can change the cash drawer (account 1100) balance. */
+const CASH_AFFECTING_EVENT_TYPES = new Set<string>([
+  'sale_posted',
+  'payment_posted',
+  'journal_entry_created',
+  'transaction_reversed',
+  'cash_drawer_session_opened',
+  'cash_drawer_session_closed',
+  'cash_drawer_transaction_posted',
+]);
 
 export class EventStreamService {
   private channels: Map<string, RealtimeChannel> = new Map();
@@ -592,23 +635,42 @@ export class EventStreamService {
       }
     }
 
+    // Drop events this client emitted. The originating device already holds the
+    // resulting rows locally (it created and uploaded them), so re-fetching and
+    // re-applying the echo is pure redundancy — and counting it as "processed"
+    // fires a full refreshData() + cache-invalidation cascade after EVERY sync
+    // (the "app re-initializes from first load" slowness). We compute lastVersion
+    // from the full `events` array above, so the sync-state cursor still advances
+    // past these skipped events and they are never re-pulled. Foreign events
+    // (other devices) are processed normally — multi-device safe.
+    const ownClientId = getClientId();
+    const isOwnEvent = (e: BranchEvent | undefined): boolean =>
+      (e?.metadata as Record<string, unknown> | undefined)?.[ORIGIN_CLIENT_METADATA_KEY] === ownClientId;
+    const foreignEvents = deduplicatedEvents.filter((e) => !isOwnEvent(e));
+    const ownEventCount = deduplicatedEvents.length - foreignEvents.length;
+    if (ownEventCount > 0) {
+      evLog(
+        `[EventStream] Skipping ${ownEventCount} self-originated event(s); processing ${foreignEvents.length} foreign event(s) for branch ${branchId}`
+      );
+    }
+
     // OPTIMIZATION: Batch-prefetch all records needed by regular (non-bulk, non-reverse) events.
     // Replaces N individual fetchAffectedRecord() calls with one .in('id',[...]) per table.
-    const prefetchCache = await this.batchPrefetchRecords(deduplicatedEvents, storeId);
+    const prefetchCache = await this.batchPrefetchRecords(foreignEvents, storeId);
 
     // OPTIMIZATION: Batch-prefetch child records for all event types that cascade to child tables.
     // All three queries run in parallel; each replaces N individual per-event queries with one .in().
     const [lineItemsByBillId, inventoryItemsByBatchId, journalByTxId] = await Promise.all([
       this.batchPrefetchChildren(
-        deduplicatedEvents, 'sale_posted', 'bill_line_items', 'bill_id',
+        foreignEvents, 'sale_posted', 'bill_line_items', 'bill_id',
         (e) => e.entity_id
       ),
       this.batchPrefetchChildren(
-        deduplicatedEvents, 'inventory_received', 'inventory_items', 'batch_id',
+        foreignEvents, 'inventory_received', 'inventory_items', 'batch_id',
         (e) => e.entity_id
       ),
       this.batchPrefetchChildren(
-        deduplicatedEvents, 'journal_entry_created', 'journal_entries', 'transaction_id',
+        foreignEvents, 'journal_entry_created', 'journal_entries', 'transaction_id',
         (e) => {
           // Prefer transaction_id from event metadata (set since the N+1 fix).
           // Fall back to looking it up from the prefetchCache for older events that
@@ -624,15 +686,15 @@ export class EventStreamService {
     ]);
     const childCaches: ChildCaches = { lineItemsByBillId, inventoryItemsByBatchId, journalByTxId };
 
-    for (let i = 0; i < deduplicatedEvents.length; i++) {
-      const event = deduplicatedEvents[i];
+    for (let i = 0; i < foreignEvents.length; i++) {
+      const event = foreignEvents[i];
       if (!event) {
         evLog(`[EventStream] Event at index ${i} is null or undefined`);
         continue;
       }
 
       try {
-        evLog(`[EventStream] Starting to process event ${event.id} (version ${event.version}, index ${i}/${deduplicatedEvents.length})`);
+        evLog(`[EventStream] Starting to process event ${event.id} (version ${event.version}, index ${i}/${foreignEvents.length})`);
         evLog(`[EventStream] Event details:`, {
           id: event.id,
           event_type: event.event_type,
@@ -660,7 +722,7 @@ export class EventStreamService {
       }
     }
 
-    evLog(`[EventStream] Processed ${processed}/${deduplicatedEvents.length} deduplicated events (from ${events.length} original events), last version: ${lastVersion}`);
+    evLog(`[EventStream] Processed ${processed}/${foreignEvents.length} foreign events (${ownEventCount} self-originated skipped, ${events.length} original), last version: ${lastVersion}`);
     if (errors.length > 0) {
       console.warn(`[EventStream] ${errors.length} error(s) during processing:`, errors);
     }
@@ -671,7 +733,55 @@ export class EventStreamService {
       );
     }
 
-    return { processed, errors, last_version: lastVersion, skipped_missing: skippedMissing };
+    return {
+      processed,
+      errors,
+      last_version: lastVersion,
+      skipped_missing: skippedMissing,
+      affected: this.summarizeAffected(foreignEvents),
+    };
+  }
+
+  /**
+   * Summarize what a batch of (foreign) events touched, so the post-sync callback
+   * can invalidate only the affected entity balances and recompute the cash drawer
+   * only when money actually moved — instead of wiping every cache on each sync.
+   */
+  private summarizeAffected(events: BranchEvent[]): AffectedSummary {
+    const entityTypes = new Set<string>();
+    const transactionIds = new Set<string>();
+    const billIds = new Set<string>();
+    const entityIds = new Set<string>();
+    let balanceAffected = false;
+    let cashAffected = false;
+
+    for (const e of events) {
+      if (!e) continue;
+      entityTypes.add(e.entity_type);
+      if (BALANCE_AFFECTING_EVENT_TYPES.has(e.event_type)) balanceAffected = true;
+      if (CASH_AFFECTING_EVENT_TYPES.has(e.event_type)) cashAffected = true;
+
+      // Collect ids that let the callback resolve exactly which entity balances moved.
+      if (e.event_type === 'payment_posted' || e.event_type === 'transaction_reversed') {
+        if (e.entity_id) transactionIds.add(e.entity_id); // entity_id is the transaction id
+      } else if (e.event_type === 'journal_entry_created') {
+        const txId = (e.metadata as Record<string, unknown> | undefined)?.transaction_id;
+        if (typeof txId === 'string' && txId) transactionIds.add(txId);
+      } else if (e.event_type === 'sale_posted') {
+        if (e.entity_id) billIds.add(e.entity_id); // entity_id is the bill id
+      } else if (e.entity_type === 'entity' || e.entity_type === 'customer' || e.entity_type === 'supplier') {
+        if (e.entity_id) entityIds.add(e.entity_id);
+      }
+    }
+
+    return {
+      entityTypes: [...entityTypes],
+      balanceAffected,
+      cashAffected,
+      transactionIds: [...transactionIds],
+      billIds: [...billIds],
+      entityIds: [...entityIds],
+    };
   }
 
   /**
@@ -1255,7 +1365,6 @@ export class EventStreamService {
       role_permissions: 'role_permissions',
       user_permissions: 'user_permissions',
       balance_snapshot: 'balance_snapshots',
-      bill_audit_log: 'bill_audit_logs',
     };
 
     return mapping[entityType] || null;

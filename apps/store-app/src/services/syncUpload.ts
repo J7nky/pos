@@ -8,6 +8,23 @@ import { SYNC_CONFIG, SYNC_TABLES, validateDependencies } from './syncConfig';
 
 const db = getDB();
 
+/**
+ * Append-only tables: rows are immutable and the server grants INSERT-only
+ * (no UPDATE RLS policy by design — see migrations/..._audit_logs.sql). They
+ * must upload with `ON CONFLICT DO NOTHING` (ignoreDuplicates) rather than the
+ * default `ON CONFLICT DO UPDATE`: a conflicting upsert would attempt an UPDATE
+ * the RLS policy rejects (403), and overwriting an audit row would violate
+ * immutability. A re-synced row already on the server is simply left untouched.
+ */
+const APPEND_ONLY_TABLES = new Set<string>(['audit_logs']);
+
+/** Upsert options for a table, honouring append-only (DO NOTHING) semantics. */
+export function upsertOptionsFor(tableName: string): { onConflict: string; ignoreDuplicates?: boolean } {
+  return APPEND_ONLY_TABLES.has(tableName)
+    ? { onConflict: 'id', ignoreDuplicates: true }
+    : { onConflict: 'id' };
+}
+
 export type UploadCurrencyRejectReason = 'invalid-currency' | 'unknown-currency';
 
 export interface UploadCurrencyError {
@@ -267,7 +284,7 @@ async function handleFailedBatch(tableName: string, cleanedBatch: any[], origina
     try {
       const { error: individualError } = await (supabase as any)
         .from(tableName)
-        .upsert([record], { onConflict: 'id' });
+        .upsert([record], upsertOptionsFor(tableName));
 
       if (individualError) {
         // Check if error is unrecoverable
@@ -279,7 +296,7 @@ async function handleFailedBatch(tableName: string, cleanedBatch: any[], origina
             // Try once more with the fixed record
             const { error: retryError } = await (supabase as any)
               .from(tableName)
-              .upsert([fixedRecord], { onConflict: 'id' });
+              .upsert([fixedRecord], upsertOptionsFor(tableName));
 
             if (!retryError) {
               // Success! Update local record and mark as synced
@@ -557,11 +574,10 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
         }
       }
 
-      // CRITICAL: For bill_line_items and bill_audit_logs, check if parent bills exist in Supabase.
-      // Uses parentExistenceCache so the query fires at most once per sync pass even though
-      // both tables share the same bill IDs.
+      // CRITICAL: For bill_line_items, check if parent bills exist in Supabase.
+      // Uses parentExistenceCache so the query fires at most once per sync pass.
       // NOTE: Only validate activeRecords - deleted records don't need parent bill validation.
-      if ((tableName === 'bill_line_items' || tableName === 'bill_audit_logs') && activeRecords.length > 0) {
+      if (tableName === 'bill_line_items' && activeRecords.length > 0) {
         const billIds = [...new Set(activeRecords.map((record: any) => record.bill_id))] as string[];
 
         try {
@@ -782,7 +798,7 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
 
         const { error } = await supabase
           .from(tableName as any)
-          .upsert(cleanedBatch, { onConflict: 'id' });
+          .upsert(cleanedBatch, upsertOptionsFor(tableName));
 
         if (error) {
           console.error(`❌ Upload failed for ${tableName}:`, error);

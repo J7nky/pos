@@ -5,6 +5,7 @@
 
 import { useState, useCallback } from 'react';
 import { getDB } from '../../lib/db';
+import { auditService } from '../../services/auditService';
 import type { CashDrawerDataLayerAdapter, CashDrawerDataLayerResult } from './types';
 
 export function useCashDrawerDataLayer(adapter: CashDrawerDataLayerAdapter): CashDrawerDataLayerResult {
@@ -101,6 +102,13 @@ export function useCashDrawerDataLayer(adapter: CashDrawerDataLayerAdapter): Cas
           ],
         });
 
+        await auditService.record({
+          storeId, branchId: currentBranchId, changedBy: openedBy,
+          entityType: 'cash_drawer_session', entityId: result.sessionId!, action: 'open',
+          changes: [{ field: 'opening_amount', old: null, new: amount }],
+          changeReason: `Cash drawer opened with ${amount}`,
+        });
+
         await updateUnsyncedCount();
         resetAutoSyncTimer();
         debouncedSync();
@@ -160,6 +168,13 @@ export function useCashDrawerDataLayer(adapter: CashDrawerDataLayerAdapter): Cas
             },
             { op: 'update', table: 'cash_drawer_accounts', id: account.id, changes: { _synced: false } },
           ],
+        });
+
+        await auditService.record({
+          storeId, branchId: currentBranchId, changedBy: closedBy,
+          entityType: 'cash_drawer_session', entityId: cashDrawer.id, action: 'close',
+          changes: [{ field: 'actual_amount', old: null, new: actualAmount }],
+          changeReason: notes ? `Cash drawer closed (${actualAmount}) — ${notes}` : `Cash drawer closed (${actualAmount})`,
         });
 
         await updateUnsyncedCount();

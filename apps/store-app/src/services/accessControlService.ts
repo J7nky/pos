@@ -14,6 +14,7 @@
  * Follows offline-first pattern: IndexedDB → Cache → Fast checks
  */
 
+
 import { getDB } from '../lib/db';
 import { permissionCache } from './permissionCache';
 import { 

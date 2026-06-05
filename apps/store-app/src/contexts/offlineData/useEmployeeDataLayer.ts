@@ -7,10 +7,24 @@ import { useState, useCallback } from 'react';
 import { createId, getDB } from '../../lib/db';
 import { crudHelperService } from '../../services/crudHelperService';
 import { emitUserEvent, buildEventOptions } from '../../services/eventEmissionHelper';
+import { auditService } from '../../services/auditService';
+import { sameRowList } from '../../utils/rowListEquality';
 import type { EmployeeDataLayerAdapter, EmployeeDataLayerResult, Tables } from './types';
 
 function normalizeEmployeeBalances(e: any): Tables['users']['Row'] {
   return { ...e, lbp_balance: e.lbp_balance || 0, usd_balance: e.usd_balance || 0 } as Tables['users']['Row'];
+}
+
+/** Credential fields whose values must never be written into the audit trail. */
+const SENSITIVE_USER_FIELDS = new Set(['password', 'password_hash', 'pin', 'pin_hash', 'auth_id']);
+
+/** Strip credential keys from an update patch before diffing for the audit log. */
+function redactSensitive(updates: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(updates)) {
+    if (!SENSITIVE_USER_FIELDS.has(k)) out[k] = v;
+  }
+  return out;
 }
 
 export function useEmployeeDataLayer(adapter: EmployeeDataLayerAdapter): EmployeeDataLayerResult {
@@ -18,7 +32,8 @@ export function useEmployeeDataLayer(adapter: EmployeeDataLayerAdapter): Employe
   const [employees, setEmployees] = useState<Tables['users']['Row'][]>([]);
 
   const hydrate = useCallback((employeesData: any[]) => {
-    setEmployees((employeesData || []).map(normalizeEmployeeBalances));
+    const normalized = (employeesData || []).map(normalizeEmployeeBalances);
+    setEmployees(prev => (sameRowList(prev, normalized) ? prev : normalized));
   }, []);
 
   const addEmployee = useCallback(
@@ -37,6 +52,12 @@ export function useEmployeeDataLayer(adapter: EmployeeDataLayerAdapter): Employe
       });
 
       resetAutoSyncTimer();
+
+      await auditService.record({
+        storeId, branchId: currentBranchId, changedBy: userProfileId,
+        entityType: 'user', entityId: employeeId, action: 'create',
+        changeReason: 'Employee created',
+      });
 
       await emitUserEvent(
         employeeId,
@@ -67,6 +88,18 @@ export function useEmployeeDataLayer(adapter: EmployeeDataLayerAdapter): Employe
       });
 
       resetAutoSyncTimer();
+
+      const userChanges = auditService.diffUpdates(
+        originalEmployee,
+        redactSensitive(updates as Record<string, unknown>)
+      );
+      if (userChanges.length > 0) {
+        await auditService.record({
+          storeId, branchId: currentBranchId, changedBy: userProfileId,
+          entityType: 'user', entityId: id, action: 'update',
+          changes: userChanges,
+        });
+      }
 
       await emitUserEvent(
         id,
@@ -99,8 +132,14 @@ export function useEmployeeDataLayer(adapter: EmployeeDataLayerAdapter): Employe
       });
 
       resetAutoSyncTimer();
+
+      await auditService.record({
+        storeId, branchId: currentBranchId, changedBy: userProfileId,
+        entityType: 'user', entityId: id, action: 'delete',
+        changeReason: 'Employee deleted',
+      });
     },
-    [storeId, pushUndo, resetAutoSyncTimer]
+    [storeId, currentBranchId, userProfileId, pushUndo, resetAutoSyncTimer]
   );
 
   return {

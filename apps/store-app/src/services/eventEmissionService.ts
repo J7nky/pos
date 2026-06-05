@@ -11,6 +11,7 @@
  */
 
 import { supabase } from '../lib/supabase';
+import { getClientId, ORIGIN_CLIENT_METADATA_KEY } from '../utils/clientId';
 
 export interface EventEmissionParams {
   store_id: string;
@@ -36,6 +37,13 @@ export class EventEmissionService {
       return 'offline-skipped';
     }
 
+    // Stamp the originating client so the event stream can skip our own
+    // echoed events instead of triggering a full refreshData() on each sync.
+    const metadata = {
+      ...(params.metadata || {}),
+      [ORIGIN_CLIENT_METADATA_KEY]: getClientId(),
+    };
+
     const { data, error } = await supabase.rpc('emit_branch_event', {
       p_store_id: params.store_id,
       p_branch_id: params.branch_id,
@@ -44,7 +52,7 @@ export class EventEmissionService {
       p_entity_id: params.entity_id,
       p_operation: params.operation,
       p_user_id: params.user_id || null,
-      p_metadata: params.metadata || null,
+      p_metadata: metadata,
     });
 
     if (error) {

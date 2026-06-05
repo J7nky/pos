@@ -5,16 +5,16 @@
  */
 
 import { getDB, createId } from '../../../lib/db';
-import type { Transaction } from '../../../types';
 import { transactionService } from '../../../services/transactionService';
+import type { TransactionContext } from '../../../services/transactionService';
 import { journalService } from '../../../services/journalService';
 import { currencyService } from '../../../services/currencyService';
 import { reminderMonitoringService } from '../../../services/reminderMonitoringService';
 import { BranchAccessValidationService } from '../../../services/branchAccessValidationService';
-import { getAccountMapping, getJournalDescription } from '../../../utils/accountMapping';
+import { auditService } from '../../../services/auditService';
 import { getLocalDateString } from '../../../utils/dateUtils';
 import { createMultilingualFromString, getTranslatedString } from '../../../utils/multilingual';
-import { generatePaymentReference, generateAdvanceReference, generateReversalReference } from '@pos-platform/shared';
+import { generatePaymentReference, generateAdvanceReference } from '@pos-platform/shared';
 import type { CurrencyCode } from '@pos-platform/shared';
 import { TRANSACTION_CATEGORIES } from '../../../constants/transactionCategories';
 import type { CashDrawerAtomicResult } from './cashDrawerTransactionOperations';
@@ -93,6 +93,8 @@ export interface ProcessPaymentDeps {
   updateUnsyncedCount: () => Promise<void>;
   debouncedSync: () => void;
   i18n: { en: any; ar: any };
+  /** Store's preferred UI language — used to localize audit summaries at write time. */
+  language?: string;
 }
 
 export interface ProcessEmployeePaymentDeps {
@@ -186,6 +188,11 @@ export async function processPayment(
 
     const isCustomer = entityType === 'customer';
 
+    // Resolve the payment reference once so the same number is used on the
+    // transaction and on the audit row (powers the audit viewer's Reference
+    // column / cross-navigation).
+    const paymentRef = reference || generatePaymentReference();
+
     const transactionDescription: MultilingualString = {
       en: (paymentDirection === 'receive'
         ? i18n.en.payments?.paymentReceivedFrom
@@ -203,6 +210,7 @@ export async function processPayment(
       source: 'web' as const
     };
 
+    let paymentResult: any = null;
     await withUndoOperation('operation', pushUndo, async () => {
       let result: any;
 
@@ -210,13 +218,13 @@ export async function processPayment(
         if (paymentDirection === 'receive') {
           result = await transactionService.createCustomerPayment(
             entityId, numAmount, currency, transactionDescription, context,
-            { reference: reference || generatePaymentReference(), updateCashDrawer: true }
+            { reference: paymentRef, updateCashDrawer: true }
           );
         } else {
           result = await transactionService.createTransaction({
             category: TRANSACTION_CATEGORIES.CUSTOMER_REFUND,
             amount: numAmount, currency, description: transactionDescription,
-            entityId, reference: reference || generatePaymentReference(),
+            entityId, reference: paymentRef,
             context, updateBalances: true, updateCashDrawer: true, createAuditLog: true, _synced: false
           });
         }
@@ -224,13 +232,13 @@ export async function processPayment(
         if (paymentDirection === 'pay') {
           result = await transactionService.createSupplierPayment(
             entityId, numAmount, currency, transactionDescription, context,
-            { reference: reference || generatePaymentReference(), updateCashDrawer: true }
+            { reference: paymentRef, updateCashDrawer: true }
           );
         } else {
           result = await transactionService.createTransaction({
             category: TRANSACTION_CATEGORIES.SUPPLIER_REFUND,
             amount: numAmount, currency, description: transactionDescription,
-            entityId, reference: reference || generatePaymentReference(),
+            entityId, reference: paymentRef,
             context, updateBalances: true, updateCashDrawer: true, createAuditLog: true, _synced: false
           });
         }
@@ -239,6 +247,33 @@ export async function processPayment(
       if (!result.success) {
         throw new Error(result.error || 'Payment processing failed');
       }
+      paymentResult = result;
+    });
+
+    // Localized business-action summary, e.g. "customer payment sent: 10 USD
+    // (ابو احمد الفلسطيني)". Built in the store's language.
+    const direction = paymentDirection === 'receive' ? 'received' : 'sent';
+    const paymentDict: any = deps.language === 'ar' ? i18n?.ar : i18n?.en;
+    const entityTypeLabel = paymentDict?.auditLog?.paymentSummary?.entityTypes?.[entityType] ?? entityType;
+    const directionLabel = paymentDict?.auditLog?.paymentSummary?.directions?.[direction] ?? direction;
+    const paymentTemplate = paymentDict?.auditLog?.paymentSummary?.entityPayment as string | undefined;
+    // Bidi-isolate the name so an LTR name (e.g. "Ahmad Jank") embedded in an
+    // RTL Arabic summary doesn't reorder the surrounding parentheses/segments.
+    const isoName = `⁨${entity.name}⁩`;
+    const paymentReason = paymentTemplate
+      ? paymentTemplate
+          .replace('{{entityType}}', entityTypeLabel)
+          .replace('{{direction}}', directionLabel)
+          .replace('{{amount}}', String(numAmount))
+          .replace('{{currency}}', currency)
+          .replace('{{name}}', isoName)
+      : `${entityTypeLabel} payment ${direction}: **${numAmount} ${currency}** (${isoName})`;
+
+    await auditService.record({
+      storeId, branchId: currentBranchId, changedBy: createdBy,
+      entityType: 'payment', entityId: paymentResult?.transactionId ?? entityId, action: 'create',
+      changeReason: paymentReason,
+      reference: paymentRef,
     });
 
     try { await refreshData(); } catch (e) { console.warn('Data refresh failed (non-critical):', e); }
@@ -300,6 +335,7 @@ export async function processEmployeePayment(
 
     const transactionId = createId();
     const postedDate = getLocalDateString(new Date().toISOString());
+    const employeeRef = reference || generatePaymentReference();
 
     await withUndoOperation('operation', pushUndo, async () => {
       await getDB().transaction('rw', [
@@ -342,7 +378,7 @@ export async function processEmployeePayment(
           amount: numAmount,
           currency,
           description: transactionDescription,
-          reference: reference || generatePaymentReference(),
+          reference: employeeRef,
           entity_id: employeeId,
           customer_id: null,
           supplier_id: null,
@@ -383,6 +419,13 @@ export async function processEmployeePayment(
       });
     });
 
+    await auditService.record({
+      storeId, branchId: currentBranchId, changedBy: createdBy,
+      entityType: 'payment', entityId: transactionId, action: 'create',
+      changeReason: `Employee payment: ${numAmount} ${currency} to ${employee.name}`,
+      reference: employeeRef,
+    });
+
     try { await refreshData(); } catch (e) { console.warn('Data refresh failed (non-critical):', e); }
     try { await updateUnsyncedCount(); } catch (e) { console.warn('Unsynced count refresh failed (non-critical):', e); }
     try { debouncedSync(); } catch (e) { console.warn('Debounced sync failed (non-critical):', e); }
@@ -394,7 +437,40 @@ export async function processEmployeePayment(
   }
 }
 
-// ─── processSupplierAdvance ──────────────────────────────────────────────────
+// ─── Supplier advances ───────────────────────────────────────────────────────
+//
+// Advances post through the standard `transactionService` pipeline — exactly
+// like every other payment — instead of hand-rolling a journal entry plus a
+// separate cash-drawer expense. The old hand-rolled path double-credited cash
+// (its own `C 1100` plus the cash-drawer expense's `C 1100`) and booked a
+// phantom `5900` expense. Routing through `transactionService`:
+//   • posts ONE balanced journal (give: `D 2100 / C 1100`, deduct: the reverse)
+//     so the advance nets into the supplier's Accounts-Payable balance and shows
+//     on their account statement;
+//   • moves the cash drawer once;
+//   • gives correct reversal for delete/edit via `deleteTransaction`.
+//
+// The per-supplier `advance_balances` sub-ledger (which powers the Advances tab
+// stat cards) is still maintained alongside the journal.
+
+const ADVANCE_CATEGORIES: string[] = [
+  TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_GIVEN,
+  TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_DEDUCTED,
+];
+
+function isAdvanceTransaction(t: { category?: string } | null | undefined): boolean {
+  return !!t && ADVANCE_CATEGORIES.includes(t.category as string);
+}
+
+function advanceContext(deps: SupplierAdvanceDeps): TransactionContext {
+  return {
+    userId: deps.userProfileId || '',
+    storeId: deps.storeId || '',
+    branchId: deps.currentBranchId || '',
+    module: 'payments',
+    source: 'offline',
+  };
+}
 
 export async function processSupplierAdvance(
   deps: SupplierAdvanceDeps,
@@ -408,10 +484,7 @@ export async function processSupplierAdvance(
     reviewDate?: string;
   }
 ): Promise<void> {
-  const {
-    storeId, currentBranchId, userProfileId, userStoreId, suppliers, exchangeRate,
-    createCashDrawerExpenseAtomic, createCashDrawerUndoData, pushUndo, refreshData
-  } = deps;
+  const { storeId, currentBranchId, userProfileId, userStoreId, suppliers, updateSupplier, pushUndo, refreshData } = deps;
   const { supplierId, amount, currency, type, description, reviewDate } = params;
 
   if (isNaN(amount) || amount <= 0) throw new Error('Please enter a valid positive amount');
@@ -419,102 +492,48 @@ export async function processSupplierAdvance(
   const supplier = suppliers.find(s => s.id === supplierId);
   if (!supplier) throw new Error('Supplier not found');
 
+  // Advance sub-ledger (Advances tab): give increases, deduct decreases.
   const previousAdvanceMap = getSupplierAdvanceBalanceMap(supplier);
   const currentInCurrency = previousAdvanceMap[currency] ?? 0;
-
-  const newAdvanceBalance = type === 'give'
-    ? currentInCurrency + amount
-    : currentInCurrency - amount;
+  const newAdvanceBalance = type === 'give' ? currentInCurrency + amount : currentInCurrency - amount;
   if (newAdvanceBalance < 0) throw new Error('Cannot deduct more than the current advance balance');
-
   const newAdvanceMap: Partial<Record<CurrencyCode, number>> = { ...previousAdvanceMap, [currency]: newAdvanceBalance };
-  const updateData: any = { supplier_data: buildSupplierAdvanceUpdate(supplier, newAdvanceMap) };
 
-  let previousCashDrawerBalance: number | undefined;
-  if (type === 'give') {
-    previousCashDrawerBalance = await deps.getCurrentCashDrawerBalance(userStoreId || '');
-  }
+  const category = type === 'give'
+    ? TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_GIVEN
+    : TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_DEDUCTED;
+  const advanceRef = generateAdvanceReference();
+  const transactionDescription: MultilingualString = createMultilingualFromString(
+    description || `Supplier advance ${type === 'give' ? 'payment' : 'deduction'} - ${supplier.name}`
+  );
 
-  const transactionId = createId();
-  const now = new Date().toISOString();
-  let cashDrawerResult: CashDrawerAtomicResult | null = null;
-  let cashDrawerAccountId: string | undefined;
-
-  await getDB().transaction('rw', [
-    getDB().entities,
-    getDB().transactions,
-    getDB().journal_entries,
-    getDB().chart_of_accounts,
-    getDB().cash_drawer_sessions,
-    getDB().cash_drawer_accounts
-  ], async () => {
-    await getDB().entities.update(supplierId, updateData);
-
-    const transactionDescription: MultilingualString = createMultilingualFromString(
-      `${description || `Supplier advance ${type === 'give' ? 'payment' : 'deduction'} - ${supplier.name}`}`
-    );
-
-    const advanceTransaction: Transaction = {
-      id: transactionId,
-      store_id: storeId!,
-      branch_id: currentBranchId || '',
-      type: type === 'give' ? 'expense' : 'income',
-      category: type === 'give' ? TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_GIVEN : TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_DEDUCTED,
+  let transactionId: string | undefined;
+  await withUndoOperation('operation', pushUndo, async () => {
+    const result = await transactionService.createTransaction({
+      category,
       amount,
       currency,
       description: transactionDescription,
-      reference: generateAdvanceReference(),
-      entity_id: supplierId,
-      created_at: now,
-      created_by: userProfileId || '',
-      _synced: false,
-      _deleted: false,
-      is_reversal: false,
-      reversal_of_transaction_id: null,
-      metadata: {
-        correlationId: createId(), source: 'offline', module: 'supplier_management',
-        advanceType: type, reviewDate: params.reviewDate, previousAdvanceMap, newAdvanceBalance
-      }
-    };
-
-    await getDB().transactions.add(advanceTransaction);
-
-    const supplierEntity = await getDB().entities.get(supplierId);
-    if (!supplierEntity) throw new Error('Supplier entity not found');
-
-    const category = type === 'give' ? TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_GIVEN : TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_DEDUCTED;
-    const accountMapping = getAccountMapping(category);
-    const journalDesc = getJournalDescription(category, supplierEntity.name, transactionDescription);
-    const postedDate = getLocalDateString(now);
-
-    await journalService.createJournalEntry({
-      transactionId,
-      debitAccount: accountMapping.debitAccount,
-      creditAccount: accountMapping.creditAccount,
-      amount, currency,
       entityId: supplierId,
-      description: journalDesc,
-      postedDate,
-      createdBy: userProfileId || '',
-      branchId: currentBranchId || ''
+      reference: advanceRef,
+      context: advanceContext(deps),
+      metadata: { source: 'offline', module: 'supplier_management', advanceType: type, reviewDate },
+      updateBalances: true,
+      updateCashDrawer: true,
+      createAuditLog: false,
+      _synced: false,
     });
-
-    if (type === 'give') {
-      const cashAmount = toCashDrawerAmount(amount, currency, 'LBP');
-      const formattedOriginal = currency === 'LBP'
-        ? ''
-        : ` (${currencyService.format(amount, currency)})`;
-      cashDrawerResult = await createCashDrawerExpenseAtomic(
-        cashAmount, 'LBP',
-        `Advance payment to ${supplier.name}${formattedOriginal}`,
-        generateAdvanceReference(),
-        supplierId
-      );
-      cashDrawerAccountId = cashDrawerResult.accountId || undefined;
+    if (!result.success || !result.transactionId) {
+      throw new Error(result.error || 'Failed to process supplier advance');
     }
+    transactionId = result.transactionId;
+
+    // Maintain the advance sub-ledger within the same undo session.
+    await updateSupplier(supplierId, { supplier_data: buildSupplierAdvanceUpdate(supplier, newAdvanceMap) });
   });
 
-  if (params.reviewDate && type === 'give') {
+  // Optional review reminder (give only).
+  if (reviewDate && type === 'give') {
     try {
       await reminderMonitoringService.createReminder({
         store_id: userStoreId || '',
@@ -523,7 +542,7 @@ export async function processSupplierAdvance(
         entity_type: 'supplier',
         entity_id: supplierId,
         entity_name: supplier.name,
-        due_date: params.reviewDate,
+        due_date: reviewDate,
         remind_before_days: [7, 3, 1, 0],
         status: 'pending',
         title: `Review Advance for ${supplier.name}`,
@@ -538,25 +557,13 @@ export async function processSupplierAdvance(
     }
   }
 
-  const baseUndoData = {
-    affected: [{ table: 'entities', id: supplierId }, { table: 'transactions', id: transactionId }],
-    steps: [
-      { op: 'delete', table: 'transactions', id: transactionId },
-      {
-        op: 'update', table: 'entities', id: supplierId,
-        changes: {
-          supplier_data: buildSupplierAdvanceUpdate(supplier, previousAdvanceMap),
-          _synced: false
-        }
-      }
-    ]
-  };
+  await auditService.record({
+    storeId, branchId: currentBranchId, changedBy: userProfileId,
+    entityType: 'payment', entityId: transactionId ?? supplierId, action: 'create',
+    changeReason: `Supplier advance ${type === 'give' ? 'given' : 'deducted'}: ${amount} ${currency} (${supplier.name})`,
+    reference: advanceRef,
+  });
 
-  const undoData = type === 'give' && cashDrawerResult
-    ? createCashDrawerUndoData((cashDrawerResult as CashDrawerAtomicResult).transactionId, previousCashDrawerBalance, cashDrawerAccountId, baseUndoData)
-    : baseUndoData;
-
-  pushUndo(undoData);
   await refreshData();
 }
 
@@ -566,107 +573,49 @@ export async function deleteSupplierAdvance(
   deps: SupplierAdvanceDeps,
   transactionId: string
 ): Promise<void> {
-  const {
-    storeId, currentBranchId, userStoreId, suppliers, exchangeRate,
-    createCashDrawerPaymentAtomic, createCashDrawerUndoData, pushUndo, refreshData
-  } = deps;
+  const { storeId, currentBranchId, userProfileId, suppliers, updateSupplier, pushUndo, refreshData } = deps;
 
   const transaction = await getDB().transactions.get(transactionId);
   if (!transaction) throw new Error('Transaction not found');
-  if (transaction.category !== 'Supplier Advance') throw new Error('Can only delete Supplier Advance transactions from this module');
+  if (!isAdvanceTransaction(transaction)) throw new Error('Can only delete Supplier Advance transactions from this module');
   if (!transaction.entity_id) throw new Error('Transaction missing entity ID');
 
   const supplier = suppliers.find(s => s.id === transaction.entity_id);
   if (!supplier) throw new Error('Supplier not found');
 
-  const wasGiveAdvance = transaction.type === 'expense';
+  const wasGiveAdvance = transaction.category === TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_GIVEN;
   const txCurrency = transaction.currency as CurrencyCode;
   const previousAdvanceMap = getSupplierAdvanceBalanceMap(supplier);
   const currentInCurrency = previousAdvanceMap[txCurrency] ?? 0;
-
   const newBalanceForCurrency = wasGiveAdvance
     ? currentInCurrency - transaction.amount
     : currentInCurrency + transaction.amount;
   if (newBalanceForCurrency < 0) throw new Error('Cannot delete: would result in negative advance balance');
+  const newAdvanceMap: Partial<Record<CurrencyCode, number>> = { ...previousAdvanceMap, [txCurrency]: newBalanceForCurrency };
 
-  const newAdvanceMap: Partial<Record<CurrencyCode, number>> = {
-    ...previousAdvanceMap,
-    [txCurrency]: newBalanceForCurrency
-  };
-  const updateData: any = { supplier_data: buildSupplierAdvanceUpdate(supplier, newAdvanceMap) };
+  await withUndoOperation('operation', pushUndo, async () => {
+    // Reverses the journal (and cash-drawer impact) and marks the transaction deleted.
+    const result = await transactionService.deleteTransaction(transactionId, advanceContext(deps));
+    if (!result.success) throw new Error(result.error || 'Failed to delete supplier advance');
 
-  let previousCashDrawerBalance: number | undefined;
-  if (wasGiveAdvance) {
-    previousCashDrawerBalance = await deps.getCurrentCashDrawerBalance(userStoreId || '');
-  }
-
-  let cashDrawerResult: CashDrawerAtomicResult | null = null;
-  let cashDrawerAccountId: string | undefined;
-
-  await getDB().transaction('rw', [
-    getDB().entities, getDB().transactions, getDB().journal_entries,
-    getDB().chart_of_accounts, getDB().cash_drawer_sessions, getDB().cash_drawer_accounts
-  ], async () => {
-    await getDB().entities.update(transaction.entity_id!, updateData);
-    await getDB().transactions.update(transactionId, { _deleted: true, _synced: false });
-
-    if (wasGiveAdvance) {
-      const cashAmount = toCashDrawerAmount(transaction.amount, txCurrency, 'LBP');
-      cashDrawerResult = await createCashDrawerPaymentAtomic(
-        cashAmount, 'LBP',
-        `Reversal: Deleted advance payment to ${supplier.name}`,
-        generateReversalReference(),
-        transaction.entity_id!
-      );
-      cashDrawerAccountId = cashDrawerResult.accountId || undefined;
-    }
+    await updateSupplier(transaction.entity_id!, { supplier_data: buildSupplierAdvanceUpdate(supplier, newAdvanceMap) });
   });
 
-  const baseUndoData = {
-    affected: [
-      { table: 'entities', id: transaction.entity_id! },
-      { table: 'transactions', id: transactionId }
-    ],
-    steps: [
-      { op: 'update', table: 'transactions', id: transactionId, changes: { _deleted: false, _synced: false } },
-      {
-        op: 'update', table: 'entities', id: transaction.entity_id!,
-        changes: {
-          supplier_data: buildSupplierAdvanceUpdate(supplier, previousAdvanceMap),
-          _synced: false
-        }
-      }
-    ]
-  };
+  await auditService.record({
+    storeId, branchId: currentBranchId, changedBy: userProfileId,
+    entityType: 'payment', entityId: transactionId, action: 'delete',
+    changeReason: `Supplier advance deleted: ${transaction.amount} ${txCurrency} (${supplier.name})`,
+    reference: transaction.reference ?? null,
+  });
 
-  let undoData: any;
-  if (wasGiveAdvance && cashDrawerResult) {
-    const cdResult = cashDrawerResult as CashDrawerAtomicResult;
-    undoData = {
-      type: 'supplier_advance_delete',
-      affected: [
-        ...baseUndoData.affected,
-        ...(cdResult.transactionId ? [{ table: 'transactions', id: cdResult.transactionId }] : []),
-        ...(cashDrawerAccountId ? [{ table: 'cash_drawer_accounts', id: cashDrawerAccountId }] : [])
-      ],
-      steps: [
-        ...baseUndoData.steps,
-        ...(cdResult.transactionId ? [{ op: 'delete', table: 'transactions', id: cdResult.transactionId }] : []),
-        ...(previousCashDrawerBalance !== undefined && cashDrawerAccountId ? [{
-          op: 'update', table: 'cash_drawer_accounts', id: cashDrawerAccountId,
-          changes: { current_balance: previousCashDrawerBalance, _synced: false }
-        }] : [])
-      ]
-    };
-  } else {
-    undoData = baseUndoData;
-  }
-
-  pushUndo(undoData);
   await refreshData();
 }
 
 // ─── updateSupplierAdvance ───────────────────────────────────────────────────
+//
+// Reverse-and-repost: reverse the original advance (delete) and post a fresh one
+// with the new values. This keeps the journal, cash drawer, and supplier balance
+// all consistent without trying to mutate a posted journal entry in place.
 
 export async function updateSupplierAdvance(
   deps: SupplierAdvanceDeps,
@@ -681,185 +630,93 @@ export async function updateSupplierAdvance(
     reviewDate?: string;
   }
 ): Promise<void> {
-  const {
-    storeId, currentBranchId, userProfileId, userStoreId, suppliers, exchangeRate,
-    processCashDrawerTransaction, getCurrentCashDrawerBalance, updateSupplier,
-    pushUndo, refreshData
-  } = deps;
+  const { storeId, currentBranchId, userProfileId, suppliers, updateSupplier, pushUndo, refreshData } = deps;
 
   const oldTransaction = await getDB().transactions.get(transactionId);
   if (!oldTransaction) throw new Error('Transaction not found');
-  if (oldTransaction.category !== 'Supplier Advance') throw new Error('Can only update Supplier Advance transactions');
-  if (!(oldTransaction as any).supplier_id) throw new Error('Transaction missing supplier ID');
+  if (!isAdvanceTransaction(oldTransaction)) throw new Error('Can only update Supplier Advance transactions');
+  if (!oldTransaction.entity_id) throw new Error('Transaction missing entity ID');
   if (isNaN(updates.amount) || updates.amount <= 0) throw new Error('Please enter a valid positive amount');
 
-  const oldSupplier = suppliers.find(s => s.id === (oldTransaction as any).supplier_id);
+  const oldSupplier = suppliers.find(s => s.id === oldTransaction.entity_id);
   if (!oldSupplier) throw new Error('Old supplier not found');
   const newSupplier = suppliers.find(s => s.id === updates.supplierId);
   if (!newSupplier) throw new Error('New supplier not found');
 
-  const oldWasGiveAdvance = oldTransaction.type === 'expense';
-  const newIsGiveAdvance = updates.type === 'give';
+  const oldWasGiveAdvance = oldTransaction.category === TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_GIVEN;
   const oldTxCurrency = oldTransaction.currency as CurrencyCode;
-  const newTxCurrency = updates.currency;
+  const sameSupplier = updates.supplierId === oldTransaction.entity_id;
 
-  const oldPreviousAdvanceMap = getSupplierAdvanceBalanceMap(oldSupplier);
-  const newSupplierAdvanceMap = getSupplierAdvanceBalanceMap(newSupplier);
-  const newPreviousAdvanceMap = updates.supplierId !== oldTransaction.entity_id
-    ? newSupplierAdvanceMap
-    : oldPreviousAdvanceMap;
+  // Reverse the OLD advance in the sub-ledger.
+  const oldAdvanceMap = getSupplierAdvanceBalanceMap(oldSupplier);
+  const oldCurrent = oldAdvanceMap[oldTxCurrency] ?? 0;
+  const reversedOldBalance = oldWasGiveAdvance ? oldCurrent - oldTransaction.amount : oldCurrent + oldTransaction.amount;
+  if (reversedOldBalance < 0) throw new Error('Cannot update: reversing old advance would result in negative balance');
+  const reversedOldMap: Partial<Record<CurrencyCode, number>> = { ...oldAdvanceMap, [oldTxCurrency]: reversedOldBalance };
 
-  const oldCurrentInCurrency = oldPreviousAdvanceMap[oldTxCurrency] ?? 0;
-  const reversedBalance = oldWasGiveAdvance
-    ? oldCurrentInCurrency - oldTransaction.amount
-    : oldCurrentInCurrency + oldTransaction.amount;
-  if (reversedBalance < 0) throw new Error('Cannot update: reversing old transaction would result in negative balance');
-
-  const oldReverseAdvanceMap: Partial<Record<CurrencyCode, number>> = {
-    ...oldPreviousAdvanceMap,
-    [oldTxCurrency]: reversedBalance
-  };
-  const oldReverseData: any = { supplier_data: buildSupplierAdvanceUpdate(oldSupplier, oldReverseAdvanceMap) };
-
-  let oldCashDrawerResult: any = null;
-  let oldPreviousCashDrawerBalance: number | undefined;
-  let oldCashDrawerAccountId: string | undefined;
-
-  if (oldWasGiveAdvance) {
-    const oldCashAmount = toCashDrawerAmount(oldTransaction.amount, oldTxCurrency, 'LBP');
-    oldPreviousCashDrawerBalance = await getCurrentCashDrawerBalance(userStoreId || '');
-    oldCashDrawerResult = await processCashDrawerTransaction({
-      type: 'payment', amount: oldCashAmount, currency: 'LBP',
-      description: 'payments.reversalUpdatedAdvancePayment',
-      reference: generateReversalReference(),
-      supplierId: oldTransaction.entity_id!,
-      storeId: userStoreId || '',
-      createdBy: userProfileId || '',
-    });
-    oldCashDrawerAccountId = oldCashDrawerResult?.accountId;
-  }
-
-  const supplierToUpdate = updates.supplierId === oldTransaction.entity_id
-    ? { ...oldSupplier, ...oldReverseData }
-    : newSupplier;
-
-  const newCurrentAdvanceMap = getSupplierAdvanceBalanceMap(supplierToUpdate);
-  const newCurrentInCurrency = newCurrentAdvanceMap[newTxCurrency] ?? 0;
-  const newBalance = newIsGiveAdvance
-    ? newCurrentInCurrency + updates.amount
-    : newCurrentInCurrency - updates.amount;
+  // Post the NEW advance in the sub-ledger. When the supplier is unchanged we
+  // stack the new amount on top of the reversed map so a same-supplier edit
+  // nets correctly.
+  const baseNewMap = sameSupplier ? reversedOldMap : getSupplierAdvanceBalanceMap(newSupplier);
+  const newIsGiveAdvance = updates.type === 'give';
+  const newCurrent = baseNewMap[updates.currency] ?? 0;
+  const newBalance = newIsGiveAdvance ? newCurrent + updates.amount : newCurrent - updates.amount;
   if (newBalance < 0) throw new Error('Cannot update: would result in negative advance balance');
+  const newMap: Partial<Record<CurrencyCode, number>> = { ...baseNewMap, [updates.currency]: newBalance };
 
-  const newAdvanceMap: Partial<Record<CurrencyCode, number>> = {
-    ...newCurrentAdvanceMap,
-    [newTxCurrency]: newBalance
-  };
-  const newUpdateData: any = { supplier_data: buildSupplierAdvanceUpdate(supplierToUpdate, newAdvanceMap) };
+  const newCategory = newIsGiveAdvance
+    ? TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_GIVEN
+    : TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_DEDUCTED;
+  const newRef = oldTransaction.reference || generateAdvanceReference();
+  const transactionDescription: MultilingualString = createMultilingualFromString(
+    updates.description || `Supplier advance ${newIsGiveAdvance ? 'payment' : 'deduction'} - ${newSupplier.name}`
+  );
 
-  if (updates.supplierId !== oldTransaction.entity_id) {
-    await updateSupplier(oldTransaction.entity_id!, oldReverseData);
-  }
-  await updateSupplier(updates.supplierId, newUpdateData);
+  let newTransactionId: string | undefined;
+  await withUndoOperation('operation', pushUndo, async () => {
+    // 1. Reverse the original transaction's ledger + cash-drawer impact.
+    const delResult = await transactionService.deleteTransaction(transactionId, advanceContext(deps));
+    if (!delResult.success) throw new Error(delResult.error || 'Failed to reverse original advance');
 
-  let newCashDrawerResult: any = null;
-  let newPreviousCashDrawerBalance: number | undefined;
-  let newCashDrawerAccountId: string | undefined;
-
-  if (newIsGiveAdvance) {
-    const newCashAmount = toCashDrawerAmount(updates.amount, newTxCurrency, 'LBP');
-    newPreviousCashDrawerBalance = await getCurrentCashDrawerBalance(userStoreId || '');
-    newCashDrawerResult = await processCashDrawerTransaction({
-      type: 'expense', amount: newCashAmount, currency: 'LBP',
-      description: 'payments.advancePayment',
-      reference: generateAdvanceReference(),
-      supplierId: updates.supplierId,
-      storeId: userStoreId || '',
-      createdBy: userProfileId || '',
+    // 2. Post the new advance.
+    const createResult = await transactionService.createTransaction({
+      category: newCategory,
+      amount: updates.amount,
+      currency: updates.currency,
+      description: transactionDescription,
+      entityId: updates.supplierId,
+      reference: newRef,
+      context: advanceContext(deps),
+      metadata: { source: 'offline', module: 'supplier_management', advanceType: updates.type, reviewDate: updates.reviewDate, replaces_transaction_id: transactionId },
+      updateBalances: true,
+      updateCashDrawer: true,
+      createAuditLog: false,
+      _synced: false,
     });
-    newCashDrawerAccountId = newCashDrawerResult?.accountId;
-  }
-
-  const transactionUpdate: any = {
-    type: newIsGiveAdvance ? 'expense' : 'income',
-    category: TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_GIVEN,
-    amount: updates.amount,
-    currency: updates.currency,
-    description: updates.description || `payments.supplierAdvance`,
-    supplier_id: updates.supplierId,
-    created_at: updates.date,
-    _synced: false,
-  };
-
-  const oldTransactionData = {
-    type: oldTransaction.type,
-    category: oldTransaction.category,
-    amount: oldTransaction.amount,
-    currency: oldTransaction.currency,
-    description: oldTransaction.description,
-    entity_id: oldTransaction.entity_id!,
-    created_at: oldTransaction.created_at,
-    _synced: oldTransaction._synced
-  };
-
-  await getDB().transactions.update(transactionId, transactionUpdate);
-
-  const affectedTables: any[] = [
-    { table: 'transactions', id: transactionId },
-    { table: 'entities', id: oldTransaction.entity_id! }
-  ];
-  const undoSteps: any[] = [
-    { op: 'update', table: 'transactions', id: transactionId, changes: oldTransactionData },
-    {
-      op: 'update', table: 'entities', id: oldTransaction.entity_id!,
-      changes: {
-        supplier_data: buildSupplierAdvanceUpdate(oldSupplier, oldPreviousAdvanceMap),
-        _synced: false
-      }
+    if (!createResult.success || !createResult.transactionId) {
+      throw new Error(createResult.error || 'Failed to post updated advance');
     }
-  ];
+    newTransactionId = createResult.transactionId;
 
-  if (updates.supplierId !== oldTransaction.entity_id) {
-    affectedTables.push({ table: 'entities', id: updates.supplierId });
-    undoSteps.push({
-      op: 'update', table: 'entities', id: updates.supplierId,
-      changes: {
-        supplier_data: buildSupplierAdvanceUpdate(newSupplier, newPreviousAdvanceMap),
-        _synced: false
-      }
-    });
-  }
+    // 3. Sub-ledger: when switching suppliers, reverse the old one first.
+    if (!sameSupplier) {
+      await updateSupplier(oldTransaction.entity_id!, { supplier_data: buildSupplierAdvanceUpdate(oldSupplier, reversedOldMap) });
+    }
+    await updateSupplier(updates.supplierId, { supplier_data: buildSupplierAdvanceUpdate(sameSupplier ? oldSupplier : newSupplier, newMap) });
+  });
 
-  const cashDrawerAccountId = oldCashDrawerAccountId || newCashDrawerAccountId;
-  const previousCashDrawerBalance = oldWasGiveAdvance && oldCashDrawerResult
-    ? oldPreviousCashDrawerBalance
-    : (newIsGiveAdvance && newCashDrawerResult ? newPreviousCashDrawerBalance : undefined);
+  const advanceChanges = auditService.diff(
+    { amount: oldTransaction.amount, currency: oldTxCurrency, type: oldWasGiveAdvance ? 'give' : 'deduct', supplier: oldSupplier.name },
+    { amount: updates.amount, currency: updates.currency, type: updates.type, supplier: newSupplier.name },
+    ['amount', 'currency', 'type', 'supplier']
+  );
+  await auditService.record({
+    storeId, branchId: currentBranchId, changedBy: userProfileId,
+    entityType: 'payment', entityId: newTransactionId ?? transactionId, action: 'update',
+    changes: advanceChanges,
+    changeReason: `Supplier advance updated (${newSupplier.name})`,
+    reference: newRef,
+  });
 
-  let undoData: any;
-  if ((oldWasGiveAdvance && oldCashDrawerResult) || (newIsGiveAdvance && newCashDrawerResult)) {
-    const cashDrawerTransactionIds: string[] = [];
-    if (oldCashDrawerResult?.transactionId) cashDrawerTransactionIds.push(oldCashDrawerResult.transactionId);
-    if (newCashDrawerResult?.transactionId) cashDrawerTransactionIds.push(newCashDrawerResult.transactionId);
-
-    undoData = {
-      type: 'supplier_advance_update',
-      affected: [
-        ...affectedTables,
-        ...(cashDrawerTransactionIds.map(id => ({ table: 'transactions', id }))),
-        ...(cashDrawerAccountId ? [{ table: 'cash_drawer_accounts', id: cashDrawerAccountId }] : [])
-      ],
-      steps: [
-        ...undoSteps,
-        ...(cashDrawerTransactionIds.map(id => ({ op: 'delete', table: 'transactions', id }))),
-        ...(previousCashDrawerBalance !== undefined && cashDrawerAccountId ? [{
-          op: 'update', table: 'cash_drawer_accounts', id: cashDrawerAccountId,
-          changes: { current_balance: previousCashDrawerBalance, _synced: false }
-        }] : [])
-      ]
-    };
-  } else {
-    undoData = { type: 'supplier_advance_update', affected: affectedTables, steps: undoSteps };
-  }
-
-  pushUndo(undoData);
   await refreshData();
 }

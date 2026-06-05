@@ -7,10 +7,22 @@ import { getDB, createId } from '../../../lib/db';
 import { InventoryPurchaseService } from '../../../services/inventoryPurchaseService';
 import { receivedItemsJournalService } from '../../../services/receivedItemsJournalService';
 import { receivedBillMonitoringService } from '../../../services/receivedBillMonitoringService';
+import { auditService } from '../../../services/auditService';
+import enLocale from '../../../i18n/locales/en';
+import arLocale from '../../../i18n/locales/ar';
 import type { Database } from '../../../types/database';
 import type { CurrencyCode } from '@pos-platform/shared';
 
 type Tables = Database['public']['Tables'];
+
+/**
+ * Inventory bills carry no human-readable number, so derive a stable display
+ * reference from the batch id. Deterministic by design: every audit row about
+ * the same batch (received / updated / deleted) shares one reference, so the
+ * viewer's Reference column groups them and click-to-search shows the batch's
+ * full history.
+ */
+const inventoryRef = (batchId: string): string => `INV-${batchId.slice(0, 8).toUpperCase()}`;
 
 export interface InventoryBatchDeps {
   storeId: string | null | undefined;
@@ -22,6 +34,8 @@ export interface InventoryBatchDeps {
   updateUnsyncedCount: () => Promise<void>;
   resetAutoSyncTimer: () => void;
   debouncedSync: () => void;
+  /** Store's preferred UI language — used to localize audit summaries at write time. */
+  language?: string;
 }
 
 export async function addInventoryBatch(
@@ -167,6 +181,22 @@ export async function addInventoryBatch(
     }
   }
 
+  // Localized business-action summary, e.g. "Inventory bill received
+  // (1 item(s), commission)". Built in the store's language.
+  const summaryDict: any = deps.language === 'ar' ? arLocale : enLocale;
+  const typeLabel = summaryDict?.auditLog?.inventorySummary?.types?.[type] ?? type;
+  const receivedTemplate = summaryDict?.auditLog?.inventorySummary?.received as string | undefined;
+  const receivedReason = receivedTemplate
+    ? receivedTemplate.replace('{{count}}', String(items.length)).replace('{{type}}', typeLabel)
+    : `Inventory bill received (${items.length} item(s), ${typeLabel})`;
+
+  await auditService.record({
+    storeId, branchId: currentBranchId, changedBy: created_by,
+    entityType: 'inventory_batch', entityId: batchId, action: 'create',
+    changeReason: receivedReason,
+    reference: inventoryRef(batchId),
+  });
+
   await refreshData();
   await updateUnsyncedCount();
   resetAutoSyncTimer();
@@ -303,6 +333,16 @@ export async function updateInventoryBatch(
     steps: [{ op: 'update', table: 'inventory_bills', id, changes: undoChanges }]
   });
 
+  const batchPaths = Object.keys(updates).filter((k) => k !== '_synced' && k !== 'updated_at');
+  const batchChanges = auditService.diff(originalBatch, { ...originalBatch, ...updates }, batchPaths);
+  if (batchChanges.length > 0) {
+    await auditService.record({
+      storeId, branchId: currentBranchId, changedBy: userProfileId,
+      entityType: 'inventory_batch', entityId: id, action: 'update', changes: batchChanges,
+      reference: inventoryRef(id),
+    });
+  }
+
   await refreshData();
   await updateUnsyncedCount();
   resetAutoSyncTimer();
@@ -381,6 +421,13 @@ export async function deleteInventoryBatch(
 
   pushUndo({ type: 'delete_inventory_batch', affected: affectedRecords, steps: undoSteps });
 
+  await auditService.record({
+    storeId, branchId: currentBranchId, changedBy: userProfileId,
+    entityType: 'inventory_batch', entityId: id, action: 'delete',
+    changeReason: `Inventory batch deleted (${batchItems.length} item(s))`,
+    reference: inventoryRef(id),
+  });
+
   await refreshData();
   await updateUnsyncedCount();
   resetAutoSyncTimer();
@@ -392,7 +439,7 @@ export async function applyCommissionRateToBatch(
   batchId: string,
   commissionRate: number
 ): Promise<void> {
-  const { pushUndo, refreshData, updateUnsyncedCount, resetAutoSyncTimer, debouncedSync } = deps;
+  const { storeId, currentBranchId, userProfileId, pushUndo, refreshData, updateUnsyncedCount, resetAutoSyncTimer, debouncedSync } = deps;
 
   const originalBatch = await getDB().inventory_bills.get(batchId);
   if (!originalBatch) throw new Error('Inventory batch not found');
@@ -406,6 +453,13 @@ export async function applyCommissionRateToBatch(
     type: 'apply_commission_rate',
     affected: [{ table: 'inventory_bills', id: batchId }],
     steps: [{ op: 'update', table: 'inventory_bills', id: batchId, changes: { commission_rate: originalBatch.commission_rate, _synced: false } }]
+  });
+
+  await auditService.record({
+    storeId, branchId: currentBranchId, changedBy: userProfileId,
+    entityType: 'inventory_batch', entityId: batchId, action: 'update',
+    changes: [{ field: 'commission_rate', old: originalBatch.commission_rate ?? null, new: commissionRate }],
+    reference: inventoryRef(batchId),
   });
 
   await refreshData();

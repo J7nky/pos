@@ -9,7 +9,9 @@ import { createId } from '../../lib/db';
 import { getDB } from '../../lib/db';
 import { journalService } from '../../services/journalService';
 import { emitEntityEvent, buildEventOptions } from '../../services/eventEmissionHelper';
+import { auditService } from '../../services/auditService';
 import { getLocalDateString } from '../../utils/dateUtils';
+import { sameRowList } from '../../utils/rowListEquality';
 import type { EntityDataLayerAdapter, EntityDataLayerResult, Tables } from './types';
 import type { CurrencyCode } from '@pos-platform/shared';
 
@@ -116,12 +118,41 @@ async function postInitialBalanceEntries(
   return transactionId;
 }
 
+/** Entity fields tracked in the audit trail (dotted paths into the row). */
+const CUSTOMER_AUDIT_PATHS = [
+  'name',
+  'phone',
+  'is_active',
+  'customer_data.credit_limit',
+  'customer_data.max_balances',
+  'customer_data.email',
+  'customer_data.address',
+];
+const SUPPLIER_AUDIT_PATHS = [
+  'name',
+  'phone',
+  'supplier_data.type',
+  'supplier_data.advance_balances',
+  'supplier_data.email',
+  'supplier_data.address',
+];
+
+/** Overlay only the defined keys of `updates` onto `base` — avoids treating an
+ *  absent (undefined) update field as a change to undefined when diffing. */
+function applyDefined<T>(base: T, updates: Record<string, unknown>): T {
+  const out = { ...base } as Record<string, unknown>;
+  for (const [key, value] of Object.entries(updates)) {
+    if (value !== undefined) out[key] = value;
+  }
+  return out as T;
+}
+
 export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataLayerResult {
   const { storeId, currentBranchId, userProfileId, pushUndo, resetAutoSyncTimer, refreshData } = adapter;
   const [entities, setEntities] = useState<Tables['entities']['Row'][]>([]);
 
   const hydrate = useCallback((entitiesData: Tables['entities']['Row'][]) => {
-    setEntities(entitiesData);
+    setEntities(prev => (sameRowList(prev, entitiesData) ? prev : entitiesData));
   }, []);
 
   const addSupplier = useCallback(
@@ -192,6 +223,12 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
         type: 'add_supplier',
         affected: [{ table: 'entities', id: supplierId }],
         steps: undoSteps,
+      });
+
+      await auditService.record({
+        storeId, branchId: currentBranchId, changedBy: userProfileId,
+        entityType: 'entity', entityId: supplierId, action: 'create',
+        changeReason: 'Supplier created',
       });
 
       await refreshData();
@@ -278,6 +315,12 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
         steps: undoSteps,
       });
 
+      await auditService.record({
+        storeId, branchId: currentBranchId, changedBy: userProfileId,
+        entityType: 'entity', entityId: customerId, action: 'create',
+        changeReason: 'Customer created',
+      });
+
       await refreshData();
       resetAutoSyncTimer();
 
@@ -348,6 +391,19 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
         affected: [{ table: 'entities', id }],
         steps: [{ op: 'update', table: 'entities', id, changes: undoChanges }],
       });
+
+      const customerChanges = auditService.diff(
+        originalEntity,
+        applyDefined(originalEntity, entityUpdates),
+        CUSTOMER_AUDIT_PATHS
+      );
+      if (customerChanges.length > 0) {
+        await auditService.record({
+          storeId, branchId: currentBranchId, changedBy: userProfileId,
+          entityType: 'entity', entityId: id, action: 'update',
+          changes: customerChanges,
+        });
+      }
 
       await refreshData();
       resetAutoSyncTimer();
@@ -420,6 +476,19 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
         affected: [{ table: 'entities', id }],
         steps: [{ op: 'update', table: 'entities', id, changes: undoChanges }],
       });
+
+      const supplierChanges = auditService.diff(
+        originalEntity,
+        applyDefined(originalEntity, entityUpdates),
+        SUPPLIER_AUDIT_PATHS
+      );
+      if (supplierChanges.length > 0) {
+        await auditService.record({
+          storeId, branchId: currentBranchId, changedBy: userProfileId,
+          entityType: 'entity', entityId: id, action: 'update',
+          changes: supplierChanges,
+        });
+      }
 
       await refreshData();
       resetAutoSyncTimer();

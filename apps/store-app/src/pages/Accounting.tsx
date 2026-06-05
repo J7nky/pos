@@ -1418,7 +1418,7 @@ export default function Accounting() {
   }
 
   return (
-    <div className="p-6">
+    <div className="p-6 stagger">
       <Toast message={toast.message} type={toast.type} visible={toast.visible} onClose={hideToast} />
       {/* Quick Action Bar */}
       <ActionTabsBar

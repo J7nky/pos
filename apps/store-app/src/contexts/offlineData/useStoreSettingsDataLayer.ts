@@ -7,6 +7,8 @@
 import { useState, useCallback } from 'react';
 import type { CurrencyCode } from '@pos-platform/shared';
 import { getDB } from '../../lib/db';
+import { auditService } from '../../services/auditService';
+import type { AuditChange } from '../../types';
 import type { StoreSettingsDataLayerAdapter, StoreSettingsDataLayerResult } from './types';
 
 function mergeStoreDataIntoReceiptSettings(store: any, existingSettings: any): any {
@@ -33,6 +35,8 @@ function mergeStoreDataIntoReceiptSettings(store: any, existingSettings: any): a
 export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter): StoreSettingsDataLayerResult {
   const {
     storeId,
+    currentBranchId,
+    userProfileId,
     isOnline,
     isSyncing,
     updateUnsyncedCount,
@@ -41,6 +45,27 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
     debouncedSync,
     reloadCurrencyState,
   } = adapter;
+
+  /**
+   * Record one `store_settings` audit row for a config change. Best-effort and
+   * fire-and-forget — store settings live on the `stores` row, so entityId is
+   * the store id; the acting branch is used for branch-scoped audit views.
+   */
+  const recordSettingsAudit = useCallback(
+    (changes: AuditChange[], changeReason?: string) => {
+      void auditService.record({
+        storeId,
+        branchId: currentBranchId,
+        changedBy: userProfileId,
+        entityType: 'store_settings',
+        entityId: storeId!,
+        action: 'update',
+        changes,
+        changeReason: changeReason ?? null,
+      });
+    },
+    [storeId, currentBranchId, userProfileId]
+  );
 
   const [currency, setCurrency] = useState<CurrencyCode>('LBP');
   const [exchangeRate, setExchangeRate] = useState(89500);
@@ -109,6 +134,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
           updated_at: new Date().toISOString(),
         });
         await updateUnsyncedCount();
+        recordSettingsAudit([{ field: 'low_stock_alert', old: !enabled, new: enabled }]);
         if (isOnline && !isSyncing) performSync(true);
         else debouncedSync();
       } catch (error) {
@@ -116,7 +142,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
         setLowStockAlertsEnabled(!enabled);
       }
     },
-    [storeId, isOnline, isSyncing, updateUnsyncedCount, performSync, debouncedSync]
+    [storeId, isOnline, isSyncing, updateUnsyncedCount, performSync, debouncedSync, recordSettingsAudit]
   );
 
   const updateLowStockThreshold = useCallback((threshold: number) => {
@@ -137,6 +163,9 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
         });
         await updateUnsyncedCount();
         resetAutoSyncTimer();
+        if (prev !== rate) {
+          recordSettingsAudit([{ field: 'preferred_commission_rate', old: prev, new: rate }]);
+        }
         if (isOnline && !isSyncing) performSync(true);
         else debouncedSync();
       } catch (error) {
@@ -144,7 +173,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
         setDefaultCommissionRate(prev);
       }
     },
-    [storeId, defaultCommissionRate, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync]
+    [storeId, defaultCommissionRate, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync, recordSettingsAudit]
   );
 
   const updateCurrency = useCallback(
@@ -161,6 +190,12 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
         await reloadCurrencyState?.(storeId);
         await updateUnsyncedCount();
         resetAutoSyncTimer();
+        if (prev !== newCurrency) {
+          recordSettingsAudit(
+            [{ field: 'preferred_currency', old: prev, new: newCurrency }],
+            `Preferred currency changed ${prev} → ${newCurrency}`
+          );
+        }
         if (isOnline && !isSyncing) performSync(true);
         else debouncedSync();
       } catch (error) {
@@ -168,7 +203,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
         setCurrency(prev);
       }
     },
-    [storeId, currency, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync, reloadCurrencyState]
+    [storeId, currency, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync, reloadCurrencyState, recordSettingsAudit]
   );
 
   const updateExchangeRate = useCallback(
@@ -196,6 +231,9 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
         await reloadCurrencyState?.(storeId);
         await updateUnsyncedCount();
         resetAutoSyncTimer();
+        if (prev !== rate) {
+          recordSettingsAudit([{ field: 'exchange_rate', old: prev, new: rate }]);
+        }
         if (isOnline && !isSyncing) performSync(true);
         else debouncedSync();
       } catch (error) {
@@ -203,7 +241,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
         setExchangeRate(prev);
       }
     },
-    [storeId, exchangeRate, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync, reloadCurrencyState]
+    [storeId, exchangeRate, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync, reloadCurrencyState, recordSettingsAudit]
   );
 
   /**
@@ -236,6 +274,12 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
         await reloadCurrencyState?.(storeId);
         await updateUnsyncedCount();
         resetAutoSyncTimer();
+        if ((prevMap[currencyCode] ?? null) !== (nextMap[currencyCode] ?? null)) {
+          recordSettingsAudit(
+            [{ field: `exchange_rates.${currencyCode}`, old: prevMap[currencyCode] ?? null, new: nextMap[currencyCode] ?? null }],
+            `Exchange rate for ${currencyCode} updated`
+          );
+        }
         if (isOnline && !isSyncing) performSync(true);
         else debouncedSync();
       } catch (error) {
@@ -243,7 +287,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
         throw error;
       }
     },
-    [storeId, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync, reloadCurrencyState]
+    [storeId, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync, reloadCurrencyState, recordSettingsAudit]
   );
 
   /**
@@ -257,7 +301,8 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
       try {
         const store = await getDB().stores.get(storeId);
         if (!store) return;
-        const list = ((store.accepted_currencies as CurrencyCode[] | undefined) ?? []).slice();
+        const prevList = ((store.accepted_currencies as CurrencyCode[] | undefined) ?? []).slice();
+        const list = prevList.slice();
         if (!list.includes(currencyCode)) list.push(currencyCode);
         const ratesMap: Partial<Record<CurrencyCode, number>> = { ...(store.exchange_rates ?? {}) };
         if (currencyCode !== 'USD' && rate !== undefined && rate > 0) {
@@ -272,6 +317,12 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
         await reloadCurrencyState?.(storeId);
         await updateUnsyncedCount();
         resetAutoSyncTimer();
+        if (!prevList.includes(currencyCode)) {
+          recordSettingsAudit(
+            [{ field: 'accepted_currencies', old: prevList, new: list }],
+            `Accepted currency added: ${currencyCode}`
+          );
+        }
         if (isOnline && !isSyncing) performSync(true);
         else debouncedSync();
       } catch (error) {
@@ -279,7 +330,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
         throw error;
       }
     },
-    [storeId, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync, reloadCurrencyState]
+    [storeId, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync, reloadCurrencyState, recordSettingsAudit]
   );
 
   /**
@@ -331,9 +382,8 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
         );
       }
 
-      const list = ((store.accepted_currencies as CurrencyCode[] | undefined) ?? []).filter(
-        (c) => c !== currencyCode
-      );
+      const prevList = ((store.accepted_currencies as CurrencyCode[] | undefined) ?? []).slice();
+      const list = prevList.filter((c) => c !== currencyCode);
       const ratesMap: Partial<Record<CurrencyCode, number>> = { ...(store.exchange_rates ?? {}) };
       delete ratesMap[currencyCode];
 
@@ -346,10 +396,14 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
       await reloadCurrencyState?.(storeId);
       await updateUnsyncedCount();
       resetAutoSyncTimer();
+      recordSettingsAudit(
+        [{ field: 'accepted_currencies', old: prevList, new: list }],
+        `Accepted currency removed: ${currencyCode}`
+      );
       if (isOnline && !isSyncing) performSync(true);
       else debouncedSync();
     },
-    [storeId, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync, reloadCurrencyState]
+    [storeId, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync, reloadCurrencyState, recordSettingsAudit]
   );
 
   const updateLanguage = useCallback(
@@ -364,6 +418,9 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
           updated_at: new Date().toISOString(),
         });
         await updateUnsyncedCount();
+        if (prev !== newLanguage) {
+          recordSettingsAudit([{ field: 'preferred_language', old: prev, new: newLanguage }]);
+        }
         if (isOnline && !isSyncing) performSync(true);
         else debouncedSync();
       } catch (error) {
@@ -371,7 +428,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
         setLanguage(prev);
       }
     },
-    [storeId, language, isOnline, isSyncing, updateUnsyncedCount, performSync, debouncedSync]
+    [storeId, language, isOnline, isSyncing, updateUnsyncedCount, performSync, debouncedSync, recordSettingsAudit]
   );
 
   const updateFiscalYearStart = useCallback(
@@ -392,6 +449,12 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
         });
         await updateUnsyncedCount();
         resetAutoSyncTimer();
+        {
+          const fiscalChanges: AuditChange[] = [];
+          if (prevMonth !== clampedMonth) fiscalChanges.push({ field: 'fiscal_year_start_month', old: prevMonth, new: clampedMonth });
+          if (prevDay !== clampedDay) fiscalChanges.push({ field: 'fiscal_year_start_day', old: prevDay, new: clampedDay });
+          if (fiscalChanges.length > 0) recordSettingsAudit(fiscalChanges, 'Fiscal year start updated');
+        }
         if (isOnline && !isSyncing) performSync(true);
         else debouncedSync();
       } catch (error) {
@@ -401,7 +464,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
         throw error;
       }
     },
-    [storeId, fiscalYearStartMonth, fiscalYearStartDay, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync]
+    [storeId, fiscalYearStartMonth, fiscalYearStartDay, isOnline, isSyncing, updateUnsyncedCount, resetAutoSyncTimer, performSync, debouncedSync, recordSettingsAudit]
   );
 
   const updateReceiptSettings = useCallback(async (newSettings: any) => {

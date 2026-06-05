@@ -773,21 +773,63 @@ export interface MissedProduct {
   _deleted?: boolean;
 }
 
-export interface BillAuditLog {
+/**
+ * General-purpose audit log (spec: audit-logging-service).
+ *
+ * One row per state-changing business action, scoped to a store branch. Captures
+ * an entire action in a single row via the `changes[]` JSON array — see
+ * audit_log_design_decisions (decision 1). (Superseded the legacy bill-specific
+ * `bill_audit_logs` table, removed in Dexie v69.)
+ *
+ * Append-only: rows are never updated or soft-deleted by the app. The only
+ * deletion is the 4-month retention prune (decision 4). It carries no
+ * `updated_at` — like `journal_entries`, it is excluded from
+ * TABLES_WITH_UPDATED_AT and syncs on `created_at`.
+ */
+export type AuditAction =
+  | 'create'
+  | 'update'
+  | 'delete'
+  | 'void'
+  | 'reactivate'
+  | 'archive'
+  | 'unarchive'
+  | 'open'
+  | 'close';
+
+/** A single before/after field delta within an `update` action. */
+export interface AuditChange {
+  /** Dotted field path, e.g. 'phone' or 'customer_data.credit_limit'. */
+  field: string;
+  /** Previous value (JSON-serialisable). Null/absent for newly-set fields. */
+  old: unknown;
+  /** New value (JSON-serialisable). */
+  new: unknown;
+}
+
+export interface AuditLog {
   id: string;
   store_id: string;
+  /** Acting branch. Always set from session context (kept non-null so the
+   *  [store_id+branch_id] compound index stays usable — IndexedDB drops nulls). */
   branch_id: string;
-  bill_id: string;
-  action: 'created' | 'updated' | 'deleted' | 'item_added' | 'item_removed' | 'item_modified' | 'payment_updated';
-  field_changed: string | null;
-  old_value: string | null;
-  new_value: string | null;
+  /** Logical module/domain of the affected row, e.g. 'entity' | 'product' | 'bill'. */
+  entity_type: string;
+  /** Primary key of the affected row in its own table. */
+  entity_id: string;
+  action: AuditAction;
+  /** Field-level deltas. Empty for create/delete; populated for update/void. */
+  changes: AuditChange[];
+  /** Optional human context, e.g. 'Customer returned goods'. */
   change_reason: string | null;
+  /** Optional human-readable document reference for cross-navigation, e.g.
+   *  'B-704053' (bill), 'PAY-12345678' (payment), 'INV-…' (received bill).
+   *  Distinct from entity_id (a UUID): this is the number a user recognises. */
+  reference?: string | null;
+  /** User id of the actor (who). */
   changed_by: string;
-  ip_address: string | null;
-  user_agent: string | null;
+  /** UTC ISO timestamp (when). */
   created_at: string;
-  updated_at: string;
   _synced: boolean;
   _lastSyncedAt?: string;
   _deleted?: boolean;

@@ -35,7 +35,6 @@ export const TABLES_WITH_UPDATED_AT = [
   'inventory_items',
   'bills',
   'bill_line_items',
-  'bill_audit_logs',
   'missed_products',
   'reminders',
   'role_permissions',

@@ -47,7 +47,10 @@ export type UndoAction = {
  */
 const EXCLUDED_TABLES = new Set([
   'pending_syncs',
-  'bill_audit_logs',
+  // Audit log is append-only and must never participate in undo: an audit row
+  // is the record OF a change, not a change to be reversed. Tracking it would
+  // also recurse once Tier A capture writes audit rows from inside DB hooks.
+  'audit_logs',
   'sync_metadata',
   'sync_state'
 ]);

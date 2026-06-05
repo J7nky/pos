@@ -81,7 +81,13 @@ export const entityBalanceCache = {
       LBP: lbp,
       fetchedAt: Date.now(),
     });
-    notify();
+    // Intentionally does NOT notify(). `set()` only ever runs inside the hook's
+    // own fetch paths, each of which updates its own React state directly after
+    // the fetch resolves. Firing notify() here meant a fresh load of N entities
+    // produced N notifications, and every subscriber rebuilt its Map on each one
+    // — an O(N²) re-render storm on the Customers page. Cross-instance
+    // propagation after a write is driven by invalidate()/invalidateMany()/
+    // invalidateAll() below, which DO notify.
   },
 
   invalidate(entityType: EntityType, entityId: string): boolean {

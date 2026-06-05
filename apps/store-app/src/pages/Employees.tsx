@@ -399,7 +399,7 @@ export default function Employees() {
   const managerAvailability = getRoleAvailability('manager');
 
   return (
-    <div className="p-6">
+    <div className="p-6 stagger">
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-800 flex items-center">
@@ -462,8 +462,8 @@ export default function Employees() {
 
       {/* Employee Form Modal */}
       {showForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+        <div className="animate-modal-fade fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="animate-modal-pop bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
             <h2 className="text-xl font-bold mb-4">
               {editingEmployee ? t('employees.editEmployee') : t('employees.addNewEmployee')}
             </h2>
@@ -657,14 +657,14 @@ export default function Employees() {
                 {/* Working Days Selection Modal */}
                 {showWorkingDaysModal && (
                   <div 
-                    className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+                    className="animate-modal-fade fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
                     onClick={(e) => {
                       if (e.target === e.currentTarget) {
                         setShowWorkingDaysModal(false);
                       }
                     }}
                   >
-                    <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+                    <div className="animate-modal-pop bg-white rounded-lg shadow-xl max-w-md w-full">
                       <div className="p-6 border-b">
                         <h3 className="text-lg font-semibold text-gray-900">{t('employees.selectWorkingDays')}</h3>
                       </div>

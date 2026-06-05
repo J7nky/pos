@@ -9,13 +9,13 @@ import { getLocalDateString } from '../../../utils/dateUtils';
 import { getFiscalPeriodForDate } from '../../../utils/fiscalPeriod';
 import { TRANSACTION_CATEGORIES } from '../../../constants/transactionCategories';
 import { BranchAccessValidationService } from '../../../services/branchAccessValidationService';
+import { auditService } from '../../../services/auditService';
 import { receivedBillMonitoringService } from '../../../services/receivedBillMonitoringService';
 import { validateBillCreation } from '../../../services/businessValidationService';
 import type { CashDrawerAtomicResult } from './cashDrawerTransactionOperations';
 import type { MultilingualString } from '../../../utils/multilingual';
 import type { CurrencyCode } from '@pos-platform/shared';
 import { currencyService } from '../../../services/currencyService';
-import { formatNumber } from '../../../utils/numberFormat';
 import { assertValidCurrency } from '../../../utils/currencyValidation';
 import {
   reverseAmounts,
@@ -60,6 +60,8 @@ export interface BillCreateDeps {
     }
   ) => any;
   refreshCashDrawerStatus: () => Promise<void>;
+  /** Store's preferred UI language — used to localize audit summaries at write time. */
+  language?: string;
 }
 
 export interface BillReactivateDeps {
@@ -96,78 +98,11 @@ export async function updateBill(
   }
 
   const now = new Date().toISOString();
-  const auditLogs: any[] = [];
-  const auditLogIds: string[] = [];
 
-  await getDB().transaction('rw', [getDB().bills, getDB().bill_audit_logs, getDB().entities], async () => {
-    await getDB().bills.update(billId, {
-      ...updates,
-      updated_at: now,
-      _synced: false,
-    });
-
-    for (const [field, newValue] of Object.entries(updates)) {
-      if (field !== '_synced' && field !== 'updated_at') {
-        const oldValue = (originalBill as any)[field];
-        if (oldValue !== newValue) {
-          let oldValueDisplay = oldValue != null ? String(oldValue) : 'empty';
-          let newValueDisplay = newValue != null ? String(newValue) : 'empty';
-
-          if (field === 'customer_id') {
-            if (oldValue) {
-              const oldEntity = await getDB().entities.get(oldValue);
-              oldValueDisplay = oldEntity?.name || oldValue;
-            } else {
-              oldValueDisplay = 'Walk-in Customer';
-            }
-            if (newValue) {
-              const newEntity = await getDB().entities.get(newValue);
-              newValueDisplay = newEntity?.name || (newValue as string);
-            } else {
-              newValueDisplay = 'Walk-in Customer';
-            }
-          }
-
-          if (
-            field === 'total_amount' ||
-            field === 'amount_paid' ||
-            field === 'amount_due' ||
-            field === 'subtotal' ||
-            field === 'tax_amount' ||
-            field === 'discount_amount'
-          ) {
-            if (oldValue != null) oldValueDisplay = formatNumber(Number(oldValue));
-            if (newValue != null) newValueDisplay = formatNumber(Number(newValue));
-          }
-
-          const fieldLabel = field.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
-          const generatedReason = changeReason || `Updating ${fieldLabel} from ${oldValueDisplay} to ${newValueDisplay}`;
-          const auditLogId = createId();
-          auditLogIds.push(auditLogId);
-
-          const auditLog = {
-            id: auditLogId,
-            bill_id: billId,
-            store_id: storeId,
-            action: 'updated' as const,
-            field_changed: field,
-            old_value: oldValueDisplay !== 'empty' ? oldValueDisplay : null,
-            new_value: newValueDisplay !== 'empty' ? newValueDisplay : null,
-            change_reason: generatedReason,
-            changed_by: changedBy,
-            ip_address: null,
-            user_agent: null,
-            created_at: now,
-            updated_at: now,
-            branch_id: currentBranchId || '',
-            _synced: false,
-          };
-
-          auditLogs.push(auditLog);
-          await getDB().bill_audit_logs.add(auditLog);
-        }
-      }
-    }
+  await getDB().bills.update(billId, {
+    ...updates,
+    updated_at: now,
+    _synced: false,
   });
 
   const undoChanges: any = {};
@@ -179,12 +114,22 @@ export async function updateBill(
 
   pushUndo({
     type: 'update_bill',
-    affected: [{ table: 'bills', id: billId }, ...auditLogIds.map((id) => ({ table: 'bill_audit_logs', id }))],
+    affected: [{ table: 'bills', id: billId }],
     steps: [
       { op: 'update', table: 'bills', id: billId, changes: undoChanges },
-      ...auditLogIds.map((id) => ({ op: 'delete', table: 'bill_audit_logs', id })),
     ],
   });
+
+  const auditPaths = Object.keys(updates).filter((k) => k !== '_synced' && k !== 'updated_at');
+  const billChanges = auditService.diff(originalBill, { ...originalBill, ...updates }, auditPaths);
+  if (billChanges.length > 0) {
+    await auditService.record({
+      storeId, branchId: currentBranchId, changedBy,
+      entityType: 'bill', entityId: billId, action: 'update',
+      changes: billChanges, changeReason: changeReason ?? null,
+      reference: (originalBill.bill_number ?? '').replace(/^BILL-/i, 'B-') || null,
+    });
+  }
 
   await refreshData();
   await updateUnsyncedCount();
@@ -202,7 +147,6 @@ export async function deleteBill(
   if (!storeId) throw new Error('No store ID available');
 
   const now = new Date().toISOString();
-  const auditLogId = createId();
 
   const bill = await getDB().bills.get(billId);
   if (!bill) throw new Error('Bill not found');
@@ -256,7 +200,6 @@ export async function deleteBill(
     [
       getDB().bills,
       getDB().bill_line_items,
-      getDB().bill_audit_logs,
       getDB().journal_entries,
       getDB().transactions,
       getDB().inventory_items,
@@ -362,39 +305,29 @@ export async function deleteBill(
         }
       }
 
-      const generatedReason = bill ? `Deleting bill #${bill.bill_number} (cancelled)` : `Deleting bill (cancelled)`;
-      await getDB().bill_audit_logs.add({
-        id: auditLogId,
-        bill_id: billId,
-        store_id: storeId,
-        action: 'deleted' as const,
-        field_changed: 'status',
-        old_value: bill?.status || 'active',
-        new_value: 'cancelled',
-        change_reason: deleteReason || generatedReason,
-        changed_by: deletedBy,
-        ip_address: null,
-        user_agent: null,
-        created_at: now,
-        updated_at: now,
-        branch_id: currentBranchId || '',
-        _synced: false,
-      });
     }
   );
 
   const undoSteps: any[] = [];
   const affectedRecords: any[] = [
     { table: 'bills', id: billId },
-    { table: 'bill_audit_logs', id: auditLogId },
   ];
   undoSteps.push({ op: 'update', table: 'bills', id: billId, changes: { status: bill.status, _synced: false } });
   for (const item of lineItems) {
     affectedRecords.push({ table: 'bill_line_items', id: item.id });
   }
-  undoSteps.push({ op: 'delete', table: 'bill_audit_logs', id: auditLogId });
 
   pushUndo({ type: 'delete_bill', affected: affectedRecords, steps: undoSteps });
+
+  // Bill cancellation — logged as a 'void' business-action summary (decision 3),
+  // not the per-journal-entry reversal mechanics.
+  await auditService.record({
+    storeId, branchId: currentBranchId, changedBy: deletedBy,
+    entityType: 'bill', entityId: billId, action: 'void',
+    changes: [{ field: 'status', old: bill.status ?? 'active', new: 'cancelled' }],
+    changeReason: deleteReason ?? `Bill #${bill.bill_number} cancelled`,
+    reference: (bill.bill_number ?? '').replace(/^BILL-/i, 'B-') || null,
+  });
 
   await refreshData();
   await updateUnsyncedCount();
@@ -520,7 +453,6 @@ export async function createBill(
 
   // Store inventory states for undo
   const inventoryStates: Array<{ id: string; originalQuantity: number; wasSynced: boolean }> = [];
-  const auditLogId = createId();
   let creditSaleTransactionId: string | null = null;
   let cashDrawerTransactionId: string | null = null;
   let cashDrawerResult: CashDrawerAtomicResult | null = null;
@@ -533,7 +465,6 @@ export async function createBill(
     getDB().transactions,
     getDB().journal_entries,
     getDB().chart_of_accounts,
-    getDB().bill_audit_logs,
     getDB().cash_drawer_sessions,
     getDB().cash_drawer_accounts
   ], async () => {
@@ -541,26 +472,6 @@ export async function createBill(
     if (mappedLineItems.length > 0) {
       await getDB().bill_line_items.bulkAdd(mappedLineItems);
     }
-
-    // Create audit log
-    const generatedReason = `Creating bill #${bill.bill_number} with total amount ${bill.total_amount || 0}`;
-    await getDB().bill_audit_logs.add({
-      id: auditLogId,
-      branch_id: currentBranchId || '',
-      store_id: storeId,
-      bill_id: billId,
-      action: 'created',
-      field_changed: null,
-      old_value: null,
-      new_value: JSON.stringify(bill),
-      change_reason: generatedReason,
-      changed_by: userProfileId,
-      ip_address: null,
-      user_agent: null,
-      created_at: now,
-      updated_at: now,
-      _synced: false
-    });
 
     // Deduct inventory quantities
     const itemsWithInventoryId = mappedLineItems.filter(item => item.inventory_item_id);
@@ -759,7 +670,6 @@ export async function createBill(
   const baseUndoData = {
     affected: [
       { table: 'bills', id: billId },
-      { table: 'bill_audit_logs', id: auditLogId },
       ...mappedLineItems.map(item => ({ table: 'bill_line_items', id: item.id })),
       ...inventoryStates.map(state => ({ table: 'inventory_items', id: state.id })),
       ...(customerBalanceUpdate && creditSaleTransactionId ? [
@@ -773,7 +683,6 @@ export async function createBill(
     ],
     steps: [
       { op: 'delete', table: 'bills', id: billId },
-      { op: 'delete', table: 'bill_audit_logs', id: auditLogId },
       ...mappedLineItems.map(item => ({ op: 'delete', table: 'bill_line_items', id: item.id })),
       ...inventoryStates.map(state => ({
         op: 'update',
@@ -797,6 +706,27 @@ export async function createBill(
     : { type: 'complete_checkout', ...baseUndoData };
 
   pushUndo(undoData);
+
+  // Localized business-action summary, e.g. "B-704053 created with 3 items
+  // (total 100 LBP)". Built in the store's language from the supplied dictionaries.
+  const billLabel = (bill.bill_number ?? '').replace(/^BILL-/i, 'B-');
+  const itemCount = mappedLineItems.length;
+  const summaryDict = deps.language === 'ar' ? i18n?.ar : i18n?.en;
+  const summaryTemplate = summaryDict?.auditLog?.billSummary?.created as string | undefined;
+  const createReason = summaryTemplate
+    ? summaryTemplate
+        .replace('{{billNumber}}', billLabel)
+        .replace('{{count}}', String(itemCount))
+        .replace('{{total}}', String(bill.total_amount ?? 0))
+        .replace('{{currency}}', billCurrency)
+    : `${billLabel} created with ${itemCount} items (total **${bill.total_amount ?? 0} ${billCurrency}**)`;
+
+  await auditService.record({
+    storeId, branchId: currentBranchId, changedBy: userProfileId,
+    entityType: 'bill', entityId: billId, action: 'create',
+    changeReason: createReason,
+    reference: billLabel || null,
+  });
 
   // Notify cash drawer update
   if (cashDrawerResult && cashDrawerTransactionId) {
@@ -836,7 +766,6 @@ export async function reactivateBill(
   if (!storeId) throw new Error('No store ID available');
 
   const now = new Date().toISOString();
-  const auditLogId = createId();
 
   const bill = await getDB().bills.get(billId);
   if (!bill) throw new Error('Bill not found');
@@ -883,7 +812,6 @@ export async function reactivateBill(
   await getDB().transaction('rw', [
     getDB().bills,
     getDB().bill_line_items,
-    getDB().bill_audit_logs,
     getDB().journal_entries,
     getDB().transactions,
     getDB().inventory_items
@@ -986,28 +914,14 @@ export async function reactivateBill(
         }
       }
     }
+  });
 
-    // Create audit log
-    const generatedReason = reactivationReason || `Reactivating bill #${bill.bill_number} - restoring accounting effects`;
-    const auditLog = {
-      id: auditLogId,
-      bill_id: billId,
-      store_id: storeId,
-      action: 'updated' as const,
-      field_changed: 'status',
-      old_value: 'cancelled',
-      new_value: 'active',
-      change_reason: generatedReason,
-      changed_by: reactivatedBy,
-      ip_address: null,
-      user_agent: null,
-      created_at: now,
-      updated_at: now,
-      branch_id: currentBranchId || '',
-      _synced: false
-    };
-
-    await getDB().bill_audit_logs.add(auditLog);
+  await auditService.record({
+    storeId, branchId: currentBranchId, changedBy: reactivatedBy,
+    entityType: 'bill', entityId: billId, action: 'reactivate',
+    changes: [{ field: 'status', old: 'cancelled', new: 'active' }],
+    changeReason: reactivationReason ?? `Bill #${bill.bill_number} reactivated`,
+    reference: (bill.bill_number ?? '').replace(/^BILL-/i, 'B-') || null,
   });
 
   await refreshData();

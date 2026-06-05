@@ -1107,14 +1107,14 @@ ${dashSeparator}`;
     setIsProcessing(true);
     
     try {
-      // Validate accounting foundation is synced before processing sale
-      // This is a safety check in case processSale is called from elsewhere
       const storeId = raw.storeId || userProfile?.store_id;
       if (!storeId) {
         throw new Error('Store ID not found. Please refresh the page and try again.');
       }
-      
-      await accountingInitService.validateAccountingSetup(storeId);
+
+      // Accounting setup is already validated in handleCheckout() before this runs
+      // (both the direct path and the cash-drawer-modal path go through it), so the
+      // redundant validateAccountingSetup() network/Dexie round-trip is skipped here.
 
       // Prepare bill data
       const amountReceived = parseFloat(activeTab.amountReceived) || 0;
@@ -1193,6 +1193,26 @@ ${dashSeparator}`;
         }
       }
 
+      // Kick off QR-token generation IN PARALLEL with bill creation. It uses a
+      // customer-level token (billId = null) so it does not depend on the bill
+      // existing — overlapping its Supabase round-trip with createBill's local
+      // work keeps it off the critical path instead of adding 0.5–2s afterwards.
+      // IMPORTANT: Tokens are only valid for real customers (public_access_tokens.customer_id FK).
+      const qrCustomerEntity = activeTab.selectedCustomer
+        ? customers.find(c => c.id === activeTab.selectedCustomer)
+        : undefined;
+      const qrCodePromise: Promise<any> | null = qrCustomerEntity
+        ? generateQRCodeForReceipt(
+            qrCustomerEntity.id,
+            null, // Bill not in Supabase yet - use customer-level token
+            billData.bill_number,
+            qrCustomerEntity.name
+          ).catch(qrError => {
+            console.warn('Failed to generate QR code:', qrError);
+            return null; // Don't fail the sale if QR generation fails
+          })
+        : null;
+
       // Use offline-first bill creation from OfflineDataContext
       console.log('💳 [POS] Creating bill with data:', {
         entity_id: billData.entity_id,
@@ -1200,41 +1220,16 @@ ${dashSeparator}`;
         amountDue: customerBalanceUpdate?.amountDue || 0,
         hasBalanceUpdate: !!customerBalanceUpdate
       });
-      
+
       const billId = await raw.createBill(billData, lineItemsData, customerBalanceUpdate || undefined);
-      
+
       console.log('💳 [POS] ✅ Bill created successfully:', billId);
 
-      // The sale is now handled entirely through the bill creation above
-      // No need for separate sale_items creation since bill_line_items now contains all sale data
-      // Inventory deductions and cash drawer updates are handled in the createBill function
+      // The sale is handled entirely through bill creation above. Inventory
+      // deductions and cash drawer updates are handled inside createBill.
 
-      // Generate QR code for customer account statement if a customer is selected
-      // IMPORTANT: Tokens are only valid for real customers (public_access_tokens.customer_id FK)
-      let qrCodeData = null;
-      if (activeTab.selectedCustomer) {
-        try {
-          // First try to find as customer
-          const customerEntity = customers.find(c => c.id === activeTab.selectedCustomer);
-
-          if (customerEntity) {
-            // Don't pass billId since bill is only local at this point (not synced to Supabase yet)
-            // Token will give the customer access to their full statement
-            qrCodeData = await generateQRCodeForReceipt(
-              customerEntity.id,
-              null, // Bill not in Supabase yet - use customer-level token
-              billData.bill_number,
-              customerEntity.name
-            );
-          } else {
-            // Selected entity is not a customer (likely a supplier) -> skip QR token generation
-            console.log('Skipping QR token generation: selected entity is not a customer');
-          }
-        } catch (qrError) {
-          console.warn('Failed to generate QR code:', qrError);
-          // Don't fail the entire transaction if QR code generation fails
-        }
-      }
+      // Resolve the QR token started in parallel above (usually already settled).
+      const qrCodeData = qrCodePromise ? await qrCodePromise : null;
 
       // Dispatch to smart print handler (thermal or formal A4 based on settings + detected printers)
       // First try to find as customer
@@ -1247,9 +1242,11 @@ ${dashSeparator}`;
 
       await handlePrint(billData, lineItemsData, entity, qrCodeData);
       
-      // Also download receipt for preview/testing
-
-      await raw.refreshData(); // Ensure UI is in sync with backend
+      // NOTE: do NOT call raw.refreshData() here. createBill() already runs a full
+      // refreshData() + refreshCashDrawerStatus() internally before it returns
+      // (see billOperations.ts), so the UI is already in sync. A second call would
+      // re-run the entire ~18-table IndexedDB rehydration, roughly doubling the
+      // post-sale spinner time.
 
       if (activeTabs.length > 1) {
         closeTab(activeTabId);
@@ -1278,7 +1275,7 @@ ${dashSeparator}`;
   }
 
   return (
-    <div className="p-6 pt-3">
+    <div className="p-6 pt-3 stagger">
       {/* <h1 className="text-2xl font-bold text-gray-900 mb-6">{t('pos.header')}</h1> */}
 
       {/* Bill Tabs */}
@@ -2032,8 +2029,8 @@ function PrintConfirmDialog({
   const [selectedPrinter, setSelectedPrinter] = React.useState(initial);
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-[200]">
-      <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm space-y-4">
+    <div className="animate-modal-fade fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-[200]">
+      <div className="animate-modal-pop bg-white rounded-xl shadow-xl p-6 w-full max-w-sm space-y-4">
         <h2 className="text-lg font-semibold text-gray-900">Print Bill?</h2>
         <p className="text-sm text-gray-600">A printer was detected. Do you want to print the bill?</p>
 

@@ -21,6 +21,13 @@ export type {
   TaxonomyDataLayerAdapter,
   TaxonomyDataLayerResult,
 } from './useTaxonomyDataLayer';
+export { useAuditLogDataLayer } from './useAuditLogDataLayer';
+export type {
+  AuditLogDataLayerAdapter,
+  AuditLogDataLayerResult,
+  AuditLogFilters,
+  AuditLogWithUser,
+} from './useAuditLogDataLayer';
 export type {
   ProductDataLayerAdapter,
   ProductDataLayerResult,

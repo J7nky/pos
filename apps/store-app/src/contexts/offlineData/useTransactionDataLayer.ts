@@ -16,6 +16,7 @@ import { TRANSACTION_CATEGORIES } from '../../constants/transactionCategories';
 import type { Transaction } from '../../types';
 import type { TransactionDataLayerAdapter, TransactionDataLayerResult, Tables } from './types';
 import { currencyService } from '../../services/currencyService';
+import { sameRowList } from '../../utils/rowListEquality';
 import { assertValidCurrency } from '../../utils/currencyValidation';
 import { notificationService } from '../../services/notificationService';
 import { InvalidCurrencyError } from '../../errors/currencyErrors';
@@ -62,7 +63,7 @@ export function useTransactionDataLayer(
   const [transactions, setTransactions] = useState<Tables['transactions']['Row'][]>([]);
 
   const hydrate = useCallback((transactionsData: Tables['transactions']['Row'][]) => {
-    setTransactions(transactionsData);
+    setTransactions(prev => (sameRowList(prev, transactionsData) ? prev : transactionsData));
   }, []);
 
   const addTransaction = useCallback(

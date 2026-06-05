@@ -6,6 +6,8 @@
 import { useState, useCallback } from 'react';
 import { getDB } from '../../lib/db';
 import { emitBranchEvent, buildEventOptions } from '../../services/eventEmissionHelper';
+import { auditService } from '../../services/auditService';
+import { sameRowList } from '../../utils/rowListEquality';
 import type { BranchDataLayerAdapter, BranchDataLayerResult } from './types';
 import type { Branch } from '../../types';
 
@@ -14,7 +16,8 @@ export function useBranchDataLayer(adapter: BranchDataLayerAdapter): BranchDataL
   const [branches, setBranches] = useState<Branch[]>([]);
 
   const hydrate = useCallback((branchesData: Branch[]) => {
-    setBranches(branchesData || []);
+    const next = branchesData || [];
+    setBranches(prev => (sameRowList(prev, next) ? prev : next));
   }, []);
 
   const updateBranch = useCallback(
@@ -50,6 +53,15 @@ export function useBranchDataLayer(adapter: BranchDataLayerAdapter): BranchDataL
       });
 
       resetAutoSyncTimer();
+
+      const branchChanges = auditService.diffUpdates(originalBranch, updates as Record<string, unknown>);
+      if (branchChanges.length > 0) {
+        await auditService.record({
+          storeId, branchId: id, changedBy: userProfileId,
+          entityType: 'branch', entityId: id, action: 'update',
+          changes: branchChanges,
+        });
+      }
 
       await emitBranchEvent(
         buildEventOptions(storeId!, id, userProfileId, 'update', {

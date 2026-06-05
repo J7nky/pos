@@ -5,6 +5,7 @@ import { useSupabaseAuth } from './SupabaseAuthContext';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { Database } from '../types/database';
 import { BillLineItem, NotificationPreferences, Branch } from '../types';
+import type { ModuleName, OperationName, UserModuleAccess } from '../types';
 import {
   getDB,
   createId,
@@ -13,6 +14,9 @@ import { syncService, type SyncResult } from '../services/syncOrchestrator';
 import { currencyService } from '../services/currencyService';
 import { salaryAccrualService } from '../services/salaryAccrualService';
 import { crudHelperService } from '../services/crudHelperService';
+import { auditService } from '../services/auditService';
+import { permissionCache } from '../services/permissionCache';
+import { emitUserEvent, buildEventOptions } from '../services/eventEmissionHelper';
 // import { PAYMENT_CATEGORIES } from '../constants/paymentCategories'; // Unused
 import enLocale from '../i18n/locales/en';
 import arLocale from '../i18n/locales/ar';
@@ -43,8 +47,9 @@ import {
   useStoreSettingsDataLayer,
   useNotificationsDataLayer,
   useTaxonomyDataLayer,
+  useAuditLogDataLayer,
 } from './offlineData';
-import type { OfflineDataContextType, OfflineSyncSessionState } from './offlineData/offlineDataContextContract';
+import type { OfflineDataContextType, OfflineSyncSessionState, RefreshScope } from './offlineData/offlineDataContextContract';
 import { useStoreSwitchLifecycle } from './offlineData/useStoreSwitchLifecycle';
 import { useBranchBootstrapEffects } from './offlineData/useBranchBootstrapEffects';
 import { useOfflineInitialization } from './offlineData/useOfflineInitialization';
@@ -165,14 +170,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   // Small arrays without a dedicated layer
   const [expenseCategories, setExpenseCategories] = useState<any[]>([]);
-  const [billAuditLogs, setBillAuditLogs] = useState<any[]>([]);
   const [missedProducts, setMissedProducts] = useState<any[]>([]);
 
   // ─── Stable callback refs (resolve circular deps between layers) ──────────
   // These refs are updated every render after all definitions, so the stable
   // wrappers below always forward to the latest implementation.
   const pushUndoRef = useRef<(data: any) => void>(() => {});
-  const refreshDataRef = useRef<() => Promise<void>>(async () => {});
+  const refreshDataRef = useRef<(scope?: RefreshScope) => Promise<void>>(async () => {});
   const resetAutoSyncTimerRef = useRef<() => void>(() => {});
   const updateUnsyncedCountRef = useRef<() => Promise<void>>(async () => {});
   const debouncedSyncRef = useRef<() => void>(() => {});
@@ -183,6 +187,10 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const stablePushUndo = useCallback((data: any) => pushUndoRef.current(data), []);
   const stableRefreshData = useCallback(() => refreshDataRef.current(), []);
+  // Financial-scoped refresh (transactions + cash drawer) for the transaction
+  // data layer — avoids rehydrating product/entity/inventory layers after an
+  // expense / income / standalone transaction. See refreshData('financial').
+  const stableRefreshFinancialData = useCallback(() => refreshDataRef.current('financial'), []);
   const stableResetAutoSyncTimer = useCallback(() => resetAutoSyncTimerRef.current(), []);
   const stableUpdateUnsyncedCount = useCallback(() => updateUnsyncedCountRef.current(), []);
   const stableDebouncedSync = useCallback(() => debouncedSyncRef.current(), []);
@@ -197,8 +205,19 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const inventoryLayer = useInventoryDataLayer({});
   const taxonomyLayer = useTaxonomyDataLayer({
     storeId,
+    currentBranchId,
+    userProfileId: userProfile?.id,
     resetAutoSyncTimer: stableResetAutoSyncTimer,
     debouncedSync: stableDebouncedSync,
+  });
+
+  // Audit-log viewer — read-only getters with role-scoped visibility.
+  const auditLogLayer = useAuditLogDataLayer({
+    storeId,
+    currentBranchId,
+    userProfileId: userProfile?.id,
+    userRole: userProfile?.role,
+    userBranchId: userProfile?.branch_id,
   });
 
   // Layers that need pushUndo + resetAutoSyncTimer
@@ -231,7 +250,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const transactionLayer = useTransactionDataLayer({
     storeId, currentBranchId, userProfileId: userProfile?.id,
     pushUndo: stablePushUndo, resetAutoSyncTimer: stableResetAutoSyncTimer,
-    refreshData: stableRefreshData,
+    // Transaction CRUD only touches transactions + cash drawer → financial scope.
+    refreshData: stableRefreshFinancialData,
     updateUnsyncedCount: stableUpdateUnsyncedCount,
     debouncedSync: stableDebouncedSync,
   });
@@ -263,7 +283,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const [preferredCurrency, setPreferredCurrency] = useState<CurrencyCode>('USD');
 
   const settingsLayer = useStoreSettingsDataLayer({
-    storeId, isOnline, isSyncing,
+    storeId, currentBranchId, userProfileId: userProfile?.id, isOnline, isSyncing,
     updateUnsyncedCount: stableUpdateUnsyncedCount,
     performSync: stablePerformSync,
     resetAutoSyncTimer: stableResetAutoSyncTimer,
@@ -425,8 +445,55 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // ─── refreshData — calls each layer's hydrate() ───────────────────────────
-  const refreshData = useCallback(async () => {
+  const refreshData = useCallback(async (scope: RefreshScope = 'all') => {
     if (!storeId) return;
+
+    // ── Targeted post-sale refresh ────────────────────────────────────────────
+    // A completed sale (createBill) only mutates bills, bill_line_items,
+    // inventory_items, inventory_bills (bill-completion can close one) and
+    // transactions. Reloading just those layers avoids the full ~18-table
+    // rehydration — notably the O(N) product scan in loadAllStoreData — which is
+    // the bulk of the post-sale spinner. The loaders below are identical to the
+    // full path's, so hydration is byte-for-byte the same, just fewer tables.
+    // Entity balances are journal-derived via entityBalanceCache and are not
+    // refreshed by refreshData in EITHER mode, so scoping does not regress them.
+    if (scope === 'sale') {
+      try {
+        const [inventoryData, batchesData, transactionsData, billsData, billLineItemsData] =
+          await Promise.all([
+            crudHelperService.getEntitiesByStoreBranch('inventory_items', storeId, currentBranchId),
+            crudHelperService.getEntitiesByStoreBranch('inventory_bills', storeId, currentBranchId),
+            crudHelperService.getEntitiesByStoreBranch('transactions', storeId, currentBranchId),
+            crudHelperService.getEntitiesByStoreBranch('bills', storeId, currentBranchId),
+            crudHelperService.getEntitiesByStoreBranch('bill_line_items', storeId, currentBranchId),
+          ]);
+        transactionLayer.hydrate(transactionsData as unknown as Tables['transactions']['Row'][]);
+        await billLayer.hydrate(billsData, billLineItemsData);
+        inventoryLayer.hydrate(inventoryData, batchesData);
+        debug('✅ Targeted post-sale refresh completed');
+      } catch (error) {
+        console.error('❌ Error during targeted sale refresh:', error);
+      }
+      return;
+    }
+
+    // ── Targeted financial refresh (transactions + cash drawer) ───────────────
+    // Expenses, income and standalone transactions only mutate the transactions
+    // table (+ the cash drawer for cash). Skipping the other layers avoids the
+    // full re-render cascade. Entity balances are journal-derived via
+    // entityBalanceCache and are unaffected by refreshData in any mode.
+    if (scope === 'financial') {
+      try {
+        const transactionsData = await crudHelperService.getEntitiesByStoreBranch('transactions', storeId, currentBranchId);
+        transactionLayer.hydrate(transactionsData as unknown as Tables['transactions']['Row'][]);
+        await cashDrawerLayer.refreshCashDrawerStatus();
+        debug('✅ Targeted financial refresh completed');
+      } catch (error) {
+        console.error('❌ Error during targeted financial refresh:', error);
+      }
+      return;
+    }
+
     debug('🔄 Refreshing data for store:', storeId);
 
     try {
@@ -446,7 +513,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         batchesData,
         billsData,
         billLineItemsData,
-        billAuditLogsData,
         missedProductsData,
         journalEntriesData,
         entitiesData,
@@ -486,7 +552,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       );
 
       // Small arrays without dedicated layers
-      setBillAuditLogs(billAuditLogsData);
       setMissedProducts(missedProductsData);
 
       // Load store settings from DB
@@ -674,13 +739,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
 
   const archiveInventoryItem = (id: string): Promise<void> =>
     inventoryItemOps.archiveInventoryItem(
-      { storeId, pushUndo, resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer, refreshData },
+      { storeId, currentBranchId, userProfileId, pushUndo, resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer, refreshData },
       id
     );
 
   const unarchiveInventoryItem = (id: string): Promise<void> =>
     inventoryItemOps.unarchiveInventoryItem(
-      { storeId, pushUndo, resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer, refreshData },
+      { storeId, currentBranchId, userProfileId, pushUndo, resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer, refreshData },
       id
     );
 
@@ -731,13 +796,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const billCreateDepsRef = useRef<billOperations.BillCreateDeps>(null!);
   billCreateDepsRef.current = {
     storeId, currentBranchId, userProfileId: userProfile?.id,
-    pushUndo, refreshData,
+    // Post-sale uses the targeted refresh — only the tables a sale mutates — to
+    // keep the post-sale spinner short. See refreshData('sale') above.
+    pushUndo, refreshData: () => refreshData('sale'),
     updateUnsyncedCount: syncStateLayer.updateUnsyncedCount,
     resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer,
     debouncedSync: syncStateLayer.debouncedSync,
     createCashDrawerTransactionAtomic,
     createCashDrawerUndoData,
     refreshCashDrawerStatus: cashDrawerLayer.refreshCashDrawerStatus,
+    language: settingsLayer.language,
   };
 
   const billReactivateDepsRef = useRef<billOperations.BillReactivateDeps>(null!);
@@ -777,6 +845,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     updateUnsyncedCount: syncStateLayer.updateUnsyncedCount,
     resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer,
     debouncedSync: syncStateLayer.debouncedSync,
+    language: settingsLayer.language,
   };
 
   const addInventoryBatchDelegate = useCallback(
@@ -806,6 +875,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     updateUnsyncedCount: stableUpdateUnsyncedCount,
     debouncedSync: stableDebouncedSync,
     i18n: { en: enLocale, ar: arLocale },
+    language: settingsLayer.language,
   };
 
   const processEmployeePaymentDepsRef = useRef<paymentOps.ProcessEmployeePaymentDeps>(null!);
@@ -877,6 +947,19 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       });
   }, [isDataReady, storeId, currentBranchId, userProfile?.id]);
 
+  // Opportunistic local audit-log retention prune (4-month, decision 4). Runs
+  // once per session after data is ready; server-side pg_cron prunes the same
+  // window. Best-effort — failures are swallowed inside the service.
+  const auditPruneRef = useRef(false);
+  useEffect(() => {
+    if (!isDataReady || !storeId) return;
+    if (auditPruneRef.current) return;
+    auditPruneRef.current = true;
+    auditService.pruneLocal(storeId).then((n) => {
+      if (n > 0) console.log(`[audit] Pruned ${n} local audit rows older than 4 months`);
+    });
+  }, [isDataReady, storeId]);
+
   // ─── Misc utilities ────────────────────────────────────────────────────────
   const ensureDataReady = useCallback((): Promise<void> => {
     if (isDataReadyRef.current) return Promise.resolve();
@@ -917,6 +1000,146 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       return perms.filter((p: any) => !p._deleted) ?? [];
     } catch (error) { console.error('Error getting role permissions from local database:', error); return []; }
   }, []);
+
+  // --- RBAC: per-user module access overrides (backed by user_permissions) ---
+  // Module access is modeled as the `access_<module>` operation: a user-specific
+  // row in `user_permissions` overrides the role default. The UI (ModuleAccessManager)
+  // works in `{ module, can_access }` terms, so we translate at this boundary.
+
+  const getUserModuleAccessOverrides = useCallback(
+    async (targetUserId: string, targetStoreId: string): Promise<UserModuleAccess[]> => {
+      try {
+        const rows = await getDB().user_permissions
+          .where('[user_id+store_id]')
+          .equals([targetUserId, targetStoreId])
+          .filter((p: any) => !p._deleted && typeof p.operation === 'string' && p.operation.startsWith('access_'))
+          .toArray();
+        return rows.map((p: any) => ({
+          id: p.id,
+          user_id: p.user_id,
+          store_id: p.store_id,
+          module: (p.operation as string).replace('access_', '') as ModuleName,
+          can_access: p.allowed,
+          created_at: p.created_at,
+          updated_at: p.updated_at,
+          _synced: p._synced,
+          _deleted: p._deleted,
+        }));
+      } catch (error) {
+        console.error('Error reading user module access overrides:', error);
+        return [];
+      }
+    },
+    []
+  );
+
+  const setUserModuleAccessOverride = useCallback(
+    async ({ userId: targetUserId, storeId: targetStoreId, module, canAccess }: {
+      userId: string; storeId: string; module: ModuleName; canAccess: boolean;
+    }): Promise<void> => {
+      const operation = `access_${module}` as OperationName;
+      const existing = await getDB().user_permissions
+        .where('[user_id+store_id+operation]')
+        .equals([targetUserId, targetStoreId, operation])
+        .first();
+
+      const now = new Date().toISOString();
+      let recordId: string;
+      const oldValue: boolean | null = existing && !existing._deleted ? existing.allowed : null;
+
+      // Write directly to the typed Dexie table. `user_permissions` is absent
+      // from the Supabase-generated `Tables` type, so crudHelperService can't be
+      // type-checked for it; the offline-first sync flags (_synced/updated_at)
+      // are set inline exactly like useBranchDataLayer's direct writes.
+      if (existing) {
+        recordId = existing.id;
+        await getDB().user_permissions.update(existing.id, {
+          allowed: canAccess,
+          _deleted: false,
+          _synced: false,
+          updated_at: now,
+        });
+      } else {
+        recordId = createId();
+        const row: UserPermission = {
+          id: recordId,
+          user_id: targetUserId,
+          store_id: targetStoreId,
+          operation,
+          allowed: canAccess,
+          created_at: now,
+          updated_at: now,
+          _synced: false,
+          _deleted: false,
+        };
+        await getDB().user_permissions.add(row);
+      }
+
+      // The change must take effect immediately on the acting device; other
+      // devices pick it up via sync (event below) + cache expiry on refresh.
+      permissionCache.clear(targetUserId, targetStoreId);
+
+      await emitUserEvent(
+        targetUserId,
+        buildEventOptions(targetStoreId, currentBranchId, userProfile?.id, existing ? 'update' : 'create', { operation })
+      );
+
+      await auditService.record({
+        storeId: targetStoreId,
+        branchId: currentBranchId,
+        changedBy: userProfile?.id,
+        entityType: 'user_permission',
+        entityId: recordId,
+        action: existing ? 'update' : 'create',
+        changes: [{ field: operation, old: oldValue, new: canAccess }],
+        changeReason: `Module access ${canAccess ? 'granted' : 'blocked'}: ${module} for user ${targetUserId}`,
+      });
+
+      await stableUpdateUnsyncedCount();
+      stableResetAutoSyncTimer();
+      stableDebouncedSync();
+    },
+    [currentBranchId, userProfile?.id, stableUpdateUnsyncedCount, stableResetAutoSyncTimer, stableDebouncedSync]
+  );
+
+  const removeUserModuleAccessOverride = useCallback(
+    async (targetUserId: string, targetStoreId: string, module: ModuleName): Promise<void> => {
+      const operation = `access_${module}` as OperationName;
+      const existing = await getDB().user_permissions
+        .where('[user_id+store_id+operation]')
+        .equals([targetUserId, targetStoreId, operation])
+        .first();
+      if (!existing || existing._deleted) return;
+
+      await getDB().user_permissions.update(existing.id, {
+        _deleted: true,
+        _synced: false,
+        updated_at: new Date().toISOString(),
+      });
+      permissionCache.clear(targetUserId, targetStoreId);
+
+      await emitUserEvent(
+        targetUserId,
+        buildEventOptions(targetStoreId, currentBranchId, userProfile?.id, 'delete', { operation })
+      );
+
+      await auditService.record({
+        storeId: targetStoreId,
+        branchId: currentBranchId,
+        changedBy: userProfile?.id,
+        entityType: 'user_permission',
+        entityId: existing.id,
+        action: 'delete',
+        changes: [{ field: operation, old: existing.allowed, new: null }],
+        changeReason: `Module access override removed: ${module} for user ${targetUserId} (restored to role default)`,
+      });
+
+      await stableUpdateUnsyncedCount();
+      stableResetAutoSyncTimer();
+      stableDebouncedSync();
+    },
+    [currentBranchId, userProfile?.id, stableUpdateUnsyncedCount, stableResetAutoSyncTimer, stableDebouncedSync]
+  );
 
   const getStore = async (sid: string): Promise<any | null> => {
     try { return (await getDB().stores.get(sid)) || null; }
@@ -1020,7 +1243,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         expenseCategories: [],
         bills: [],
         billLineItems: [],
-        billAuditLogs: [],
         missedProducts: [],
         journalEntries: [],
         entities: [],
@@ -1089,13 +1311,17 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         reactivateBill: async () => {},
         getBills: async () => [],
         getBillDetails: async () => null,
-        createBillAuditLog: async () => {},
         getStore: async () => null,
         getBranchLogo: async () => null,
         getBranchById: async () => undefined,
         getFirstBranchForStore: async () => null,
         getUserById: async () => undefined,
         getRolePermissionsByRole: async () => [],
+        getUserModuleAccessOverrides: async () => [],
+        setUserModuleAccessOverride: async () => {},
+        removeUserModuleAccessOverride: async () => {},
+        getAuditLogs: async () => [],
+        getEntityAuditLogs: async () => [],
         ensureDataReady: async () => {},
         getGlobalLogos: async () => [],
         deductInventoryQuantity: async () => {},
@@ -1178,7 +1404,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       expenseCategories,
       bills: billLayer.bills,
       billLineItems: billLayer.billLineItems,
-      billAuditLogs,
       missedProducts,
       journalEntries: accountingLayer.journalEntries,
       entities: entityLayer.entities,
@@ -1276,7 +1501,6 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       reactivateBill: reactivateBillDelegate,
       getBills: billLayer.getBills,
       getBillDetails: billLayer.getBillDetails,
-      createBillAuditLog: billLayer.createBillAuditLog,
 
       // Store / logo utilities
       getStore,
@@ -1285,6 +1509,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       getFirstBranchForStore,
       getUserById,
       getRolePermissionsByRole,
+      getUserModuleAccessOverrides,
+      setUserModuleAccessOverride,
+      removeUserModuleAccessOverride,
+      getAuditLogs: auditLogLayer.getAuditLogs,
+      getEntityAuditLogs: auditLogLayer.getEntityAuditLogs,
       ensureDataReady,
       getGlobalLogos,
 

@@ -39,9 +39,10 @@ export class SyncDebugger {
       'chart_of_accounts', 'entities',
       'inventory_bills', 'inventory_items',
       'transactions', 'journal_entries', 'balance_snapshots',
-      'bills', 'bill_line_items', 'bill_audit_logs',
+      'bills', 'bill_line_items',
       'missed_products', 'reminders',
-      'role_permissions', 'user_permissions'
+      'role_permissions', 'user_permissions',
+      'audit_logs'
     ];
 
     const discrepancies: SyncDiscrepancy[] = [];

@@ -25,7 +25,8 @@ import {
   WifiOff,
   Calculator,
   UserCog,
-  CloudOff
+  CloudOff,
+  ScrollText
 } from 'lucide-react';
 
 // Layout-independent navigation shortcuts. `key` drives the native HTML
@@ -374,7 +375,8 @@ export default function Layout() {
     { id: 'reports', label: t('nav.reports'), icon: FileText, path: '/reports', module: 'reports' as ModuleName },
     { id: 'unsynced', label: t('nav.unsynced'), icon: CloudOff, path: '/unsynced', module: null },
     { id: 'settings', label: t('nav.settings'), icon: Settings, path: '/settings', module: 'settings' as ModuleName },
-    { id: 'employees', label: t('nav.employees'), icon: UserCog, path: '/employees', module: 'users' as ModuleName }
+    { id: 'employees', label: t('nav.employees'), icon: UserCog, path: '/employees', module: 'users' as ModuleName },
+    { id: 'audit-log', label: t('nav.auditLog'), icon: ScrollText, path: '/audit-log', module: null }
   ];
 
   // Filter menu items based on module access

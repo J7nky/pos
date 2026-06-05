@@ -1,28 +1,28 @@
 /**
  * Bill/sales domain layer for OfflineDataContext (§1.3).
- * Owns bills, billLineItems, sales state + hydrate + getBills, getBillDetails, createBillAuditLog, getBillsByIds, getBillLineItemsByInventoryItemIds.
+ * Owns bills, billLineItems, sales state + hydrate + getBills, getBillDetails, getBillsByIds, getBillLineItemsByInventoryItemIds.
  * createBill, updateBill, deleteBill, addSale, updateSale, deleteSale remain in context (complex cross-domain deps).
  */
 
 import { useState, useCallback } from 'react';
-import { createId } from '../../lib/db';
 import { getDB } from '../../lib/db';
 import { getLocalDateString } from '../../utils/dateUtils';
 import { normalizeNameForComparison } from '../../utils/nameNormalization';
 import { BillLineItemTransforms } from '../../types';
 import type { BillLineItem } from '../../types';
+import { sameRowList } from '../../utils/rowListEquality';
 import type { BillDataLayerAdapter, BillDataLayerResult } from './types';
 
 export function useBillDataLayer(adapter: BillDataLayerAdapter): BillDataLayerResult {
-  const { storeId, currentBranchId, refreshData, updateUnsyncedCount, debouncedSync } = adapter;
+  const { storeId } = adapter;
   const [bills, setBills] = useState<any[]>([]);
   const [billLineItems, setBillLineItems] = useState<any[]>([]);
   const [sales, setSales] = useState<BillLineItem[]>([]);
 
   const hydrate = useCallback(
     async (billsData: any[], billLineItemsData: any[]): Promise<void> => {
-      setBills(billsData);
-      setBillLineItems(billLineItemsData);
+      setBills(prev => (sameRowList(prev, billsData) ? prev : billsData));
+      setBillLineItems(prev => (sameRowList(prev, billLineItemsData) ? prev : billLineItemsData));
       // unit_price is taken from persisted bill_line_items only — never re-derived from live inventory pricing (Feature 016 / T023).
       const transformedSaleItems: BillLineItem[] = billLineItemsData.map((item: any) =>
         BillLineItemTransforms.fromDbRow({
@@ -43,7 +43,7 @@ export function useBillDataLayer(adapter: BillDataLayerAdapter): BillDataLayerRe
           branch_id: item.branch_id,
         })
       );
-      setSales(transformedSaleItems);
+      setSales(prev => (sameRowList(prev, transformedSaleItems) ? prev : transformedSaleItems));
     },
     []
   );
@@ -149,49 +149,12 @@ export function useBillDataLayer(adapter: BillDataLayerAdapter): BillDataLayerRe
         .filter((item: any) => !item._deleted)
         .toArray();
 
-      const auditLogs = await getDB().bill_audit_logs
-        .where('bill_id')
-        .equals(billId)
-        .filter((log: any) => !log._deleted)
-        .toArray();
-
-      const auditLogsWithUsers = await Promise.all(
-        auditLogs.map(async (log: any) => {
-          const user = await getDB().users.get(log.changed_by);
-          return {
-            ...log,
-            users: user ? { name: (user as any).name, email: (user as any).email } : undefined,
-          };
-        })
-      );
-
       return {
         ...bill,
         line_items: lineItems,
-        bill_audit_logs: auditLogsWithUsers,
       };
     },
     [storeId]
-  );
-
-  const createBillAuditLog = useCallback(
-    async (auditData: any): Promise<void> => {
-      if (!storeId) throw new Error('No store ID available');
-
-      const auditLog = {
-        id: createId(),
-        store_id: storeId,
-        created_at: new Date().toISOString(),
-        _synced: false,
-        ...auditData,
-      };
-
-      await getDB().bill_audit_logs.add(auditLog);
-      await refreshData();
-      await updateUnsyncedCount();
-      debouncedSync();
-    },
-    [storeId, refreshData, updateUnsyncedCount, debouncedSync]
   );
 
   const getBillsByIds = useCallback(async (ids: string[]): Promise<any[]> => {
@@ -229,7 +192,6 @@ export function useBillDataLayer(adapter: BillDataLayerAdapter): BillDataLayerRe
     hydrate,
     getBills,
     getBillDetails,
-    createBillAuditLog,
     getBillsByIds,
     getBillLineItemsByInventoryItemIds,
   };

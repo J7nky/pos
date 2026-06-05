@@ -249,7 +249,7 @@ export default function Settings() {
   const visibleTabs = tabs.filter(tab => tab.visible);
 
   return (
-    <div className="p-6">
+    <div className="p-6 stagger">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">{t('settings.header')}</h1>
         {showSaveMessage && (

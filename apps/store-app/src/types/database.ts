@@ -762,52 +762,6 @@ export interface Database {
           updated_at?: string;
         };
       };
-      bill_audit_logs: {
-        Row: {
-          id: string;
-          store_id: string;
-          bill_id: string;
-          action: 'created' | 'updated' | 'deleted' | 'item_added' | 'item_removed' | 'item_modified' | 'payment_updated';
-          field_changed: string | null;
-          old_value: string | null;
-          new_value: string | null;
-          change_reason: string | null;
-          changed_by: string;
-          ip_address: string | null;
-        
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          id?: string;
-          store_id: string;
-          bill_id: string;
-          action: 'created' | 'updated' | 'deleted' | 'item_added' | 'item_removed' | 'item_modified' | 'payment_updated';
-          field_changed?: string | null;
-          old_value?: string | null;
-          new_value?: string | null;
-          change_reason?: string | null;
-          changed_by: string;
-          ip_address?: string | null;
-        
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: {
-          id?: string;
-          store_id?: string;
-          bill_id?: string;
-          action?: 'created' | 'updated' | 'deleted' | 'item_added' | 'item_removed' | 'item_modified' | 'payment_updated';
-          field_changed?: string | null;
-          old_value?: string | null;
-          new_value?: string | null;
-          change_reason?: string | null;
-          changed_by?: string;
-          ip_address?: string | null;
-        
-          updated_at?: string;
-        };
-      };
       inventory_bills: {
         Row: {
           id: string;

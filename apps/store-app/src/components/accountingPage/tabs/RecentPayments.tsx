@@ -1151,8 +1151,8 @@ export default function RecentPayments({
 
       {/* Edit Payment Modal */}
       {editingPayment && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-md w-full">
+        <div className="animate-modal-fade fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="animate-modal-pop bg-white rounded-lg max-w-md w-full">
             <div className="p-6 border-b">
               <h2 className="text-xl font-semibold text-gray-900">
                 {t('payments.editPayment') || 'Edit Payment'}
@@ -1228,8 +1228,8 @@ export default function RecentPayments({
 
       {/* Delete Confirmation Modal */}
       {deletingPayment && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-lg w-full max-h-[90vh] overflow-y-auto">
+        <div className="animate-modal-fade fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="animate-modal-pop bg-white rounded-lg max-w-lg w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b">
               <h2 className="text-xl font-semibold text-gray-900">
                 {t('payments.deletePaymentTitle') || 'Delete Payment'}

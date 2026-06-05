@@ -102,15 +102,20 @@ export const TRANSACTION_ACCOUNT_MAPPING: Record<TransactionCategory, AccountMap
   },
   
   [TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_GIVEN]: {
-    debitAccount: '1400', // Prepaid Expenses (increases)
+    // An advance is a prepayment that reduces what we owe the supplier, so it
+    // posts against Accounts Payable (a debit / contra balance) rather than a
+    // separate prepaid-asset account. This is what nets the advance into the
+    // supplier's balance and statement (account 2100 is the entity-balance
+    // account for suppliers).
+    debitAccount: '2100', // Accounts Payable (decreases what we owe / prepaid)
     creditAccount: '1100', // Cash (decreases)
     description: 'Advance given to supplier',
     requiresEntity: true
   },
-  
+
   [TRANSACTION_CATEGORIES.SUPPLIER_ADVANCE_DEDUCTED]: {
     debitAccount: '1100', // Cash (increases)
-    creditAccount: '1400', // Prepaid Expenses (decreases)
+    creditAccount: '2100', // Accounts Payable (increases what we owe again)
     description: 'Advance deducted from supplier payment',
     requiresEntity: true
   },

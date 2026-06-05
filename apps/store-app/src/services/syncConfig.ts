@@ -53,13 +53,15 @@ export const SYNC_TABLES = [
   'journal_entries', // Must sync after entities, chart_of_accounts, and bills
   'balance_snapshots', // Must sync after entities
   'bill_line_items',
-  'bill_audit_logs',
   'cash_drawer_sessions',
   'missed_products',
   'reminders',
   // RBAC tables (Role-Based Access Control) - sync for cross-device permissions
   'role_permissions', // Default permissions per role (operations + module access)
-  'user_permissions' // User-specific permission overrides (operations + module access)
+  'user_permissions', // User-specific permission overrides (operations + module access)
+  // General-purpose audit log (v68) — append-only; no FK dependencies (entity_id
+  // is a logical reference into many tables, not a hard FK). Synced last.
+  'audit_logs'
 ] as const;
 
 export type SyncTable = typeof SYNC_TABLES[number];
@@ -97,7 +99,8 @@ export const SYNC_TIERS: Record<DataTierName, readonly SyncTable[]> = {
     // neither is present yet.
     'balance_snapshots',
     'bill_line_items',
-    'bill_audit_logs',
+    // Audit log is business data, not UI-critical — Tier 2.
+    'audit_logs',
   ],
   tier3: ['missed_products', 'reminders'],
 } as const;
@@ -124,12 +127,12 @@ const SYNC_DEPENDENCIES: Record<SyncTable, SyncTable[]> = {
   'inventory_items': ['products', 'inventory_bills', 'units_of_measure'],
   'transactions': [],
   'bill_line_items': ['bills', 'products', 'entities', 'inventory_items'], // supplier_id references entity.id
-  'bill_audit_logs': ['bills'],
   'cash_drawer_sessions': ['cash_drawer_accounts'],
   'missed_products': ['cash_drawer_sessions', 'inventory_items'],
   'reminders': ['users'], // Reminders reference users (created_by, completed_by)
   'role_permissions': [], // RBAC: Role permissions are GLOBAL (no store_id, no dependencies)
-  'user_permissions': ['stores', 'users'] // RBAC: User permissions reference stores and users
+  'user_permissions': ['stores', 'users'], // RBAC: User permissions reference stores and users
+  'audit_logs': ['stores'] // Audit rows belong to a store; entity_id is a soft reference (no hard FK)
 };
 
 /** Topologically order tables within a tier using `SYNC_DEPENDENCIES` (dependencies first). */

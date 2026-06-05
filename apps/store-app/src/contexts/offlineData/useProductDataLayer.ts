@@ -9,6 +9,8 @@ import { createId } from '../../lib/db';
 import { getDB } from '../../lib/db';
 import { crudHelperService } from '../../services/crudHelperService';
 import { emitProductEvent, buildEventOptions } from '../../services/eventEmissionHelper';
+import { auditService } from '../../services/auditService';
+import { sameRowList } from '../../utils/rowListEquality';
 import type { ProductDataLayerAdapter, ProductDataLayerResult, Tables } from './types';
 
 export function useProductDataLayer(adapter: ProductDataLayerAdapter): ProductDataLayerResult {
@@ -16,7 +18,7 @@ export function useProductDataLayer(adapter: ProductDataLayerAdapter): ProductDa
   const [products, setProducts] = useState<Tables['products']['Row'][]>([]);
 
   const hydrate = useCallback((productsData: Tables['products']['Row'][]) => {
-    setProducts(productsData);
+    setProducts(prev => (sameRowList(prev, productsData) ? prev : productsData));
   }, []);
 
   const addProduct = useCallback(
@@ -33,6 +35,12 @@ export function useProductDataLayer(adapter: ProductDataLayerAdapter): ProductDa
       });
 
       resetAutoSyncTimer();
+
+      await auditService.record({
+        storeId, branchId: currentBranchId, changedBy: userProfileId,
+        entityType: 'product', entityId: productId, action: 'create',
+        changeReason: 'Product created',
+      });
 
       await emitProductEvent(
         productId,
@@ -64,6 +72,15 @@ export function useProductDataLayer(adapter: ProductDataLayerAdapter): ProductDa
 
       resetAutoSyncTimer();
 
+      const productChanges = auditService.diffUpdates(originalProduct, updates as Record<string, unknown>);
+      if (productChanges.length > 0) {
+        await auditService.record({
+          storeId, branchId: currentBranchId, changedBy: userProfileId,
+          entityType: 'product', entityId: id, action: 'update',
+          changes: productChanges,
+        });
+      }
+
       await emitProductEvent(
         id,
         buildEventOptions(storeId!, currentBranchId, userProfileId, 'update', { fields_changed: Object.keys(updates) })
@@ -93,6 +110,12 @@ export function useProductDataLayer(adapter: ProductDataLayerAdapter): ProductDa
       });
 
       resetAutoSyncTimer();
+
+      await auditService.record({
+        storeId, branchId: currentBranchId, changedBy: userProfileId,
+        entityType: 'product', entityId: id, action: 'delete',
+        changeReason: 'Product deleted',
+      });
 
       await emitProductEvent(id, buildEventOptions(storeId!, currentBranchId, userProfileId, 'delete'));
     },

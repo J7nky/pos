@@ -88,7 +88,6 @@ export interface BillDataLayerResult {
   hydrate: (billsData: any[], billLineItemsData: any[]) => Promise<void>;
   getBills: (filters?: any) => Promise<any[]>;
   getBillDetails: (billId: string) => Promise<any | null>;
-  createBillAuditLog: (auditData: any) => Promise<void>;
   getBillsByIds: (ids: string[]) => Promise<any[]>;
   getBillLineItemsByInventoryItemIds: (inventoryItemIds: string[]) => Promise<any[]>;
 }
@@ -227,6 +226,8 @@ export interface CashDrawerDataLayerResult {
 /** Adapter for StoreSettingsDataLayer: deps for persist + sync. */
 export interface StoreSettingsDataLayerAdapter {
   storeId: string | null;
+  currentBranchId: string | null;
+  userProfileId: string | undefined;
   isOnline: boolean;
   isSyncing: boolean;
   updateUnsyncedCount: () => Promise<void>;

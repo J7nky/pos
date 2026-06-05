@@ -6,16 +6,20 @@
  */
 
 import { useState, useCallback } from 'react';
+import { getDB } from '../../lib/db';
 import {
   categoryService,
   unitService,
   type CreateCategoryInput,
   type CreateUnitInput,
 } from '../../services/taxonomyService';
+import { auditService } from '../../services/auditService';
 import type { ProductCategory, UnitOfMeasure } from '../../types/taxonomy';
 
 export interface TaxonomyDataLayerAdapter {
   storeId: string | null;
+  currentBranchId: string | null;
+  userProfileId: string | undefined;
   resetAutoSyncTimer: () => void;
   debouncedSync: () => void;
 }
@@ -34,7 +38,7 @@ export interface TaxonomyDataLayerResult {
 }
 
 export function useTaxonomyDataLayer(adapter: TaxonomyDataLayerAdapter): TaxonomyDataLayerResult {
-  const { storeId, resetAutoSyncTimer, debouncedSync } = adapter;
+  const { storeId, currentBranchId, userProfileId, resetAutoSyncTimer, debouncedSync } = adapter;
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [units, setUnits] = useState<UnitOfMeasure[]>([]);
 
@@ -59,22 +63,40 @@ export function useTaxonomyDataLayer(adapter: TaxonomyDataLayerAdapter): Taxonom
     await refresh();
     resetAutoSyncTimer();
     debouncedSync();
+    await auditService.record({
+      storeId, branchId: currentBranchId, changedBy: userProfileId,
+      entityType: 'product_category', entityId: id, action: 'create',
+      changeReason: 'Category created',
+    });
     return id;
-  }, [storeId, refresh, resetAutoSyncTimer, debouncedSync]);
+  }, [storeId, currentBranchId, userProfileId, refresh, resetAutoSyncTimer, debouncedSync]);
 
   const updateCategory = useCallback(async (id: string, updates: Parameters<typeof categoryService.update>[1]): Promise<void> => {
+    const before = await getDB().product_categories.get(id);
     await categoryService.update(id, updates);
     await refresh();
     resetAutoSyncTimer();
     debouncedSync();
-  }, [refresh, resetAutoSyncTimer, debouncedSync]);
+    const changes = auditService.diffUpdates(before, updates as Record<string, unknown>);
+    if (changes.length > 0) {
+      await auditService.record({
+        storeId, branchId: currentBranchId, changedBy: userProfileId,
+        entityType: 'product_category', entityId: id, action: 'update', changes,
+      });
+    }
+  }, [storeId, currentBranchId, userProfileId, refresh, resetAutoSyncTimer, debouncedSync]);
 
   const deleteCategory = useCallback(async (id: string): Promise<void> => {
     await categoryService.softDelete(id);
     await refresh();
     resetAutoSyncTimer();
     debouncedSync();
-  }, [refresh, resetAutoSyncTimer, debouncedSync]);
+    await auditService.record({
+      storeId, branchId: currentBranchId, changedBy: userProfileId,
+      entityType: 'product_category', entityId: id, action: 'delete',
+      changeReason: 'Category deleted',
+    });
+  }, [storeId, currentBranchId, userProfileId, refresh, resetAutoSyncTimer, debouncedSync]);
 
   const createUnit = useCallback(async (input: CreateUnitInput): Promise<string> => {
     if (!storeId) throw new Error('No active store');
@@ -82,22 +104,40 @@ export function useTaxonomyDataLayer(adapter: TaxonomyDataLayerAdapter): Taxonom
     await refresh();
     resetAutoSyncTimer();
     debouncedSync();
+    await auditService.record({
+      storeId, branchId: currentBranchId, changedBy: userProfileId,
+      entityType: 'unit_of_measure', entityId: id, action: 'create',
+      changeReason: 'Unit created',
+    });
     return id;
-  }, [storeId, refresh, resetAutoSyncTimer, debouncedSync]);
+  }, [storeId, currentBranchId, userProfileId, refresh, resetAutoSyncTimer, debouncedSync]);
 
   const updateUnit = useCallback(async (id: string, updates: Parameters<typeof unitService.update>[1]): Promise<void> => {
+    const before = await getDB().units_of_measure.get(id);
     await unitService.update(id, updates);
     await refresh();
     resetAutoSyncTimer();
     debouncedSync();
-  }, [refresh, resetAutoSyncTimer, debouncedSync]);
+    const changes = auditService.diffUpdates(before, updates as Record<string, unknown>);
+    if (changes.length > 0) {
+      await auditService.record({
+        storeId, branchId: currentBranchId, changedBy: userProfileId,
+        entityType: 'unit_of_measure', entityId: id, action: 'update', changes,
+      });
+    }
+  }, [storeId, currentBranchId, userProfileId, refresh, resetAutoSyncTimer, debouncedSync]);
 
   const deleteUnit = useCallback(async (id: string): Promise<void> => {
     await unitService.softDelete(id);
     await refresh();
     resetAutoSyncTimer();
     debouncedSync();
-  }, [refresh, resetAutoSyncTimer, debouncedSync]);
+    await auditService.record({
+      storeId, branchId: currentBranchId, changedBy: userProfileId,
+      entityType: 'unit_of_measure', entityId: id, action: 'delete',
+      changeReason: 'Unit deleted',
+    });
+  }, [storeId, currentBranchId, userProfileId, refresh, resetAutoSyncTimer, debouncedSync]);
 
   return {
     categories,

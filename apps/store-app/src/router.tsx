@@ -11,6 +11,7 @@ import Accounting from './pages/Accounting';
 import Settings from './pages/Settings';
 import CategoriesAndUnitsSettings from './pages/CategoriesAndUnitsSettings';
 import Employees from './pages/Employees';
+import AuditLog from './pages/AuditLog';
 import UnsyncedItems from './pages/UnsyncedItems';
 import PublicCustomerStatement from './pages/PublicCustomerStatement';
 import ErrorPage from './components/ErrorPage';
@@ -101,6 +102,13 @@ export const router = createRouter([
                 <Employees />
               </ProtectedRoute>
             ),
+            errorElement: <ErrorPage />,
+          },
+          {
+            // Open to all authenticated roles — row visibility is role-scoped
+            // inside the data layer (admin: store, manager: branch, cashier: self).
+            path: "audit-log",
+            element: <AuditLog />,
             errorElement: <ErrorPage />,
           },
           {

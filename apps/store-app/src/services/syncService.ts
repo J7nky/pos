@@ -22,7 +22,7 @@ import type {
 } from './syncConfig';
 export { SYNC_TABLES } from './syncConfig';
 export type { SyncTable, SyncResult, DataTierName, DownloadPageResult, SyncCheckpoint } from './syncConfig';
-import { uploadLocalChanges, isUnrecoverableError, deleteProblematicRecord } from './syncUpload';
+import { uploadLocalChanges, isUnrecoverableError, deleteProblematicRecord, upsertOptionsFor } from './syncUpload';
 import { downloadRemoteChanges, applyStoreFilter } from './syncDownload';
 import { detectAndSyncDeletions } from './syncDeletionDetection';
 import { comprehensiveLoggingService } from './comprehensiveLoggingService';
@@ -458,7 +458,7 @@ export class SyncService {
               const { error: upsertError } = await (supabase as any)
                 .from(pendingSync.table_name)
                 .upsert(cleanedPayload, {
-                  onConflict: 'id',
+                  ...upsertOptionsFor(pendingSync.table_name),
                   ...(idem ? { headers: { 'Idempotency-Key': idem } } : {}),
                 })
                 .select();

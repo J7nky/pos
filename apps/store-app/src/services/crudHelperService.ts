@@ -28,6 +28,16 @@ export class CRUDHelperService {
   private host: CRUDLifecycleHost;
 
   /**
+   * Set true once a full scan has confirmed every global product carries an
+   * index-matchable `is_global` (numeric 1/0). All write + sync paths emit
+   * numeric values, so this is the normal case — once verified we skip the
+   * expensive whole-table fallback scan on every subsequent product load (it
+   * otherwise ran inside every refreshData(): every sync, every non-sale save).
+   * A scan that finds any missed global leaves this false so the net stays on.
+   */
+  private globalProductIndexClean = false;
+
+  /**
    * The module-level singleton is constructed with an empty host; production
    * code binds the real host through `setLifecycleHost` from
    * `useSyncStateLayer`. Tests may pass a stub directly.
@@ -256,26 +266,44 @@ export class CRUDHelperService {
         }
         const globalProducts = await globalProductsQuery.toArray();
 
-        // Additional fallback: check entire table for any missed global products
-        // This handles edge cases where is_global might have unexpected values
-        const allProducts = await table.toArray();
-        const missedGlobalProducts = allProducts.filter((p: any) => {
-          // Check if it's global and not already in our results
-          const isTrulyGlobal = p.is_global === 1 || p.is_global === true || p.is_global === '1' || p.is_global === 'true';
-          const notInStoreProducts = !storeProducts.find((sp: any) => sp.id === p.id);
-          const notInGlobalProducts = !globalProducts.find((gp: any) => gp.id === p.id);
-          const notDeleted = includeDeleted || !p._deleted;
-          return isTrulyGlobal && notInStoreProducts && notInGlobalProducts && notDeleted;
-        });
+        // Build an O(1) membership set of what the two index queries already
+        // returned, so the missed-global fallback below is O(N) instead of
+        // O(N²). It previously ran two Array.find() scans per row, which made
+        // this branch quadratic and froze refreshData() on large catalogs.
+        const seenIds = new Set<string>();
+        for (const p of storeProducts) seenIds.add(p.id);
+        for (const p of globalProducts) seenIds.add(p.id);
+
+        // Safety net: catch global products whose `is_global` was stored as a
+        // value the index can't match — notably boolean `true`, which IndexedDB
+        // cannot index. New writes are numeric 1/0 (createGlobalProduct /
+        // createStoreProduct) and sync normalizes too, so in practice this finds
+        // nothing. The whole-table read here is the single most expensive part of
+        // refreshData(), so we only pay for it until one clean scan proves the
+        // index is complete, then skip it. The includeDeleted path (rare) always
+        // scans to stay exhaustive.
+        let missedGlobalProducts: any[] = [];
+        if (includeDeleted || !this.globalProductIndexClean) {
+          const allProducts = await table.toArray();
+          missedGlobalProducts = allProducts.filter((p: any) => {
+            if (seenIds.has(p.id)) return false; // already returned by an index query
+            const isTrulyGlobal = p.is_global === 1 || p.is_global === true || p.is_global === '1' || p.is_global === 'true';
+            const notDeleted = includeDeleted || !p._deleted;
+            return isTrulyGlobal && notDeleted;
+          });
+
+          if (missedGlobalProducts.length > 0) {
+            console.warn(`⚠️ Found ${missedGlobalProducts.length} global products with unexpected is_global values:`,
+              missedGlobalProducts.map((p: any) => ({ id: p.id, name: p.name, is_global: p.is_global, typeof: typeof p.is_global })));
+          } else if (!includeDeleted) {
+            // Index is complete for live rows — skip the full scan from now on.
+            this.globalProductIndexClean = true;
+          }
+        }
 
         // Combine all results
         const results = [...storeProducts, ...globalProducts, ...missedGlobalProducts];
-        
-        if (missedGlobalProducts.length > 0) {
-          console.warn(`⚠️ Found ${missedGlobalProducts.length} global products with unexpected is_global values:`, 
-            missedGlobalProducts.map((p: any) => ({ id: p.id, name: p.name, is_global: p.is_global, typeof: typeof p.is_global })));
-        }
-        
+
         return results;
       }
 
@@ -399,7 +427,7 @@ export class CRUDHelperService {
       () => this.getEntitiesByStoreBranch('inventory_bills', storeId, branchId),
       () => this.getEntitiesByStoreBranch('bills', storeId, branchId),
       () => this.getEntitiesByStoreBranch('bill_line_items', storeId, branchId),
-      () => Promise.resolve<any[]>([]), // bill_audit_logs — not hydrated (§5.1)
+      () => Promise.resolve<any[]>([]), // (removed) legacy bill_audit_logs — placeholder keeps positional indices stable
       () => this.getEntitiesByStoreBranch('cash_drawer_accounts', storeId, branchId),
       () => this.getEntitiesByStoreBranch('cash_drawer_sessions', storeId, branchId),
       () => this.getEntitiesByStoreBranch('missed_products', storeId, branchId),
@@ -434,7 +462,6 @@ export class CRUDHelperService {
       batchesData: results[7],
       billsData: results[8],
       billLineItemsData: results[9],
-      billAuditLogsData: results[10],
       cashDrawerAccountsData: results[11],
       cashDrawerSessionsData: results[12],
       missedProductsData: results[13],
@@ -460,7 +487,7 @@ export class CRUDHelperService {
       'branches', 'products', 'entities', 'users',
       'cash_drawer_accounts',
       'inventory_bills', 'inventory_items', 'transactions', 'journal_entries',
-      'bills', 'bill_line_items', 'bill_audit_logs', 'cash_drawer_sessions',
+      'bills', 'bill_line_items', 'cash_drawer_sessions',
       'missed_products', 'reminders'
     ];
 
@@ -509,7 +536,7 @@ export class CRUDHelperService {
       'branches', 'products', 'entities', 'users',
       'cash_drawer_accounts',
       'inventory_bills', 'inventory_items', 'transactions', 'journal_entries',
-      'bills', 'bill_line_items', 'bill_audit_logs', 'cash_drawer_sessions',
+      'bills', 'bill_line_items', 'cash_drawer_sessions',
       'missed_products', 'reminders'
     ];
 

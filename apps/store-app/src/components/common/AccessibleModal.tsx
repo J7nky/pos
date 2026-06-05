@@ -49,7 +49,7 @@ export default function AccessibleModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+      className="animate-modal-fade fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
       onClick={handleOverlayClick}
       role="dialog"
       aria-modal="true"
@@ -57,7 +57,7 @@ export default function AccessibleModal({
     >
       <div
         ref={containerRef as React.RefObject<HTMLDivElement>}
-        className={`bg-white rounded-lg ${sizeClasses[size]} w-full max-h-[90vh] overflow-hidden shadow-xl ${className}`}
+        className={`animate-modal-pop bg-white rounded-lg ${sizeClasses[size]} w-full max-h-[90vh] overflow-hidden shadow-xl ${className}`}
         role="document"
       >
         {/* Header */}

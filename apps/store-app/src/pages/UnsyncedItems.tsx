@@ -46,7 +46,6 @@ const TABLE_METADATA: Record<string, TableMetadata> = {
   inventory_bills: { displayName: 'Inventory Bills', icon: Receipt, color: 'text-cyan-600' },
   bills: { displayName: 'Bills', icon: FileText, color: 'text-orange-600' },
   bill_line_items: { displayName: 'Bill Line Items', icon: FileText, color: 'text-orange-500' },
-  bill_audit_logs: { displayName: 'Bill Audit Logs', icon: FileText, color: 'text-orange-400' },
   transactions: { displayName: 'Transactions', icon: Calculator, color: 'text-emerald-600' },
   cash_drawer_accounts: { displayName: 'Cash Drawer Accounts', icon: Store, color: 'text-pink-600' },
   cash_drawer_sessions: { displayName: 'Cash Drawer Sessions', icon: Store, color: 'text-pink-500' },
@@ -208,7 +207,7 @@ export default function UnsyncedItems() {
   };
 
   return (
-    <div className="p-6 bg-gray-50 min-h-screen">
+    <div className="p-6 bg-gray-50 min-h-screen stagger">
       {/* Header */}
       <div className="mb-6">
         <div className="flex items-center justify-between">

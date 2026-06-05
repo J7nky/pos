@@ -101,7 +101,7 @@ export default function Reports() {
     : [];
 
   return (
-    <div className="p-6">
+    <div className="p-6 stagger">
       {/* Header */}
       <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">

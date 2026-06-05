@@ -4,25 +4,40 @@
  * addInventoryItem / updateInventoryItem stay in context (complex journal/sync logic).
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { getDB } from '../../lib/db';
+import { sameRowList } from '../../utils/rowListEquality';
 import type { InventoryDataLayerAdapter, InventoryDataLayerResult } from './types';
 
 export function useInventoryDataLayer(_adapter: InventoryDataLayerAdapter): InventoryDataLayerResult {
   const [inventoryItems, setInventoryItems] = useState<any[]>([]);
   const [inventoryBills, setInventoryBills] = useState<any[]>([]);
   const [inventory, setInventory] = useState<any[]>([]);
+  // Last raw inputs, to detect no-op hydrates. The derived `inventory` depends on
+  // BOTH items and batches, so it must recompute when either changes.
+  const prevInputsRef = useRef<{ items: any[]; batches: any[] } | null>(null);
 
   const hydrate = useCallback((inventoryData: any[], batchesData: any[]) => {
-    setInventoryItems(inventoryData || []);
-    setInventoryBills(batchesData || []);
+    const items = inventoryData || [];
+    const batches = batchesData || [];
 
-    const batchById = (batchesData || []).reduce((acc: Record<string, any>, b: any) => {
+    const prev = prevInputsRef.current;
+    const itemsSame = prev ? sameRowList(prev.items, items) : false;
+    const batchesSame = prev ? sameRowList(prev.batches, batches) : false;
+    prevInputsRef.current = { items, batches };
+
+    // Nothing changed — leave all three arrays (and their references) untouched.
+    if (itemsSame && batchesSame) return;
+
+    if (!itemsSame) setInventoryItems(items);
+    if (!batchesSame) setInventoryBills(batches);
+
+    const batchById = batches.reduce((acc: Record<string, any>, b: any) => {
       acc[b.id] = b;
       return acc;
     }, {});
 
-    setInventory((inventoryData || []).map((item: any) => {
+    setInventory(items.map((item: any) => {
       const batch = item.batch_id ? batchById[item.batch_id] : null;
       return {
         ...item,

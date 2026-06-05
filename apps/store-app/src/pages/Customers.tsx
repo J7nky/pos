@@ -17,6 +17,7 @@ import { useCurrency } from '../hooks/useCurrency';
 import { Pagination } from '../components/common/Pagination';
 import { useEntityBalances } from '../hooks/useEntityBalances';
 import { UnifiedPaymentModal } from '../components/common/UnifiedPaymentModal';
+import { EntityAuditHistory } from '../components/audit/EntityAuditHistory';
 import { CURRENCY_LEGACY_FIELD_MAP, getLegacyBalance } from '../utils/currencyFieldMap';
 import { currencyService } from '../services/currencyService';
 import type { CurrencyCode } from '@pos-platform/shared';
@@ -310,9 +311,8 @@ export default function Customers() {
       });
 
       if (result.success) {
-        // Force immediate refresh to ensure UI updates with new balances
-        await raw.refreshData();
-        // Refresh only the affected entity's balance — one cache invalidation,
+        // processPayment() already refreshed context data internally; no second
+        // full reload here. Refresh only the affected entity's balance — one cache invalidation,
         // one notify, one refetch. Previously this called refreshAll() which
         // looped invalidate(entityType, id) per entity, firing N notifies and
         // re-running every subscriber N times.
@@ -474,8 +474,7 @@ export default function Customers() {
         usd_max_balance: customerForm.usd_max_balance,
         updated_at: new Date().toISOString(),
       });
-      // Force immediate refresh to ensure UI updates
-      await raw.refreshData();
+      // updateCustomer() already refreshed context data internally.
       showToast('Customer updated successfully!', 'success');
     } else {
       await addCustomer({
@@ -489,8 +488,7 @@ export default function Customers() {
         lb_max_balance: customerForm.lb_max_balance,
         usd_max_balance: customerForm.usd_max_balance,
       });
-      // Force immediate refresh to ensure UI updates
-      await raw.refreshData();
+      // addCustomer() already refreshed context data internally.
       showToast('Customer added successfully!', 'success');
     }
     setShowCustomerForm(false);
@@ -584,7 +582,7 @@ export default function Customers() {
 
 
   return (
-    <div className="p-6">
+    <div className="p-6 stagger">
       <Toast message={toast.message} type={toast.type} visible={toast.visible} onClose={hideToast} />
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">{t('customers.title')}</h1>
@@ -865,8 +863,8 @@ export default function Customers() {
 
       {/* Customer Form Modal */}
       {showCustomerForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="animate-modal-fade fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="animate-modal-pop bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b">
               <h2 className="text-xl font-semibold text-gray-900">
                 {editingCustomer ? t('customers.editCustomerTitle') : t('customers.addNewCustomer')}
@@ -993,6 +991,11 @@ export default function Customers() {
                 })}
               </div>
               {customerFormError && <div className="text-red-600 text-sm font-medium pt-2">{customerFormError}</div>}
+              {editingCustomer?.id && (
+                <div className="border-t border-gray-200 pt-4">
+                  <EntityAuditHistory entityType="entity" entityId={editingCustomer.id} />
+                </div>
+              )}
               <div className="flex justify-end space-x-3 pt-4">
                 <button
                   type="button"
@@ -1030,8 +1033,7 @@ export default function Customers() {
               lb_balance: supplierData.lb_balance || 0,
               usd_balance: supplierData.usd_balance || 0,
             });
-            // Force immediate refresh to ensure UI updates
-            await raw.refreshData();
+            // addSupplier() already refreshed context data internally.
             showToast('Supplier added successfully!', 'success');
           }
           setShowSupplierForm(false);
@@ -1068,12 +1070,19 @@ export default function Customers() {
           showToast={showToast}
           onProcessAdvance={async (data) => {
             await raw.processSupplierAdvance(data);
+            // Advances now hit Accounts Payable (2100), so the supplier's cached
+            // balance must be invalidated/refetched — refreshData() alone doesn't
+            // touch the entity-balance cache (same pattern as payments above).
+            await supplierBalances.refreshBalance(data.supplierId);
           }}
           onEditAdvance={async (transactionId, updates) => {
             await raw.updateSupplierAdvance(transactionId, updates);
+            // The supplier can change on edit, so refresh all supplier balances.
+            await supplierBalances.refreshAll();
           }}
           onDeleteAdvance={async (transactionId) => {
             await raw.deleteSupplierAdvance(transactionId);
+            await supplierBalances.refreshAll();
           }}
           addSupplier={addSupplier}
           refreshData={raw.refreshData}

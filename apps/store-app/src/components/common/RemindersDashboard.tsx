@@ -358,8 +358,8 @@ export default function RemindersDashboard({
 
       {/* Completion Modal */}
       {showCompletionModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+        <div className="animate-modal-fade fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="animate-modal-pop bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
             <div className="p-6">
               <h3 className="text-lg font-semibold mb-4">Complete Reminder</h3>
               <textarea
@@ -393,8 +393,8 @@ export default function RemindersDashboard({
 
       {/* Snooze Modal */}
       {showSnoozeModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+        <div className="animate-modal-fade fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="animate-modal-pop bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
             <div className="p-6">
               <h3 className="text-lg font-semibold mb-4">Snooze Reminder</h3>
               <input

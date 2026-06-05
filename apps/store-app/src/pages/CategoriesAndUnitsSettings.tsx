@@ -41,7 +41,7 @@ const CategoriesAndUnitsSettings: React.FC = () => {
   const sortedUnits = units.slice().sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-6 max-w-5xl mx-auto stagger">
       <h1 className="text-2xl font-bold mb-4 text-gray-900 dark:text-slate-100">
         {t('settings.categoriesAndUnits') || 'Categories & Units'}
       </h1>
@@ -269,8 +269,8 @@ const CategoryFormModal: React.FC<{
   const [saving, setSaving] = useState(false);
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white dark:bg-slate-900 rounded-lg max-w-md w-full p-6">
+    <div className="animate-modal-fade fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="animate-modal-pop bg-white dark:bg-slate-900 rounded-lg max-w-md w-full p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-bold">{existing ? 'Edit category' : 'Add category'}</h2>
           <button onClick={onClose}><X className="w-5 h-5" /></button>
@@ -346,8 +346,8 @@ const UnitFormModal: React.FC<{
   const [saving, setSaving] = useState(false);
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white dark:bg-slate-900 rounded-lg max-w-md w-full p-6">
+    <div className="animate-modal-fade fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="animate-modal-pop bg-white dark:bg-slate-900 rounded-lg max-w-md w-full p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-bold">{existing ? 'Edit unit' : 'Add unit'}</h2>
           <button onClick={onClose}><X className="w-5 h-5" /></button>

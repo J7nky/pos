@@ -13,6 +13,7 @@ import { getFiscalPeriodForDate } from '../../../utils/fiscalPeriod';
 import type { CurrencyCode } from '@pos-platform/shared';
 import { CURRENCY_META } from '@pos-platform/shared';
 import { currencyService } from '../../../services/currencyService';
+import { auditService } from '../../../services/auditService';
 import { roundHalfEven } from '../../../utils/currencyRounding';
 import { LegacyCurrencyMissingError, CurrencyLockError } from '../../../errors/currencyErrors';
 
@@ -85,6 +86,24 @@ export async function updateSale(
   const priceChanged = updates.unit_price !== undefined || updates.received_value !== undefined || updates.weight !== undefined;
 
   await getDB().updateBillLineItem(id, dbUpdates, userProfileId);
+
+  // Audit the line-item edit as a bill-level update (replaces the granular
+  // bill_audit_logs coverage that db.updateBillLineItem used to write).
+  const lineChanges = auditService
+    .diff(originalSale, { ...originalSale, ...dbUpdates }, ['quantity', 'unit_price', 'weight', 'received_value', 'notes'])
+    .map((c) => ({ ...c, field: `line_item.${c.field}` }));
+  if (lineChanges.length > 0) {
+    await auditService.record({
+      storeId,
+      branchId: currentBranchId,
+      changedBy: userProfileId,
+      entityType: 'bill',
+      entityId: originalSale.bill_id,
+      action: 'update',
+      changes: lineChanges,
+      changeReason: 'Sale line item edited',
+    });
+  }
 
   if (quantityChanged && originalSale.product_id) {
     if (quantityDifference > 0) {
@@ -236,7 +255,7 @@ export async function updateSale(
 }
 
 export async function deleteSale(deps: SaleDeps, id: string): Promise<void> {
-  const { storeId, currentBranchId, pushUndo, refreshData, updateUnsyncedCount, resetAutoSyncTimer, debouncedSync } = deps;
+  const { storeId, currentBranchId, userProfileId, pushUndo, refreshData, updateUnsyncedCount, resetAutoSyncTimer, debouncedSync } = deps;
   if (!storeId) throw new Error('No store ID available');
 
   const saleItem = await getDB().bill_line_items.get(id);
@@ -283,6 +302,19 @@ export async function deleteSale(deps: SaleDeps, id: string): Promise<void> {
       product_id: saleItem.product_id
     }
   });
+
+  if (userProfileId) {
+    await auditService.record({
+      storeId,
+      branchId: currentBranchId,
+      changedBy: userProfileId,
+      entityType: 'bill',
+      entityId: saleItem.bill_id,
+      action: 'update',
+      changes: [{ field: 'line_item', old: `qty ${saleItem.quantity} @ ${saleItem.unit_price}`, new: null }],
+      changeReason: 'Sale line item removed',
+    });
+  }
 
   await refreshData();
   await updateUnsyncedCount();

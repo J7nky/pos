@@ -2,7 +2,7 @@ import type { Transaction as DexieTransaction } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
 import type { SyncMetadata, PendingSync } from '../types';
 
-export const CURRENT_DB_VERSION = 67;
+export const CURRENT_DB_VERSION = 69;
 
 export const V54_STORES = {
   stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
@@ -208,6 +208,31 @@ export const V66_STORES = {
  * strategy: existing local snapshots are attributed `source='client'` so the
  * server-driven generator (Plan B / B3) can later replace them on conflict.
  */
+
+/**
+ * v68 (audit-logging-service, Phase 0): introduces the general-purpose
+ * `audit_logs` table — one row per state-changing business action, scoped to a
+ * store branch (see audit_log_design_decisions).
+ *
+ * Append-only by design: the app only ever INSERTs. There is no `updated_at`
+ * (the table is excluded from TABLES_WITH_UPDATED_AT and syncs on `created_at`,
+ * like journal_entries). `changes` is a JSONB array and is not indexed — Dexie
+ * cannot range-query JSON. Indexed surface targets the three read patterns:
+ * per-record history [store_id+entity_type+entity_id], branch activity feed
+ * [store_id+branch_id] / [store_id+created_at], and by-actor [changed_by+created_at].
+ *
+ * New empty table — `upgradeV68` has no backfill (no production data; see
+ * project_no_production_data_yet).
+ */
+export const V68_STORES = {
+  audit_logs:
+    'id, store_id, branch_id, entity_type, entity_id, action, changed_by, created_at, [store_id+branch_id], [store_id+entity_type+entity_id], [changed_by+created_at], [store_id+created_at], _synced, _deleted',
+} as const;
+
+/** v69 — drop the legacy `bill_audit_logs` store (null = delete table). */
+export const V69_STORES = {
+  bill_audit_logs: null,
+} as const;
 
 export async function upgradeV54(_tx: DexieTransaction): Promise<void> {
   console.log('🔧 Initializing database schema v54');
@@ -689,4 +714,21 @@ export async function upgradeV65(tx: DexieTransaction): Promise<void> {
       }
     });
   console.log('   ✅ v65 migration complete');
+}
+
+/**
+ * v68 (audit-logging-service Phase 0): creates the `audit_logs` table. The
+ * Dexie store definition in V68_STORES does all the work; there is nothing to
+ * backfill on a fresh, empty table.
+ */
+export async function upgradeV68(_tx: DexieTransaction): Promise<void> {
+  console.log('🔧 Migrating database schema v67 → v68 (audit_logs table)');
+  console.log('   ✅ v68 migration complete');
+}
+
+export async function upgradeV69(_tx: DexieTransaction): Promise<void> {
+  // Drops the legacy `bill_audit_logs` table — superseded by the general
+  // `audit_logs` service (bills now audited semantically at the operation layer).
+  console.log('🔧 Migrating database schema v68 → v69 (drop legacy bill_audit_logs)');
+  console.log('   ✅ v69 migration complete');
 }

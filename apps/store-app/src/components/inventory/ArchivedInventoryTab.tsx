@@ -280,8 +280,8 @@ const ArchivedInventoryTab: React.FC<ArchivedInventoryTabProps> = ({
 
       {/* Bulk delete confirm dialog */}
       {confirmBulkDelete && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white dark:bg-slate-900 rounded-lg max-w-sm w-full shadow-2xl ring-1 ring-black/5 dark:ring-white/10 p-6">
+        <div className="animate-modal-fade fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="animate-modal-pop bg-white dark:bg-slate-900 rounded-lg max-w-sm w-full shadow-2xl ring-1 ring-black/5 dark:ring-white/10 p-6">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-slate-100 mb-2">
               {t('inventory.permanentDeleteTitle')}
             </h3>

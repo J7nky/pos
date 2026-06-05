@@ -344,8 +344,8 @@ export default function AccountStatementModal({
         );
       })()}
 
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 no-print">
-        <div className="bg-white rounded-lg max-w-7xl w-full max-h-[95vh] overflow-hidden flex flex-col">
+      <div className="animate-modal-fade fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 no-print">
+        <div className="animate-modal-pop bg-white rounded-lg max-w-7xl w-full max-h-[95vh] overflow-hidden flex flex-col">
           {/* Sync Indicator - Subtle, non-intrusive */}
           {isSyncing && (
             <div className="absolute top-2 right-2 z-10 bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 flex items-center gap-2 shadow-sm">

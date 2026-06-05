@@ -22,8 +22,9 @@ import { TRANSACTION_CATEGORIES } from '../../../constants/transactionCategories
 import { entityBalanceCache } from '../../../services/entityBalanceCache';
 import type { CurrencyCode } from '@pos-platform/shared';
 import { formatDateTime } from '../../../utils/numberFormat';
+import { EntityAuditHistory } from '../../audit/EntityAuditHistory';
 
-import { 
+import {
   FileText, 
   Search, 
   Filter, 
@@ -84,21 +85,8 @@ type LineItemEditState = {
   notes?: string;
 };
 
-interface BillAuditLog {
-  id: string;
-  action: string;
-  field_changed: string | null;
-  old_value: string | null;
-  new_value: string | null;
-  change_reason: string | null;
-  changed_by: string;
-  created_at: string;
-  users?: { name: string; email: string };
-}
-
 interface BillDetails extends BillWithTotals {
   bill_line_items: BillLineItem[];
-  bill_audit_logs: BillAuditLog[];
   _synced?: boolean;
 }
 
@@ -405,190 +393,6 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
     return billChanges || hasLineItemChanges;
   }, [selectedBill, editForm, lineItemEdits, billLineItems]);
 
-  const getFieldLabel = useCallback((fieldName: string): string => {
-    const fieldLabels: Record<string, string> = {
-      customer_id: t('soldBills.customer'),
-      payment_method: t('soldBills.paymentMethod'),
-      payment_status: t('soldBills.paymentStatus'),
-      amount_paid: t('soldBills.amountPaid'),
-      notes: t('soldBills.notes'),
-      subtotal: t('soldBills.subtotal'),
-      total_amount: t('soldBills.total'),
-      status: t('soldBills.status'),
-    };
-    return fieldLabels[fieldName] || fieldName;
-  }, [t]);
-
-  const renderAuditValue = useCallback((fieldName: string | null, value: string | null) => {
-    if (value === null || value === undefined || value === '') {
-      return <span className="italic text-slate-400">{t('soldBills.notAvailable')}</span>;
-    }
-
-    const trimmed = typeof value === 'string' ? value.trim() : value;
-    const normalizedField = fieldName || '';
-
-    // Customer ID - resolve to customer name
-    if (normalizedField === 'customer_id') {
-      const customerName = getCustomerName(value);
-      return (
-        <span className="inline-flex items-center gap-1.5">
-          <User className="h-3.5 w-3.5 text-slate-400" />
-          <span>{customerName}</span>
-        </span>
-      );
-    }
-
-    // Payment method - with icon
-    if (normalizedField === 'payment_method') {
-      const translatedValue = t(`soldBills.${value}`);
-      return (
-        <span className="inline-flex items-center gap-1.5">
-          {value === 'cash' && <DollarSign className="h-3.5 w-3.5 text-green-500" />}
-          {value === 'card' && <CreditCard className="h-3.5 w-3.5 text-blue-500" />}
-          {value === 'credit' && <Clock className="h-3.5 w-3.5 text-amber-500" />}
-          <span className="capitalize">{translatedValue}</span>
-        </span>
-      );
-    }
-
-    // Payment status - with badge
-    if (normalizedField === 'payment_status') {
-      const statusColors: Record<string, string> = {
-        paid: 'bg-green-100 text-green-700 border-green-200',
-        partial: 'bg-amber-100 text-amber-700 border-amber-200',
-        pending: 'bg-gray-100 text-gray-700 border-gray-200',
-      };
-      const colorClass = statusColors[value] || 'bg-gray-100 text-gray-700 border-gray-200';
-      return (
-        <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${colorClass}`}>
-          <span className="capitalize">{t(`soldBills.${value}`)}</span>
-        </span>
-      );
-    }
-
-    // Monetary amounts - with currency formatting
-    if (['amount_paid', 'subtotal', 'total_amount', 'line_total'].includes(normalizedField)) {
-      const numericValue = Number(value);
-      if (!Number.isNaN(numericValue)) {
-        return (
-          <span className="inline-flex items-center gap-1.5 font-mono text-sm">
-            <DollarSign className="h-3.5 w-3.5 text-slate-400" />
-            <span className="font-semibold">{formatCurrency(numericValue)}</span>
-          </span>
-        );
-      }
-    }
-
-    // Bill status - with badge
-    if (normalizedField === 'status') {
-      const statusColors: Record<string, string> = {
-        active: 'bg-green-100 text-green-700 border-green-200',
-        cancelled: 'bg-red-100 text-red-700 border-red-200',
-        refunded: 'bg-purple-100 text-purple-700 border-purple-200',
-      };
-      
-      const colorClass = statusColors[value] || 'bg-gray-100 text-gray-700 border-gray-200';
-      return (
-        <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${colorClass}`}>
-          <span className="capitalize">{t(`soldBills.${value}`)}</span>
-        </span>
-      );
-    }
-
-    // Dates and timestamps - with icon
-    if (normalizedField.endsWith('_at') || normalizedField.includes('date')) {
-      const date = new Date(value);
-      if (!Number.isNaN(date.getTime())) {
-        return (
-          <span className="inline-flex items-center gap-1.5 text-sm">
-            <Clock className="h-3.5 w-3.5 text-slate-400" />
-            <span>{formatDateTime(date)}</span>
-          </span>
-        );
-      }
-    }
-
-    // Notes - with multiline support
-    if (normalizedField === 'notes') {
-      return (
-        <div className="rounded-lg bg-slate-50 border border-slate-200 p-2 text-sm text-slate-700">
-          {value || <span className="italic text-slate-400">{t('soldBills.noNotes')}</span>}
-        </div>
-      );
-    }
-
-    // Boolean values
-    if (value === 'true' || value === 'false') {
-      const isTrue = value === 'true';
-      return (
-        <span className={`inline-flex items-center gap-1.5 ${isTrue ? 'text-green-600' : 'text-red-600'}`}>
-          {isTrue ? <CheckCircle className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
-          <span className="capitalize font-medium">{isTrue ? t('soldBills.yes') : t('soldBills.no')}</span>
-        </span>
-      );
-    }
-
-    // Hide JSON objects and arrays completely
-    if (typeof trimmed === 'string' && trimmed.length > 1 && ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']')))) {
-      try {
-        JSON.parse(trimmed);
-        // If it's valid JSON, hide it with a friendly message
-        return (
-          <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-            <div className="flex items-center gap-2">
-              <Activity className="h-3.5 w-3.5" />
-              <span className="font-medium">{t('soldBills.systemUpdate')}</span>
-            </div>
-          </div>
-        );
-      } catch (error) {
-        // Not valid JSON, continue to show as regular value
-      }
-    }
-
-    // Default - plain text
-    return <span className="text-sm">{value}</span>;
-  }, [formatCurrency, getCustomerName, t]);
-
-  const groupedAuditLogs = useMemo(() => {
-    if (!selectedBill?.bill_audit_logs) return [];
-
-    // Group by timestamp and change reason to combine related changes
-    const groups = new Map<string, BillAuditLog[]>();
-    
-    selectedBill.bill_audit_logs.forEach(log => {
-      const key = `${log.created_at}_${log.changed_by}_${log.change_reason || 'no_reason'}`;
-      if (!groups.has(key)) {
-        groups.set(key, []);
-      }
-      groups.get(key)!.push(log);
-    });
-
-    // Convert to array and sort by timestamp (newest first)
-    return Array.from(groups.values())
-      .sort((a, b) => new Date(b[0].created_at).getTime() - new Date(a[0].created_at).getTime());
-  }, [selectedBill]);
-
-  const auditActionMeta = useMemo(() => ({
-    updated: {
-      label: t('soldBills.auditActionUpdated'),
-      badgeClass: 'border border-blue-100 bg-blue-50 text-blue-700 shadow-sm',
-      dotClass: 'bg-blue-500',
-      icon: <RefreshCw className="h-3 w-3" />,
-    },
-    created: {
-      label: t('soldBills.auditActionCreated'),
-      badgeClass: 'border border-green-100 bg-green-50 text-green-700 shadow-sm',
-      dotClass: 'bg-green-500',
-      icon: <CheckCircle className="h-3 w-3" />,
-    },
-    deleted: {
-      label: t('soldBills.auditActionDeleted'),
-      badgeClass: 'border border-red-100 bg-red-50 text-red-700 shadow-sm',
-      dotClass: 'bg-red-500',
-      icon: <Trash2 className="h-3 w-3" />,
-    },
-  }), [t]);
 
   const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -673,19 +477,12 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
           ? (data as any).line_items
           : [];
 
-      const normalizedAuditLogs = Array.isArray((data as any).bill_audit_logs)
-        ? (data as any).bill_audit_logs
-        : Array.isArray((data as any).audit_logs)
-          ? (data as any).audit_logs
-          : [];
-
       // Add computed totals to the bill
       const billWithTotals = addComputedTotals(data as any, normalizedLineItems);
-      
+
       const normalizedBill = {
         ...billWithTotals,
         bill_line_items: normalizedLineItems,
-        bill_audit_logs: normalizedAuditLogs,
       } as BillDetails;
 
       setSelectedBill(normalizedBill);
@@ -1827,8 +1624,8 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
 
       {/* Bill Details Modal */}
       {showBillDetails && selectedBill && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="animate-modal-fade fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="animate-modal-pop bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b flex items-center justify-between">
               <div className="flex items-center space-x-3 rtl:space-x-reverse">
                 <h2 className="text-xl font-semibold text-gray-900 rtl:text-right">
@@ -2065,8 +1862,8 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
 
       {/* Edit Bill Modal */}
       {showEditBill && selectedBill && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-5xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="animate-modal-fade fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="animate-modal-pop bg-white rounded-lg max-w-5xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b flex items-center justify-between">
               <h2 className="text-xl font-semibold text-gray-900 rtl:text-right">
                 {t('soldBills.editBill')} - {selectedBill.bill_number}
@@ -2481,8 +2278,8 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
 
       {/* Audit Trail Modal */}
       {showAuditTrail && selectedBill && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="animate-modal-fade fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="animate-modal-pop bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b flex items-center justify-between">
               <h2 className="text-xl font-semibold text-gray-900 rtl:text-right">
                 {t('soldBills.auditTrail')} - {selectedBill.bill_number}
@@ -2496,133 +2293,7 @@ export default function InventoryLogs({ highlightBillNumber }: SoldBillsProps = 
             </div>
 
             <div className="p-6">
-              {groupedAuditLogs.length > 0 ? (
-                <div className="relative">
-                  <div className="absolute left-6 top-0 bottom-0 hidden w-px bg-gradient-to-b from-transparent via-slate-200 to-transparent md:block" />
-                  <div className="space-y-6">
-                    {groupedAuditLogs.map((logGroup, groupIndex) => {
-                      const firstLog = logGroup[0];
-                      const actionKey = (firstLog.action || 'updated') as keyof typeof auditActionMeta;
-                      const fallbackMeta = {
-                        label: firstLog.action,
-                        badgeClass: 'border border-slate-200 bg-slate-100 text-slate-700',
-                        dotClass: 'bg-slate-400',
-                        icon: <History className="h-3 w-3 text-slate-500" />,
-                      };
-                      const actionMeta = auditActionMeta[actionKey] || fallbackMeta;
-                      
-                      // Count only logs with actual changes
-                      const actualChangesCount = logGroup.filter((log) => {
-                        const isGeneralChange = !log.field_changed || log.field_changed === 'bill_record';
-                        if (isGeneralChange) return true;
-                        return log.old_value !== null || log.new_value !== null;
-                      }).length;
-                      
-                      const multipleChanges = actualChangesCount > 1;
-
-                      return (
-                        <div key={`group-${groupIndex}`} className="relative pl-10 md:pl-14">
-                          <span className="absolute left-4 top-7 hidden h-3 w-3 -translate-x-1.5 items-center justify-center md:flex">
-                            <span className={`h-3 w-3 rounded-full border-2 border-white shadow-sm ${actionMeta.dotClass}`} />
-                          </span>
-
-                          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm hover:shadow-md transition-shadow">
-                            <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 md:flex-row md:items-center md:justify-between">
-                              <div className="flex flex-wrap items-center gap-3">
-                                <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide ${actionMeta.badgeClass}`}>
-                                  {actionMeta.icon}
-                                  <span>{actionMeta.label}</span>
-                                </span>
-                                {multipleChanges && (
-                                  <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
-                                    <Activity className="h-3 w-3" />
-                                    <span>{actualChangesCount} {t('soldBills.fieldsChanged')}</span>
-                                  </span>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-3 text-right text-xs text-slate-500">
-                                <div>{formatDateTime(firstLog.created_at)}</div>
-                              </div>
-                            </div>
-
-                            <div className="space-y-4 px-5 py-4">
-                              <div className="flex items-center gap-2 text-xs text-slate-500">
-                                <User className="h-3.5 w-3.5" />
-                                <span>{t('soldBills.changedBy')}: <span className="font-medium text-slate-700">{firstLog.users?.name || t('soldBills.unknownUser')}</span></span>
-                              </div>
-
-                              {firstLog.change_reason && (
-                                <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
-                                  <div className="flex items-center gap-2">
-                                    <FileText className="h-3.5 w-3.5" />
-                                    <span className="font-medium">{t('soldBills.reason')}:</span>
-                                    <span>{firstLog.change_reason}</span>
-                                  </div>
-                                </div>
-                              )}
-
-                              <div className="space-y-3">
-                                {logGroup
-                                  .filter((log) => {
-                                    // ==================== ONLY SHOW LOGS WITH ACTUAL CHANGES ====================
-                                    // Show general changes (bill creation, etc.)
-                                    const isGeneralChange = !log.field_changed || log.field_changed === 'bill_record';
-                                    if (isGeneralChange) return true;
-                                    
-                                    // Show logs where old_value or new_value exists
-                                    // (indicating an actual change happened)
-                                    return log.old_value !== null || log.new_value !== null;
-                                  })
-                                  .map((log) => {
-                                  const isGeneralChange = !log.field_changed || log.field_changed === 'bill_record';
-                                  
-                                  if (isGeneralChange) {
-                                    return (
-                                      <div key={log.id} className="rounded-xl border border-amber-100 bg-amber-50 p-4">
-                                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-700">
-                                          <Activity className="h-3.5 w-3.5" />
-                                          <span>{t('soldBills.systemUpdate')}</span>
-                                        </div>
-                                      </div>
-                                    );
-                                  }
-
-                                  return (
-                                    <div key={log.id} className="rounded-xl border border-slate-100 bg-slate-50/50 p-4">
-                                      <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
-                                        <Edit className="h-4 w-4 text-slate-400" />
-                                        <span>{getFieldLabel(log.field_changed || '')}</span>
-                                      </div>
-                                      <div className="grid gap-3 md:grid-cols-2">
-                                        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
-                                          <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">{t('soldBills.old')}</div>
-                                          <div>{renderAuditValue(log.field_changed, log.old_value)}</div>
-                                        </div>
-                                        <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 shadow-sm">
-                                          <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-blue-600">{t('soldBills.new')}</div>
-                                          <div>{renderAuditValue(log.field_changed, log.new_value)}</div>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : (
-                <div className="py-12 text-center">
-                  <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100">
-                    <History className="h-8 w-8 text-slate-400" />
-                  </div>
-                  <h3 className="mb-1 text-sm font-medium text-slate-900">{t('soldBills.noAuditTrailAvailable')}</h3>
-                  <p className="text-xs text-slate-500">{t('soldBills.auditTrailEmptyDesc')}</p>
-                </div>
-              )}
+              <EntityAuditHistory entityType="bill" entityId={selectedBill.id} />
             </div>
           </div>
         </div>

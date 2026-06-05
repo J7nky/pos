@@ -9,6 +9,7 @@ import type { Database } from '../../../types/database';
 import type { InventoryItem } from '../../../types';
 import { receivedItemsJournalService } from '../../../services/receivedItemsJournalService';
 import { crudHelperService } from '../../../services/crudHelperService';
+import { auditService } from '../../../services/auditService';
 import type { CurrencyCode } from '@pos-platform/shared';
 import { currencyService } from '../../../services/currencyService';
 import { assertValidCurrency } from '../../../utils/currencyValidation';
@@ -184,6 +185,15 @@ export async function updateInventoryItem(
     steps: [{ op: 'update', table: 'inventory_items', id, changes: undoChanges }]
   });
 
+  const itemPaths = Object.keys(updates).filter((k) => k !== '_synced' && k !== 'updated_at');
+  const itemChanges = auditService.diff(originalItem, newItem, itemPaths);
+  if (itemChanges.length > 0) {
+    await auditService.record({
+      storeId, branchId: currentBranchId, changedBy: userProfileId,
+      entityType: 'inventory_item', entityId: id, action: 'update', changes: itemChanges,
+    });
+  }
+
   resetAutoSyncTimer();
 }
 
@@ -217,10 +227,10 @@ export async function checkInventoryItemReferences(id: string): Promise<{
 }
 
 export async function archiveInventoryItem(
-  deps: Pick<InventoryItemDeps, 'storeId' | 'pushUndo' | 'resetAutoSyncTimer' | 'refreshData'>,
+  deps: Pick<InventoryItemDeps, 'storeId' | 'currentBranchId' | 'userProfileId' | 'pushUndo' | 'resetAutoSyncTimer' | 'refreshData'>,
   id: string
 ): Promise<void> {
-  const { storeId, pushUndo, resetAutoSyncTimer, refreshData } = deps;
+  const { storeId, currentBranchId, userProfileId, pushUndo, resetAutoSyncTimer, refreshData } = deps;
   if (!storeId) throw new Error('No store ID available');
 
   const originalItem = await getDB().inventory_items.get(id);
@@ -234,15 +244,21 @@ export async function archiveInventoryItem(
     steps: [{ op: 'update', table: 'inventory_items', id, changes: { is_archived: false, _synced: false } }],
   });
 
+  await auditService.record({
+    storeId, branchId: currentBranchId, changedBy: userProfileId,
+    entityType: 'inventory_item', entityId: id, action: 'archive',
+    changes: [{ field: 'is_archived', old: false, new: true }],
+  });
+
   resetAutoSyncTimer();
   await refreshData();
 }
 
 export async function unarchiveInventoryItem(
-  deps: Pick<InventoryItemDeps, 'storeId' | 'pushUndo' | 'resetAutoSyncTimer' | 'refreshData'>,
+  deps: Pick<InventoryItemDeps, 'storeId' | 'currentBranchId' | 'userProfileId' | 'pushUndo' | 'resetAutoSyncTimer' | 'refreshData'>,
   id: string
 ): Promise<void> {
-  const { storeId, pushUndo, resetAutoSyncTimer, refreshData } = deps;
+  const { storeId, currentBranchId, userProfileId, pushUndo, resetAutoSyncTimer, refreshData } = deps;
   if (!storeId) throw new Error('No store ID available');
 
   const originalItem = await getDB().inventory_items.get(id);
@@ -254,6 +270,12 @@ export async function unarchiveInventoryItem(
     type: 'unarchive_inventory_item',
     affected: [{ table: 'inventory_items', id }],
     steps: [{ op: 'update', table: 'inventory_items', id, changes: { is_archived: true, _synced: false } }],
+  });
+
+  await auditService.record({
+    storeId, branchId: currentBranchId, changedBy: userProfileId,
+    entityType: 'inventory_item', entityId: id, action: 'unarchive',
+    changes: [{ field: 'is_archived', old: true, new: false }],
   });
 
   resetAutoSyncTimer();
@@ -319,6 +341,12 @@ export async function deleteInventoryItem(
       type: 'delete_inventory_item',
       affected: [{ table: 'inventory_items', id }],
       steps: [{ op: 'add', table: 'inventory_items', id, changes: originalItem }],
+    });
+
+    await auditService.record({
+      storeId, branchId: currentBranchId, changedBy: userProfileId,
+      entityType: 'inventory_item', entityId: id, action: 'delete',
+      changeReason: `Inventory item deleted${originalItem.sku ? ` (SKU ${originalItem.sku})` : ''}`,
     });
 
     resetAutoSyncTimer();

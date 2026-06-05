@@ -14,6 +14,8 @@ import {
   V64_STORES,
   V65_STORES,
   V66_STORES,
+  V68_STORES,
+  V69_STORES,
   upgradeV54,
   upgradeV55,
   upgradeV56,
@@ -28,6 +30,8 @@ import {
   upgradeV65,
   upgradeV66,
   upgradeV67,
+  upgradeV68,
+  upgradeV69,
 } from './dbSchema';
 import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
 import { 
@@ -44,7 +48,6 @@ import {
   inventory_bills,
   Store,
   Branch,
-  BillAuditLog,
   SyncMetadata,
   PendingSync,
   Employee,
@@ -55,6 +58,7 @@ import {
   RolePermission,
   UserPermission,
   FiscalYearPeriod,
+  AuditLog,
   UserModuleAccess // @deprecated - kept for migration
 } from '../types';
 import {
@@ -148,7 +152,6 @@ class POSDatabase extends Dexie {
   // Bill management tables
   bills!: Table<Bill, string>;
   bill_line_items!: Table<BillLineItem, string>;
-  bill_audit_logs!: Table<BillAuditLog, string>;
   // Currency management tables
   
   // Sync management tables
@@ -175,6 +178,9 @@ class POSDatabase extends Dexie {
 
   // Fiscal periods (v66, Plan A) — one row per (store, fiscal year), tier-1 synced.
   fiscal_periods!: Table<FiscalYearPeriod, string>;
+
+  // General-purpose audit log (v68) — append-only, one row per business action.
+  audit_logs!: Table<AuditLog, string>;
   
   // RBAC tables (Role-Based Access Control)
   role_permissions!: Table<RolePermission, string>;
@@ -230,6 +236,8 @@ class POSDatabase extends Dexie {
     this.version(65).stores(V65_STORES).upgrade(upgradeV65);
     this.version(66).stores(V66_STORES).upgrade(upgradeV66);
     this.version(67).upgrade(upgradeV67);
+    this.version(68).stores(V68_STORES).upgrade(upgradeV68);
+    this.version(69).stores(V69_STORES).upgrade(upgradeV69);
 
     // Add hooks for cash drawer tables
     this.cash_drawer_accounts.hook('creating', this.addCreateFieldsWithUpdatedAt);
@@ -256,8 +264,10 @@ class POSDatabase extends Dexie {
     // Bill management hooks
     this.bills.hook('creating', this.addCreateFieldsWithUpdatedAt);
     this.bill_line_items.hook('creating', this.addCreateFields);
-    this.bill_audit_logs.hook('creating', this.addCreateFields);
     this.bills.hook('updating', this.addUpdateFields);
+
+    // Audit log hook — append-only, no updated_at (creating only).
+    this.audit_logs.hook('creating', this.addCreateFields);
 
     // ========================================================================
     // AUTOMATIC SYNC TRIGGERS - Generic solution for all tables
@@ -271,11 +281,11 @@ class POSDatabase extends Dexie {
     const syncableTables = [
       'stores', 'branches', 'products', 'users', 'entities',
       'inventory_items', 'inventory_bills', 'transactions', 'journal_entries',
-      'bills', 'bill_line_items', 'bill_audit_logs',
+      'bills', 'bill_line_items',
       'cash_drawer_accounts', 'cash_drawer_sessions',
       'missed_products', 'reminders', 'chart_of_accounts',
       'role_permissions', 'user_permissions', 'balance_snapshots',
-      'product_categories', 'units_of_measure'
+      'product_categories', 'units_of_measure', 'audit_logs'
     ];
 
     // Register sync trigger hooks for all tables
@@ -1299,7 +1309,10 @@ class POSDatabase extends Dexie {
       id: productId,
       ...productData,
       store_id: 'global', // Use 'global' as a special store_id for global products
-      is_global: true,
+      // Store as numeric 1, not boolean true: IndexedDB cannot index booleans,
+      // so a boolean `true` would be invisible to the `where('is_global')` index
+      // query in crudHelperService and require a full-table scan to recover.
+      is_global: 1,
       created_at: now,
       updated_at: now,
       _synced: false,
@@ -1324,7 +1337,7 @@ class POSDatabase extends Dexie {
       id: productId,
       ...productData,
       store_id: storeId,
-      is_global: false,
+      is_global: 0, // numeric, not boolean — keep index-compatible (see createGlobalProduct)
       created_at: now,
       updated_at: now,
       _synced: false,
@@ -1342,7 +1355,10 @@ class POSDatabase extends Dexie {
    */
   async isProductGlobal(productId: string): Promise<boolean> {
     const product = await this.products.get(productId);
-    return product?.is_global === true;
+    const g = product?.is_global as unknown;
+    // Accept every shape is_global has been stored as (numeric 1 is canonical now,
+    // but legacy/synced rows may carry boolean true or string '1'/'true').
+    return g === 1 || g === true || g === '1' || g === 'true';
   }
 
   // Bill management methods
@@ -1357,7 +1373,7 @@ class POSDatabase extends Dexie {
     const billId = uuidv4();
     const now = new Date().toISOString();
     
-    return await this.transaction('rw', [this.bills, this.bill_line_items, this.bill_audit_logs], async () => {
+    return await this.transaction('rw', [this.bills, this.bill_line_items], async () => {
       // Create the bill
       const bill: Bill = {
         id: billId,
@@ -1401,70 +1417,20 @@ class POSDatabase extends Dexie {
       }));
       
       await this.bill_line_items.bulkAdd(billLineItems);
-      
-      // Create audit log entry
-      await this.bill_audit_logs.add({
-        id: uuidv4(),
-        store_id: billData.store_id!,
-        branch_id: billData.branch_id!,
-        created_at: now,
-        updated_at: now,
-        _synced: false,
-        bill_id: billId,
-        action: 'created',
-        field_changed: null,
-        old_value: null,
-        new_value: JSON.stringify(bill),
-        change_reason: 'Bill created from POS sale',
-        changed_by: billData.created_by!,
-        ip_address: null,
-        user_agent: null,
-      });
 
       return billId;
     });
   }
 
-  async updateBill(billId: string, updates: Partial<Bill>, changedBy: string, changeReason?: string): Promise<void> {
+  async updateBill(billId: string, updates: Partial<Bill>, changedBy: string, _changeReason?: string): Promise<void> {
     const originalBill = await this.bills.get(billId);
     if (!originalBill) throw new Error('Bill not found');
-    
-    return await this.transaction('rw', [this.bills, this.bill_audit_logs], async () => {
-      const now = new Date().toISOString();
-      
-      // Update the bill
-      await this.bills.update(billId, {
-        ...updates,
-        last_modified_by: changedBy,
-        updated_at: now,
-        _synced: false,
-      });
 
-      // Log each changed field
-      for (const [field, newValue] of Object.entries(updates)) {
-        if (field !== 'last_modified_by' && field !== 'last_modified_at' && field !== '_synced') {
-          const oldValue = (originalBill as any)[field];
-          if (oldValue !== newValue) {
-            await this.bill_audit_logs.add({
-              id: uuidv4(),
-              store_id: originalBill.store_id,
-              branch_id: originalBill.branch_id,
-              created_at: now,
-              updated_at: now,
-              _synced: false,
-              bill_id: billId,
-              action: 'updated',
-              field_changed: field,
-              old_value: JSON.stringify(oldValue),
-              new_value: JSON.stringify(newValue),
-              change_reason: changeReason || 'Bill updated',
-              changed_by: changedBy,
-              ip_address: null,
-              user_agent: null,
-            });
-          }
-        }
-      }
+    await this.bills.update(billId, {
+      ...updates,
+      last_modified_by: changedBy,
+      updated_at: new Date().toISOString(),
+      _synced: false,
     });
   }
 
@@ -1523,34 +1489,25 @@ class POSDatabase extends Dexie {
     
     // Get line items and audit logs for each bill
     const billsWithDetails = await Promise.all(bills.map(async (bill) => {
-      const [lineItems, auditLogs] = await Promise.all([
-        this.bill_line_items.where('bill_id').equals(bill.id).sortBy('line_order'),
-        this.bill_audit_logs.where('bill_id').equals(bill.id).reverse().sortBy('created_at')
-      ]);
-      
+      const lineItems = await this.bill_line_items.where('bill_id').equals(bill.id).sortBy('line_order');
       return {
         ...bill,
         bill_line_items: lineItems,
-        bill_audit_logs: auditLogs
       };
     }));
-    
+
     return billsWithDetails;
   }
 
   async getBillDetails(billId: string): Promise<any | null> {
     const bill = await this.bills.get(billId);
     if (!bill) return null;
-    
-    const [lineItems, auditLogs] = await Promise.all([
-      this.bill_line_items.where('bill_id').equals(billId).sortBy('line_order'),
-      this.bill_audit_logs.where('bill_id').equals(billId).reverse().sortBy('created_at')
-    ]);
-    
+
+    const lineItems = await this.bill_line_items.where('bill_id').equals(billId).sortBy('line_order');
+
     return {
       ...bill,
       bill_line_items: lineItems,
-      bill_audit_logs: auditLogs
     };
   }
 
@@ -1562,14 +1519,14 @@ class POSDatabase extends Dexie {
   async addBillLineItem(
     billId: string,
     lineItem: Partial<BillLineItem>,
-    addedBy: string
+    _addedBy: string
   ): Promise<string> {
     const bill = await this.bills.get(billId);
     if (!bill) throw new Error('Bill not found');
 
     const now = new Date().toISOString();
     const lineItemId = uuidv4();
-    
+
     const newLineItem = {
       id: lineItemId,
       bill_id: billId,
@@ -1581,34 +1538,7 @@ class POSDatabase extends Dexie {
       ...lineItem
     } as BillLineItem;
 
-    await this.transaction('rw', [this.bill_line_items, this.bill_audit_logs, this.products], async () => {
-      await this.bill_line_items.add(newLineItem);
-
-      // Resolve product name for audit log
-      const product = await this.products.get(newLineItem.product_id);
-      const productName = product?.name || 'Unknown Product';
-      
-      // Create audit log with descriptive reason
-      const generatedReason = `Adding line item: ${productName} (Qty: ${newLineItem.quantity}, Price: ${newLineItem.unit_price})`;
-
-      await this.bill_audit_logs.add({
-        id: uuidv4(),
-        store_id: bill.store_id,
-        branch_id: bill.branch_id,
-        created_at: now,
-        updated_at: now,
-        _synced: false,
-        bill_id: billId,
-        action: 'item_added',
-        field_changed: 'line_items',
-        old_value: null,
-        new_value: JSON.stringify(newLineItem),
-        change_reason: generatedReason,
-        changed_by: addedBy,
-        ip_address: null,
-        user_agent: null
-      });
-    });
+    await this.bill_line_items.add(newLineItem);
 
     return lineItemId;
   }
@@ -1619,73 +1549,15 @@ class POSDatabase extends Dexie {
   async updateBillLineItem(
     lineItemId: string,
     updates: Partial<BillLineItem>,
-    updatedBy: string
+    _updatedBy: string
   ): Promise<void> {
     const originalItem = await this.bill_line_items.get(lineItemId);
     if (!originalItem) throw new Error('Line item not found');
 
-    const now = new Date().toISOString();
-
-    await this.transaction('rw', [this.bill_line_items, this.bill_audit_logs, this.products], async () => {
-      // Update the line item
-      await this.bill_line_items.update(lineItemId, {
-        ...updates,
-        updated_at: now,
-        _synced: false
-      });
-
-      // Create audit log for each changed field with ID resolution
-      // Skip computed/automatic fields that are consequences of other changes
-      const computedFields = ['line_total', 'received_value', 'updated_at', '_synced'];
-      
-      for (const [field, newValue] of Object.entries(updates)) {
-        if (!computedFields.includes(field)) {
-          const oldValue = (originalItem as any)[field];
-          if (oldValue !== newValue) {
-            // Resolve IDs to human-readable names
-            let oldValueDisplay = oldValue != null ? String(oldValue) : 'empty';
-            let newValueDisplay = newValue != null ? String(newValue) : 'empty';
-
-            // Resolve product_id to product name
-            if (field === 'product_id') {
-              if (oldValue && typeof oldValue === 'string') {
-                const oldProduct = await this.products.get(oldValue);
-                oldValueDisplay = oldProduct?.name || oldValue;
-              }
-              if (newValue && typeof newValue === 'string') {
-                const newProduct = await this.products.get(newValue);
-                newValueDisplay = newProduct?.name || String(newValue);
-              }
-            }
-
-            // Resolve product name for audit log
-            const product = await this.products.get(originalItem.product_id);
-            const productName = product?.name || 'Unknown Product';
-            
-            // Generate descriptive change reason
-            const fieldLabel = field.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-            const generatedReason = `Modifying line item: ${fieldLabel} from ${oldValueDisplay} to ${newValueDisplay} (Product: ${productName})`;
-
-            await this.bill_audit_logs.add({
-              id: uuidv4(),
-              store_id: originalItem.store_id,
-              branch_id: originalItem.branch_id,
-              created_at: now,
-              updated_at: now,
-              _synced: false,
-              bill_id: originalItem.bill_id,
-              action: 'item_modified',
-              field_changed: field,
-              old_value: oldValueDisplay !== 'empty' ? oldValueDisplay : null,
-              new_value: newValueDisplay !== 'empty' ? newValueDisplay : null,
-              change_reason: generatedReason,
-              changed_by: updatedBy,
-              ip_address: null,
-              user_agent: null
-            });
-          }
-        }
-      }
+    await this.bill_line_items.update(lineItemId, {
+      ...updates,
+      updated_at: new Date().toISOString(),
+      _synced: false
     });
   }
 
@@ -1694,45 +1566,15 @@ class POSDatabase extends Dexie {
    */
   async removeBillLineItem(
     lineItemId: string,
-    removedBy: string
+    _removedBy: string
   ): Promise<void> {
     const lineItem = await this.bill_line_items.get(lineItemId);
     if (!lineItem) throw new Error('Line item not found');
 
-    const now = new Date().toISOString();
-
-    await this.transaction('rw', [this.bill_line_items, this.bill_audit_logs, this.products], async () => {
-      // Soft delete the line item
-      await this.bill_line_items.update(lineItemId, {
-        _deleted: true,
-        updated_at: now,
-        _synced: false
-      });
-
-      // Resolve product name for audit log
-      const product = await this.products.get(lineItem.product_id);
-      const productName = product?.name || 'Unknown Product';
-      
-      // Create audit log with descriptive reason
-      const generatedReason = `Removing line item: ${productName} (Qty: ${lineItem.quantity}, Price: ${lineItem.unit_price})`;
-
-      await this.bill_audit_logs.add({
-        id: uuidv4(),
-        store_id: lineItem.store_id,
-        branch_id: lineItem.branch_id,
-        created_at: now,
-        updated_at: now,
-        _synced: false,
-        bill_id: lineItem.bill_id,
-        action: 'item_removed',
-        field_changed: 'line_items',
-        old_value: JSON.stringify(lineItem),
-        new_value: null,
-        change_reason: generatedReason,
-        changed_by: removedBy,
-        ip_address: null,
-        user_agent: null
-      });
+    await this.bill_line_items.update(lineItemId, {
+      _deleted: true,
+      updated_at: new Date().toISOString(),
+      _synced: false
     });
   }
 

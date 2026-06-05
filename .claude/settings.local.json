@@ -101,7 +101,10 @@
       "Bash(pnpm --filter @pos-platform/store-app exec tsc --noEmit)",
       "Bash(supabase --version)",
       "Bash(echo \"exit $?\")",
-      "Bash(pnpm test:run --reporter=basic src/contexts/offlineData/operations/__tests__/withUndoOperation.test.ts)"
+      "Bash(pnpm test:run --reporter=basic src/contexts/offlineData/operations/__tests__/withUndoOperation.test.ts)",
+      "Bash(grep -E \"\\\\.ts$\")",
+      "Bash(awk 'NR>=905 && NR<=1015 && \\(/<\\\\/form>/ || /justify-end/ || /type=\"submit\"/ || /editingCustomer/ || /Cancel/ || /pt-4|pt-6|border-t/\\)' src/pages/Customers.tsx)",
+      "Bash(npx vitest *)"
     ]
   }
 }

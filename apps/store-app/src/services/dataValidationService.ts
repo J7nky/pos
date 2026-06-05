@@ -59,11 +59,6 @@ const VALIDATION_RULES: Record<string, ValidationRule[]> = {
     { field: 'unit_price', required: true, type: 'number', min: 0 },
     { field: 'line_total', required: true, type: 'number', min: 0 },
   ],
-  bill_audit_logs: [
-    { field: 'bill_id', required: true, type: 'uuid', foreignKey: { table: 'bills', cacheKey: 'bills' } },
-    { field: 'action', required: true, type: 'string' },
-    { field: 'changed_by', required: true, type: 'uuid', foreignKey: { table: 'users', cacheKey: 'users' } },
-  ],
   cash_drawer_accounts: [
     { field: 'store_id', required: true, type: 'uuid' },
     { field: 'account_code', required: true, type: 'string' },
@@ -674,13 +669,6 @@ export class DataValidationService {
       cleanRecord.inventory_item_id = cleanRecord.inventory_item_id || null;
     }
 
-    if (tableName === 'bill_audit_logs') {
-      // Remove fields that don't exist in database schema
-      delete cleanRecord.ip_address;
-      delete cleanRecord.user_agent;
-      // Keep updated_at - it exists in the schema
-    }
-
     if (tableName === 'transactions') {
       delete cleanRecord.status; // Remove status field that doesn't exist in Supabase schema
     }
@@ -715,7 +703,7 @@ export class DataValidationService {
     }
 
     // Remove updated_at for tables without it
-    const tablesWithoutUpdatedAt = ['inventory_items', 'transactions', 'inventory_bills', 'bill_line_items', 'bill_audit_logs'];
+    const tablesWithoutUpdatedAt = ['inventory_items', 'transactions', 'inventory_bills', 'bill_line_items', 'audit_logs'];
     if (tablesWithoutUpdatedAt.includes(tableName)) {
       delete cleanRecord.updated_at;
     }

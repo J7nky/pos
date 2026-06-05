@@ -99,8 +99,9 @@ export default function RecordExpenseModal({ isOpen, onClose, onSuccess }: Recor
                 return;
             }
 
-            // Refresh data
-            await raw.refreshData();
+            // Refresh data — an expense only touches transactions + cash drawer,
+            // so use the financial scope instead of the full rehydration.
+            await raw.refreshData('financial');
 
             // Call success callback
             onSuccess?.();
@@ -122,8 +123,8 @@ export default function RecordExpenseModal({ isOpen, onClose, onSuccess }: Recor
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
+        <div className="animate-modal-fade fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="animate-modal-pop bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
                 {/* Header */}
                 <div className="flex items-center justify-between p-4 border-b">
                     <div className="flex items-center gap-2">

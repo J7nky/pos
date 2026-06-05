@@ -6,7 +6,6 @@ import type { Database } from '../../types/database';
 import type {
   Branch,
   Bill,
-  BillAuditLog,
   BillLineItem,
   CashDrawerSession,
   ExpenseCategory,
@@ -17,15 +16,26 @@ import type {
   NotificationPreferences,
   PendingSync,
   RolePermission,
+  ModuleName,
+  UserModuleAccess,
 } from '../../types';
 import type { InventoryItem } from '../../types/inventory';
 import type { BalanceSnapshot, ChartOfAccounts, JournalEntry } from '../../types/accounting';
 import type { ProductCategory, UnitOfMeasure } from '../../types/taxonomy';
 import type { CreateCategoryInput, CreateUnitInput } from '../../services/taxonomyService';
+import type { AuditLogFilters, AuditLogWithUser } from './useAuditLogDataLayer';
 import type { SyncResult } from '../../services/syncOrchestrator';
 import type { CurrencyCode } from '@pos-platform/shared';
 
 type Tables = Database['public']['Tables'];
+
+/**
+ * Scope for refreshData(): 'all' = full rehydration of every domain layer;
+ * 'sale' = only the tables a sale mutates (bills, line items, inventory,
+ * transactions); 'financial' = only transactions + cash-drawer status (expenses,
+ * income, standalone transactions). Narrow scopes skip the full re-render cascade.
+ */
+export type RefreshScope = 'all' | 'sale' | 'financial';
 
 /** Persisted receipt/print layout settings (stored in localStorage, merged with store data). */
 type ReceiptSettings = {
@@ -216,10 +226,8 @@ type CashDrawerSessionDetailsResponse = {
 
 type BillDetails = Bill & {
   bill_line_items: BillLineItem[];
-  bill_audit_logs: BillAuditLog[];
-  // Back-compat aliases used by some UI callers
+  // Back-compat alias used by some UI callers
   line_items?: BillLineItem[];
-  audit_logs?: BillAuditLog[];
 };
 
 /** Runtime tier hydration progress (not persisted — see incremental sync redesign). */
@@ -320,7 +328,6 @@ export interface OfflineDataContextType {
   expenseCategories: ExpenseCategory[];
   bills: Bill[];
   billLineItems: BillLineItem[];
-  billAuditLogs: BillAuditLog[];
   missedProducts: MissedProduct[];
 
   journalEntries: JournalEntry[];
@@ -431,7 +438,6 @@ export interface OfflineDataContextType {
   reactivateBill: (billId: string, reactivatedBy: string, reactivationReason?: string) => Promise<void>;
   getBills: (filters?: BillFilters) => Promise<Array<Bill & { line_items: BillLineItem[] }>>;
   getBillDetails: (billId: string) => Promise<BillDetails | null>;
-  createBillAuditLog: (auditData: Omit<BillAuditLog, 'id' | 'store_id' | 'created_at' | '_synced'>) => Promise<void>;
 
   getStore: (storeId: string) => Promise<Tables['stores']['Row'] | null>;
   getBranchLogo: (branchId: string, storeId: string) => Promise<string | null>;
@@ -439,13 +445,35 @@ export interface OfflineDataContextType {
   getFirstBranchForStore: (storeId: string) => Promise<Branch | null>;
   getUserById: (userId: string) => Promise<Tables['users']['Row'] | undefined>;
   getRolePermissionsByRole: (role: string) => Promise<RolePermission[]>;
+  /**
+   * RBAC — per-user module access overrides. Backed by the `user_permissions`
+   * table: module access is the `access_<module>` operation layered over role
+   * defaults. Returned rows are mapped to the `{ module, can_access }` shape the
+   * UI expects. Only non-deleted `access_*` overrides are returned.
+   */
+  getUserModuleAccessOverrides: (userId: string, storeId: string) => Promise<UserModuleAccess[]>;
+  /** Grant/block a module for a user (upserts the `access_<module>` override). */
+  setUserModuleAccessOverride: (params: {
+    userId: string;
+    storeId: string;
+    module: ModuleName;
+    canAccess: boolean;
+  }) => Promise<void>;
+  /** Remove a module override, restoring the role default for that module. */
+  removeUserModuleAccessOverride: (userId: string, storeId: string, module: ModuleName) => Promise<void>;
+  /**
+   * Audit viewer (Phase 4). Both getters are role-scoped at the data layer:
+   * admin → whole store, manager → own branch, cashier → own actions only.
+   */
+  getAuditLogs: (filters?: AuditLogFilters) => Promise<AuditLogWithUser[]>;
+  getEntityAuditLogs: (entityType: string, entityId: string) => Promise<AuditLogWithUser[]>;
   ensureDataReady: () => Promise<void>;
   getGlobalLogos: () => Promise<Array<{ name: string; url: string; path: string }>>;
 
   deductInventoryQuantity: (productId: string, quantity: number) => Promise<void>;
   restoreInventoryQuantity: (productId: string, quantity: number) => Promise<void>;
 
-  refreshData: () => Promise<void>;
+  refreshData: (scope?: RefreshScope) => Promise<void>;
   getStockLevels: () => DerivedStockLevel[];
   toggleLowStockAlerts: (enabled: boolean) => Promise<void>;
   updateLowStockThreshold: (threshold: number) => void;
