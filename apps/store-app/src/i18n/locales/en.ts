@@ -1,6 +1,7 @@
 const en = {
   app: { name: 'Produce POS', loading: 'Loading...' },
   common: {
+    recent: 'Recent',
     closed: 'Closed',
     loading: 'Loading...',
     active: 'active',
@@ -88,7 +89,11 @@ const en = {
     },
     confirmations: { fullResyncConfirm: 'This will clear all local data and re-download from server. Continue?' },
     alerts: { connectionRestored: 'Connection Restored', autoSyncingChanges: 'Auto-syncing your changes...' },
-    currency: { USD: 'USD', LBP: 'LBP' },
+    currency: {
+      USD: 'USD', LBP: 'LBP', EUR: 'EUR', GBP: 'GBP', SAR: 'SAR', AED: 'AED', EGP: 'EGP',
+      JOD: 'JOD', SYP: 'SYP', IQD: 'IQD', TRY: 'TRY', MAD: 'MAD', TND: 'TND', DZD: 'DZD',
+      LYD: 'LYD', SDG: 'SDG', YER: 'YER', KWD: 'KWD', BHD: 'BHD', QAR: 'QAR', OMR: 'OMR',
+    },
     previous: 'Previous',
     next: 'Next',
     showing: 'Showing',
@@ -119,7 +124,8 @@ const en = {
   login: {
     title: 'Produce POS', subtitle: 'Wholesale Produce Market ERP', email: 'Email Address', emailPlaceholder: 'Enter your email', password: 'Password', passwordPlaceholder: 'Enter your password',
     signIn: 'Sign In', signUp: 'Sign Up', signingIn: 'Signing In...', signingUp: 'Signing Up...', fullName: 'Full Name', role: 'Role', store: 'Store', selectStore: 'Select a store', demoAccount: 'Demo Account',
-    invalidCredentials: 'Invalid email or password', signupFailed: 'Sign up failed. Please try again.', genericError: 'An error occurred. Please try again.'
+    invalidCredentials: 'Invalid email or password', signupFailed: 'Sign up failed. Please try again.', genericError: 'An error occurred. Please try again.',
+    lockedTitle: 'Too many failed attempts', lockedMessage: 'Sign-in is temporarily disabled. Try again in {{time}}.'
   },
   employees: {
     recordAPaymentTo: 'Record a payment to',
@@ -697,6 +703,14 @@ const en = {
     duplicateSupplierNameError: 'A supplier with this name already exists.'
   },
   accounting: {
+    tabs: {
+      dashboard: 'Dashboard',
+      nonpriced: 'Non Priced Items',
+      billsManagement: 'Bills Management',
+      receivedBills: 'Received Bills',
+      payments: 'Recent Payments',
+      cashDrawer: 'Cash Drawer',
+    },
     failedToCloseTheBillWithNonPricedItems: "Failed to close bill. There are non-priced items",
     errorLoadingData: 'Error Loading Data',
     unableToLoadData: 'Unable to load accounting data. Please refresh the page or check your connection.',
@@ -808,6 +822,11 @@ const en = {
     paymentCanceled: 'Payment Canceled',
     reversal: 'Reversal',
     refund: 'Refund',
+    selectEntity: 'Select entity...',
+    pleaseSelectEntity: 'Please select an entity',
+    changingEntityNote: 'Changing the entity reverses the original on the previous entity and posts the correction to the selected one.',
+    cannotCorrectNonActive: 'This payment was already corrected or reversed and can no longer be edited.',
+    cannotDeleteNonActive: 'This payment is no longer active and cannot be deleted.',
     title: 'Payment Management',
     subtitle: 'Track and manage all payment transactions',
     addPayment: 'Add Payment',
@@ -1401,12 +1420,13 @@ const en = {
     actions: {
       create: 'Created', update: 'Updated', delete: 'Deleted', void: 'Voided',
       reactivate: 'Reactivated', archive: 'Archived', unarchive: 'Unarchived', open: 'Opened', close: 'Closed',
+      login: 'Signed in', logout: 'Signed out',
     },
     entityTypes: {
       entity: 'Customer / Supplier', product: 'Product', user: 'Employee', branch: 'Branch',
       bill: 'Sale Bill', payment: 'Payment', cash_drawer_session: 'Cash drawer', inventory_item: 'Inventory item',
       inventory_batch: 'Inventory batch', product_category: 'Category', unit_of_measure: 'Unit',
-      store_settings: 'Store settings', user_permission: 'Permission',
+      store_settings: 'Store settings', user_permission: 'Permission', auth: 'Authentication',
     },
     billSummary: {
       created: 'Bill created with {{count}} items (total **{{total}} {{currency}}**)',

@@ -94,12 +94,9 @@ export default function TransactionListItem({
       }
       navigate('/accounting');
     } else {
-      // Navigate to Accounting dashboard (default)
-      localStorage.setItem('accounting_active_tab', JSON.stringify('dashboard'));
-      // Store transaction ID for highlighting in dashboard
-      if (transaction.id) {
-        sessionStorage.setItem('highlightDashboardTransactionId', transaction.id);
-      }
+      // Dashboard tab archived — fall back to the default Accounting tab.
+      // (Previously routed to 'dashboard' with a highlightDashboardTransactionId.)
+      localStorage.setItem('accounting_active_tab', JSON.stringify('bills-management'));
       navigate('/accounting');
     }
   };

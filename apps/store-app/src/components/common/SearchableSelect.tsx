@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Search, X, ChevronDown, Check, Loader2, Plus } from 'lucide-react';
 import { normalizeNameForComparison } from '../../utils/nameNormalization';
+import {  useI18n } from '../../i18n';
 
 // One-time injected keyframes for the dropdown entrance (no tailwind config change needed).
 const STYLE_ID = 'searchable-select-anim';
@@ -360,6 +361,7 @@ export default function SearchableSelect({
     'flex-shrink-0 whitespace-nowrap px-3.5 py-2 text-sm font-medium rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 min-h-[40px] active:scale-95';
   const chipActive = 'bg-blue-600 text-white shadow-sm dark:bg-blue-500';
   const chipIdle = 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700';
+   const { t   } = useI18n();
 
   // Single shared dropdown body — used by BOTH the inline and portal renders so
   // the two paths can never drift out of sync.
@@ -478,7 +480,7 @@ export default function SearchableSelect({
       {/* Recent Selections */}
       {recentOptions.length > 0 && !searchTerm && (
         <div className={`p-2 ${sectionDivider}`}>
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 px-2 mb-1 dark:text-slate-500">Recent</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 px-2 mb-1 dark:text-slate-500">{t('common.recent')}</p>
           <div className="space-y-0.5">
             {recentOptions.slice(0, 3).map(option => (
               <button

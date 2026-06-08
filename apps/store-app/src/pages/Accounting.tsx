@@ -125,17 +125,25 @@ export default function Accounting() {
   const [recentEntities, setRecentEntities] = useLocalStorage<string[]>('accounting_recent_entities', []);
   const [recentCategories, setRecentCategories] = useLocalStorage<string[]>('accounting_recent_categories', []);
 
-  const [activeTab, setActiveTab] = useLocalStorage<'dashboard' | 'nonpriced' | 'bills-management' | 'received-bills' | 'cash-drawer' | 'payments'>('accounting_active_tab', 'dashboard');
+  // NOTE: 'dashboard' remains in the type union so the archived dashboard code stays valid/restorable.
+  const [activeTab, setActiveTab] = useLocalStorage<'dashboard' | 'nonpriced' | 'bills-management' | 'received-bills' | 'cash-drawer' | 'payments'>('accounting_active_tab', 'bills-management');
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     const tabParam = searchParams.get('tab');
-    const valid = ['dashboard', 'nonpriced', 'bills-management', 'received-bills', 'cash-drawer', 'payments'];
+    // 'dashboard' archived — excluded so a deep link can't land on the hidden tab.
+    const valid = ['nonpriced', 'bills-management', 'received-bills', 'cash-drawer', 'payments'];
     if (tabParam && valid.includes(tabParam)) {
       setActiveTab(tabParam as typeof activeTab);
       searchParams.delete('tab');
       setSearchParams(searchParams, { replace: true });
     }
   }, [searchParams]);
+  // Dashboard tab archived — redirect any stale persisted value to the new default.
+  useEffect(() => {
+    if (activeTab === 'dashboard') {
+      setActiveTab('bills-management');
+    }
+  }, [activeTab]);
   const [cashDrawerBalance, setCashDrawerBalance] = useState<number | null>(null);
   const [showForm, setShowForm] = useState<"receive" | "pay" | "expense" | null>(null);
   const [dashboardPeriod] = useLocalStorage<'today' | 'week' | 'month' | 'quarter' | 'year'>('accounting_dashboard_period', 'today');
@@ -184,12 +192,14 @@ export default function Accounting() {
         sessionStorage.removeItem('highlightPaymentTransactionId');
       }
       
-      // Handle dashboard transaction highlighting (can run immediately)
+      // Dashboard tab archived — its transaction-highlight navigation is disabled.
+      // (Re-enable the block below if the dashboard tab is restored.)
       if (highlightDashboardTransactionId) {
-        setActiveTab('dashboard');
+        // setActiveTab('dashboard');
         // Store for DashboardOverview component to use (don't remove yet, let component handle it)
         // Note: We're keeping the same key name so component can read it
         // Component will remove it after reading
+        sessionStorage.removeItem('highlightDashboardTransactionId');
       }
 
       // Handle inventory bill transaction - switch tab immediately (item matching happens in separate useEffect)

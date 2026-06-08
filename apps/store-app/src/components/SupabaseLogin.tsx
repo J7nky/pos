@@ -19,7 +19,10 @@ export default function SupabaseLogin() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const { signIn, signUp, getStores } = useSupabaseAuth();
+  // Failed-login lockout: epoch-ms the lock lifts, plus a 1s ticker for the countdown.
+  const [lockedUntil, setLockedUntil] = useState<number | null>(null);
+  const [nowTs, setNowTs] = useState<number>(() => Date.now());
+  const { signIn, signUp, getStores, getLoginLockout } = useSupabaseAuth();
   const [showSignUp, setShowSignUp] = useState(false);
   const [name, setName] = useState('');
   const [role, setRole] = useState<'admin' | 'manager' | 'cashier'>('manager');
@@ -73,6 +76,46 @@ export default function SupabaseLogin() {
       passwordInputRef.current.focus();
     }
   }, [selectedUser]);
+
+  // Restore any active lockout for the entered email (survives page reloads, and
+  // switching to a different account swaps in that account's own counter).
+  useEffect(() => {
+    if (!email) {
+      setLockedUntil(null);
+      return;
+    }
+    const status = getLoginLockout(email);
+    setLockedUntil(status.locked ? status.until : null);
+  }, [email, getLoginLockout]);
+
+  // While locked, tick once a second so the countdown updates and clears itself.
+  useEffect(() => {
+    if (!lockedUntil) return;
+    const tick = () => {
+      const t = Date.now();
+      setNowTs(t);
+      if (t >= lockedUntil) {
+        setLockedUntil(null);
+        setError('');
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [lockedUntil]);
+
+  const isLocked = lockedUntil != null && nowTs < lockedUntil;
+  const remainingMs = isLocked ? lockedUntil - nowTs : 0;
+  // The lockout only gates sign-in, never the sign-up flow.
+  const showLock = isLocked && !showSignUp;
+
+  /** Format a remaining duration as M:SS for the lockout countdown. */
+  const formatRemaining = (ms: number): string => {
+    const totalSec = Math.max(0, Math.ceil(ms / 1000));
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
 
   const handleUserSelect = (user: SavedUser) => {
     setSelectedUser(user);
@@ -134,8 +177,11 @@ export default function SupabaseLogin() {
       } else {
         const result = await signIn(email, password);
         if (!result.success) {
-          // Show appropriate error message
-          if (navigator.onLine) {
+          if (result.lockedUntil) {
+            // Locked out (or just hit the threshold) — the countdown banner takes over.
+            setLockedUntil(result.lockedUntil);
+            setError('');
+          } else if (navigator.onLine) {
             setError(result.error || 'Invalid email or password');
           } else {
             setError(result.error || 'Invalid email or password. Please check your credentials or connect to the internet.');
@@ -312,7 +358,12 @@ export default function SupabaseLogin() {
             </div>
           </div>
 
-          {error && (
+          {showLock ? (
+            <div className="text-red-700 text-sm text-center bg-red-50 p-3 rounded-md border border-red-200">
+              <p className="font-semibold">{t('login.lockedTitle')}</p>
+              <p className="mt-1">{t('login.lockedMessage', { time: formatRemaining(remainingMs) })}</p>
+            </div>
+          ) : error ? (
             <div className="text-red-600 text-sm text-center bg-red-50 p-3 rounded-md">
               {error}
               {!navigator.onLine && (
@@ -321,7 +372,7 @@ export default function SupabaseLogin() {
                 </div>
               )}
             </div>
-          )}
+          ) : null}
 
           {!navigator.onLine && !error && (
             <div className="text-yellow-600 text-sm text-center bg-yellow-50 p-3 rounded-md">
@@ -331,10 +382,12 @@ export default function SupabaseLogin() {
 
           <button
             type="submit"
-            disabled={isLoading}
+            disabled={isLoading || showLock}
             className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isLoading ? (
+            {showLock ? (
+              `${t('login.lockedTitle')} · ${formatRemaining(remainingMs)}`
+            ) : isLoading ? (
               <div className="flex items-center">
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
                 {showSignUp ? t('login.signingUp') : t('login.signingIn')}

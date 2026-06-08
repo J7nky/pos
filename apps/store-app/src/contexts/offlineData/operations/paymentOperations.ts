@@ -19,6 +19,7 @@ import type { CurrencyCode } from '@pos-platform/shared';
 import { TRANSACTION_CATEGORIES } from '../../../constants/transactionCategories';
 import type { CashDrawerAtomicResult } from './cashDrawerTransactionOperations';
 import type { MultilingualString } from '../../../utils/multilingual';
+import type { RefreshScope } from '../offlineDataContextContract';
 import { withUndoOperation } from './withUndoOperation';
 
 // ─── per-currency advance balance helpers ──────────────────────────────────
@@ -89,8 +90,10 @@ export interface ProcessPaymentDeps {
     additionalUndoData?: { affected: Array<{ table: string; id: string }>; steps: any[] }
   ) => any;
   pushUndo: (data: any) => void;
-  refreshData: () => Promise<void>;
-  updateUnsyncedCount: () => Promise<void>;
+  refreshData: (scope?: RefreshScope) => Promise<void>;
+  /** Surgically append the new payment transaction instead of reloading the whole table. */
+  upsertTransactions: (rows: any[]) => void;
+  updateUnsyncedCount: (optimisticDelta?: number) => Promise<void>;
   debouncedSync: () => void;
   i18n: { en: any; ar: any };
   /** Store's preferred UI language — used to localize audit summaries at write time. */
@@ -102,8 +105,10 @@ export interface ProcessEmployeePaymentDeps {
   currentBranchId: string | null;
   employees: any[];
   exchangeRate: number;
-  refreshData: () => Promise<void>;
-  updateUnsyncedCount: () => Promise<void>;
+  refreshData: (scope?: RefreshScope) => Promise<void>;
+  /** Surgically append the new payment transaction instead of reloading the whole table. */
+  upsertTransactions: (rows: any[]) => void;
+  updateUnsyncedCount: (optimisticDelta?: number) => Promise<void>;
   debouncedSync: () => void;
   i18n: { en: any; ar: any };
   pushUndo: (action: any) => void;
@@ -140,7 +145,7 @@ export interface SupplierAdvanceDeps {
     additionalUndoData?: { affected: Array<{ table: string; id: string }>; steps: any[] }
   ) => any;
   pushUndo: (data: any) => void;
-  refreshData: () => Promise<void>;
+  refreshData: (scope?: RefreshScope) => Promise<void>;
 }
 
 // ─── processPayment ─────────────────────────────────────────────────────────
@@ -161,7 +166,7 @@ export async function processPayment(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const { entityType, entityId, amount, currency, description: _description, reference, storeId, createdBy, paymentDirection } = params;
-    const { currentBranchId, customers, suppliers, exchangeRate, createCashDrawerUndoData, pushUndo, refreshData, updateUnsyncedCount, debouncedSync, i18n } = deps;
+    const { currentBranchId, customers, suppliers, exchangeRate, createCashDrawerUndoData, pushUndo, refreshData, upsertTransactions, updateUnsyncedCount, debouncedSync, i18n } = deps;
 
     if (!currentBranchId) {
       return { success: false, error: 'No branch selected. Please select a branch before processing payment.' };
@@ -214,32 +219,35 @@ export async function processPayment(
     await withUndoOperation('operation', pushUndo, async () => {
       let result: any;
 
+      // skipCashDrawerImpact: this flow ignores the returned cashDrawerImpact, so
+      // skip the O(history) all-1100-ledger scan. The cash-drawer session still
+      // auto-opens (updateCashDrawer) and the 1100 journal entry is still posted.
       if (isCustomer) {
         if (paymentDirection === 'receive') {
           result = await transactionService.createCustomerPayment(
             entityId, numAmount, currency, transactionDescription, context,
-            { reference: paymentRef, updateCashDrawer: true }
+            { reference: paymentRef, updateCashDrawer: true, skipCashDrawerImpact: true }
           );
         } else {
           result = await transactionService.createTransaction({
             category: TRANSACTION_CATEGORIES.CUSTOMER_REFUND,
             amount: numAmount, currency, description: transactionDescription,
             entityId, reference: paymentRef,
-            context, updateBalances: true, updateCashDrawer: true, createAuditLog: true, _synced: false
+            context, updateBalances: true, updateCashDrawer: true, skipCashDrawerImpact: true, createAuditLog: true, _synced: false
           });
         }
       } else {
         if (paymentDirection === 'pay') {
           result = await transactionService.createSupplierPayment(
             entityId, numAmount, currency, transactionDescription, context,
-            { reference: paymentRef, updateCashDrawer: true }
+            { reference: paymentRef, updateCashDrawer: true, skipCashDrawerImpact: true }
           );
         } else {
           result = await transactionService.createTransaction({
             category: TRANSACTION_CATEGORIES.SUPPLIER_REFUND,
             amount: numAmount, currency, description: transactionDescription,
             entityId, reference: paymentRef,
-            context, updateBalances: true, updateCashDrawer: true, createAuditLog: true, _synced: false
+            context, updateBalances: true, updateCashDrawer: true, skipCashDrawerImpact: true, createAuditLog: true, _synced: false
           });
         }
       }
@@ -276,8 +284,24 @@ export async function processPayment(
       reference: paymentRef,
     });
 
-    try { await refreshData(); } catch (e) { console.warn('Data refresh failed (non-critical):', e); }
-    try { await updateUnsyncedCount(); } catch (e) { console.warn('Unsynced count refresh failed (non-critical):', e); }
+    // The payment created exactly one transaction row. Surgically merge it into
+    // state instead of reloading the whole transactions table (O(history) on
+    // large stores). Cash-drawer status still refreshes; entity balances are
+    // journal-derived independently and refreshed by the caller.
+    try {
+      const newTx = paymentResult?.transactionId
+        ? await getDB().transactions.get(paymentResult.transactionId)
+        : undefined;
+      if (newTx) upsertTransactions([newTx]);
+    } catch (e) { console.warn('Transaction upsert failed (non-critical):', e); }
+    // Cash-drawer status recompute reads the whole 1100 ledger (O(history)) and
+    // the drawer widget isn't on the payment screen — don't block on it. The
+    // drawer view updates from context state when this resolves a beat later.
+    void refreshData(['cashDrawer']).catch(e => console.warn('Cash drawer refresh failed (non-critical):', e));
+    // The unsynced-count recount scans EVERY table (O(history)) — don't block on
+    // it. Pass an optimistic +1 so the badge ticks up immediately; the background
+    // recount then reconciles to the exact total.
+    void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count refresh failed (non-critical):', e));
     try { debouncedSync(); } catch (e) { console.warn('Debounced sync failed (non-critical):', e); }
 
     return { success: true };
@@ -303,7 +327,7 @@ export async function processEmployeePayment(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const { employeeId, amount, currency, description, reference, storeId, createdBy } = params;
-    const { currentBranchId, employees, exchangeRate, refreshData, updateUnsyncedCount, debouncedSync, i18n, pushUndo } = deps;
+    const { currentBranchId, employees, exchangeRate, refreshData, upsertTransactions, updateUnsyncedCount, debouncedSync, i18n, pushUndo } = deps;
 
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
@@ -426,8 +450,17 @@ export async function processEmployeePayment(
       reference: employeeRef,
     });
 
-    try { await refreshData(); } catch (e) { console.warn('Data refresh failed (non-critical):', e); }
-    try { await updateUnsyncedCount(); } catch (e) { console.warn('Unsynced count refresh failed (non-critical):', e); }
+    // One transaction row was created (transactionId). Surgically merge it in
+    // rather than reloading the whole transactions table; refresh the drawer.
+    try {
+      const newTx = await getDB().transactions.get(transactionId);
+      if (newTx) upsertTransactions([newTx]);
+    } catch (e) { console.warn('Transaction upsert failed (non-critical):', e); }
+    // Both reads below are O(history) and feed off-screen widgets — fire and
+    // forget so the payment returns immediately. Optimistic +1 ticks the badge
+    // up at once; the recount reconciles. The drawer view updates from state.
+    void refreshData(['cashDrawer']).catch(e => console.warn('Cash drawer refresh failed (non-critical):', e));
+    void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count refresh failed (non-critical):', e));
     try { debouncedSync(); } catch (e) { console.warn('Debounced sync failed (non-critical):', e); }
 
     return { success: true };
@@ -564,7 +597,9 @@ export async function processSupplierAdvance(
     reference: advanceRef,
   });
 
-  await refreshData();
+  // Advances post to transactions + cash drawer AND mutate the supplier's
+  // supplier_data.advance_balances (shown on the Advances tab) → reload entities.
+  await refreshData(['transactions', 'cashDrawer', 'entities']);
 }
 
 // ─── deleteSupplierAdvance ───────────────────────────────────────────────────
@@ -608,7 +643,9 @@ export async function deleteSupplierAdvance(
     reference: transaction.reference ?? null,
   });
 
-  await refreshData();
+  // Advances post to transactions + cash drawer AND mutate the supplier's
+  // supplier_data.advance_balances (shown on the Advances tab) → reload entities.
+  await refreshData(['transactions', 'cashDrawer', 'entities']);
 }
 
 // ─── updateSupplierAdvance ───────────────────────────────────────────────────
@@ -718,5 +755,7 @@ export async function updateSupplierAdvance(
     reference: newRef,
   });
 
-  await refreshData();
+  // Advances post to transactions + cash drawer AND mutate the supplier's
+  // supplier_data.advance_balances (shown on the Advances tab) → reload entities.
+  await refreshData(['transactions', 'cashDrawer', 'entities']);
 }

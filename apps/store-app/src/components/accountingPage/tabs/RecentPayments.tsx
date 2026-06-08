@@ -5,6 +5,7 @@ import { useSupabaseAuth } from '../../../contexts/SupabaseAuthContext';
 import { transactionService } from '../../../services/transactionService';
 import { accountBalanceService } from '../../../services/accountBalanceService';
 import { transactionValidationService } from '../../../services/transactionValidationService';
+import { auditService } from '../../../services/auditService';
 import { TRANSACTION_CATEGORIES } from '../../../constants/transactionCategories';
 import { isPaymentCategory } from '../../../constants/paymentCategories';
 import { 
@@ -18,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Pagination } from '../../common/Pagination';
 import Toast from '../../common/Toast';
+import SearchableSelect from '../../common/SearchableSelect';
 import type { CurrencyCode } from '@pos-platform/shared';
 
 interface RecentPaymentsProps {
@@ -43,7 +45,6 @@ interface PaymentRow {
   createdById: string;
   isReversal?: boolean;
   reversalOfTransactionId?: string | null;
-  reversalTransactions?: PaymentRow[]; // Child reversals for this transaction
   originalAmount?: number; // Original amount for corrected payments
   originalCurrency?: CurrencyCode; // Original currency for corrected payments
   isCorrected?: boolean; // Whether this is a corrected payment
@@ -133,7 +134,8 @@ export default function RecentPayments({
     amount: '',
     currency: 'USD' as CurrencyCode,
     description: '',
-    reference: ''
+    reference: '',
+    entityId: ''
   });
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error'; visible: boolean }>({
     message: '',
@@ -144,6 +146,9 @@ export default function RecentPayments({
   // Get all transactions and entities
   const transactions = raw.transactions || [];
   const entities = raw.entities || [];
+  // Store's configured currencies — drives the currency dropdowns instead of a
+  // hardcoded USD/LBP pair, so a store that accepts other currencies sees them.
+  const acceptedCurrencies = raw.acceptedCurrencies || [];
 
   // Load user names into cache
   useEffect(() => {
@@ -183,8 +188,12 @@ export default function RecentPayments({
     // Filter payment transactions that have entity_id for customer, supplier, or employee
     // This unified approach uses entity_id instead of separate customer_id/supplier_id/employee_id fields
     let allPaymentTransactions = transactions.filter(t => {
-      // Must be a payment category
-      if (!isPaymentCategory(t.category)) {
+      // Must be a payment category OR a refund. Refunds use TRANSACTION_CATEGORIES
+      // (Customer/Supplier Refund), which are not part of PAYMENT_CATEGORIES, so
+      // isPaymentCategory() alone would exclude them from the payments list.
+      const isRefund = t.category === TRANSACTION_CATEGORIES.CUSTOMER_REFUND ||
+                       t.category === TRANSACTION_CATEGORIES.SUPPLIER_REFUND;
+      if (!isPaymentCategory(t.category) && !isRefund) {
         return false;
       }
 
@@ -220,32 +229,29 @@ export default function RecentPayments({
     // Filter to only include transactions with valid entity types (customer, supplier, employee)
     // We'll check entity types asynchronously in the mapping step below
 
-    // Build a map of corrected transaction IDs to their original amounts and currencies
-    // This helps us identify which transactions are corrections and what their original amounts were
+    // A row is "superseded" (was corrected and replaced) when its typed status
+    // says so. We OR in the legacy `metadata.corrected` flag purely as a
+    // backward-compat fallback for any row that predates the v70 migration or
+    // arrives from a not-yet-migrated server — the typed column is authoritative.
+    const isSuperseded = (t: typeof transactions[number]): boolean =>
+      t.status === 'superseded' || (t as any).metadata?.corrected === true;
+
+    // Build a map of correction id → the superseded row's amount/currency, so a
+    // correction can display the prior ("original") amount. Keyed off the typed
+    // superseded_by_transaction_id, falling back to the legacy metadata pointer.
     const correctedTransactionMap = new Map<string, { amount: number; currency: CurrencyCode }>();
     transactions.forEach(t => {
-      const transactionWithMetadata = t as any;
-      if (transactionWithMetadata.metadata?.corrected === true && transactionWithMetadata.metadata?.correctedTransactionId) {
-        // This is the original transaction that was corrected
-        // Store the original amount and currency for the corrected transaction
-        const correctedTransactionId = transactionWithMetadata.metadata.correctedTransactionId as string;
-        correctedTransactionMap.set(correctedTransactionId, {
-          amount: t.amount,
-          currency: t.currency as CurrencyCode
-        });
-      }
+      if (!isSuperseded(t)) return;
+      const correctionId = (t.superseded_by_transaction_id || (t as any).metadata?.correctedTransactionId) as string | undefined;
+      if (!correctionId) return;
+      correctedTransactionMap.set(correctionId, {
+        amount: t.amount,
+        currency: t.currency as CurrencyCode
+      });
     });
 
-    // Filter out original transactions that were corrected (metadata.corrected === true)
-    // These should not appear in the list
-    allPaymentTransactions = allPaymentTransactions.filter(t => {
-      const transactionWithMetadata = t as any;
-      // Hide original transactions that were corrected
-      if (transactionWithMetadata.metadata?.corrected === true) {
-        return false;
-      }
-      return true;
-    });
+    // Hide superseded originals from the list — they were replaced by a correction.
+    allPaymentTransactions = allPaymentTransactions.filter(t => !isSuperseded(t));
 
     // Map to rows with entity and user names
     // Note: We filter by entity type here since we need to check entities table
@@ -292,9 +298,9 @@ export default function RecentPayments({
         // Get entity name from entity object
         const entityName = entity.name || 'Unknown';
 
-        // Determine status: canceled (metadata.deleted) > reversed (_deleted) > completed
+        // Determine status: canceled (status='voided' / legacy metadata.deleted) > reversed (_deleted) > completed
         const transactionWithMetadata = transaction as any;
-        const status: PaymentStatus = transactionWithMetadata.metadata?.deleted === true
+        const status: PaymentStatus = (transaction.status === 'voided' || transactionWithMetadata.metadata?.deleted === true)
           ? 'canceled'
           : transaction._deleted
             ? 'reversed'
@@ -326,7 +332,6 @@ export default function RecentPayments({
           createdById: transaction.created_by || '',
           isReversal: transaction.is_reversal || false,
           reversalOfTransactionId: transaction.reversal_of_transaction_id || null,
-          reversalTransactions: [],
           originalAmount,
           originalCurrency,
           isCorrected: isCorrected || false
@@ -338,49 +343,16 @@ export default function RecentPayments({
     const nonReversalRows = rows.filter(row => !row.isReversal);
     const reversalRows = rows.filter(row => row.isReversal);
 
-    // Group reversals under their original transactions (for non-corrected originals)
-    const groupedRows: PaymentRow[] = [];
-    const reversalMap = new Map<string, PaymentRow[]>();
-    
-    // Collect reversals grouped by their original transaction ID
-    reversalRows.forEach(row => {
-      if (row.reversalOfTransactionId) {
-        if (!reversalMap.has(row.reversalOfTransactionId)) {
-          reversalMap.set(row.reversalOfTransactionId, []);
-        }
-        reversalMap.get(row.reversalOfTransactionId)!.push(row);
-      }
-    });
-
-    // Build the final list with reversals nested under their originals (if originals exist)
-    nonReversalRows.forEach(row => {
-      const reversals = reversalMap.get(row.id) || [];
-      if (reversals.length > 0 && showReversals) {
-        // Original transaction with reversals - include reversals as children
-        groupedRows.push({
-          ...row,
-          reversalTransactions: reversals
-        });
-      } else {
-        // Original transaction without reversals, or showReversals is false
-        groupedRows.push(row);
-      }
-    });
-
-    // Add standalone reversal transactions (reversals whose originals were filtered out)
-    // These are reversals that point to transactions with metadata.corrected === true
-    if (showReversals) {
-      reversalRows.forEach(row => {
-        // Check if this reversal is already included as a child
-        const alreadyIncluded = groupedRows.some(gr => 
-          gr.reversalTransactions?.some(rt => rt.id === row.id)
-        );
-        if (!alreadyIncluded) {
-          // This is a standalone reversal (its original was filtered out)
-          groupedRows.push(row);
-        }
-      });
-    }
+    // Build the displayed list. When "show corrected & reversed" is on we render
+    // a FLAT list where every payment and every reversal is its own top-level
+    // row, so the date sort below produces a strictly chronological
+    // (monotonic-date) timeline. The previous design nested each reversal under
+    // its original, which pinned a recent reversal beneath a much older payment
+    // and broke chronological order. Reversal rows are styled distinctly in the
+    // table via row.isReversal. When the toggle is off, reversals stay hidden.
+    const groupedRows: PaymentRow[] = showReversals
+      ? [...nonReversalRows, ...reversalRows]
+      : [...nonReversalRows];
 
     // Apply filters
     let filtered = groupedRows;
@@ -445,6 +417,17 @@ export default function RecentPayments({
     setTimeout(() => setToast(t => ({ ...t, visible: false })), 3000);
   };
 
+  // Entities selectable when correcting a payment. Restricted to the same type
+  // as the original (e.g. customer → another customer) so the transaction's
+  // category — and therefore its accounting — stays valid after the change.
+  const editEntityOptions = useMemo(() => {
+    if (!editingPayment) return [];
+    return entities
+      .filter(e => !e._deleted && e.entity_type === editingPayment.entityType)
+      .map(e => ({ id: e.id, label: e.name || 'Unknown', value: e.id }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [entities, editingPayment]);
+
   const handleEditPayment = async (payment: PaymentRow) => {
     // Get the full transaction to populate form
     const transaction = transactions.find(t => t.id === payment.id);
@@ -462,7 +445,8 @@ export default function RecentPayments({
         amount: transaction.amount.toString(),
         currency: transaction.currency || 'USD',
         description,
-        reference: transaction.reference || ''
+        reference: transaction.reference || '',
+        entityId: transaction.entity_id || payment.entityId || ''
       });
       setEditingPayment(payment);
     }
@@ -474,6 +458,11 @@ export default function RecentPayments({
     const amount = parseFloat(editForm.amount);
     if (isNaN(amount) || amount <= 0) {
       showToast(t('payments.pleaseEnterValidAmount') || 'Please enter a valid amount', 'error');
+      return;
+    }
+
+    if (!editForm.entityId) {
+      showToast(t('payments.pleaseSelectEntity') || 'Please select an entity', 'error');
       return;
     }
 
@@ -494,6 +483,28 @@ export default function RecentPayments({
         return;
       }
 
+      // Guard: only an ACTIVE row may be corrected. A row that was already
+      // superseded, reversed or deleted must never be corrected again —
+      // re-reversing an already-reversed transaction would double-count in the
+      // ledger. This is the authoritative enforcement point (the source of
+      // truth is the client); superseded rows are also hidden from the list, so
+      // this defends against a stale/duplicate row slipping through.
+      const orig = originalTransaction as any;
+      const alreadyFinalized =
+        orig._deleted === true ||
+        orig.is_reversal === true ||
+        (orig.status != null && orig.status !== 'active') ||
+        orig.metadata?.corrected === true;
+      if (alreadyFinalized) {
+        showToast(
+          t('payments.cannotCorrectNonActive') ||
+          'This payment was already corrected or reversed and can no longer be edited.',
+          'error'
+        );
+        setEditingPayment(null);
+        return;
+      }
+
       // Check if anything actually changed
       const amountChanged = originalTransaction.amount !== amount;
       const currencyChanged = originalTransaction.currency !== editForm.currency;
@@ -504,8 +515,9 @@ export default function RecentPayments({
           : JSON.stringify(originalTransaction.description));
       const descriptionChanged = originalDescription !== editForm.description;
       const referenceChanged = (originalTransaction.reference || '') !== (editForm.reference || '');
+      const entityChanged = (originalTransaction.entity_id || '') !== (editForm.entityId || '');
 
-      if (!amountChanged && !currencyChanged && !descriptionChanged && !referenceChanged) {
+      if (!amountChanged && !currencyChanged && !descriptionChanged && !referenceChanged && !entityChanged) {
         showToast(t('payments.noChangesDetected') || 'No changes detected', 'error');
         setEditingPayment(null);
         return;
@@ -532,68 +544,39 @@ export default function RecentPayments({
         `Corrected payment - Original: ${originalDescription}`;
 
       console.log('✅ Creating corrected transaction...');
-      let correctedResult;
-
-      if (originalTransaction.customer_id) {
-        // Customer payment
-        correctedResult = await transactionService.createCustomerPayment(
-          originalTransaction.customer_id,
-          amount,
-          editForm.currency,
-          correctedDescription,
-          context,
-          {
-            reference: editForm.reference || undefined,
-            updateCashDrawer: originalTransaction.category === TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT_RECEIVED ||
-                             originalTransaction.category === TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT
-          }
-        );
-      } else if (originalTransaction.supplier_id) {
-        // Supplier payment
-        correctedResult = await transactionService.createSupplierPayment(
-          originalTransaction.supplier_id,
-          amount,
-          editForm.currency,
-          correctedDescription,
-          context,
-          {
-            reference: editForm.reference || undefined,
-            updateCashDrawer: originalTransaction.category === TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT
-          }
-        );
-      } else if (originalTransaction.employee_id) {
-        // Employee payment
-        correctedResult = await transactionService.createEmployeePayment(
-          originalTransaction.employee_id,
-          amount,
-          editForm.currency,
-          correctedDescription,
-          context,
-          {
-            reference: editForm.reference || undefined,
-            updateCashDrawer: false
-          }
-        );
-      } else {
-        // General transaction - use createTransaction
-        correctedResult = await transactionService.createTransaction({
-          category: originalTransaction.category as any,
-          amount,
-          currency: editForm.currency,
-          description: correctedDescription,
-          context,
-          reference: editForm.reference || undefined,
-          entityId: originalTransaction.entity_id || undefined
-        });
-      }
+      // Route the correction to the (possibly changed) entity. The reversal above
+      // already undid the original on its previous entity, so when the entity is
+      // changed the balance moves cleanly: old entity nets to zero, new entity
+      // receives the payment. Keyed off entity_id + the original category rather
+      // than the legacy customer_id/supplier_id/employee_id fields, which the app
+      // no longer populates. updateCashDrawer is left to createTransaction's
+      // category-based default so it mirrors the reversal's cash-drawer impact.
+      const correctedResult = await transactionService.createTransaction({
+        category: originalTransaction.category as any,
+        amount,
+        currency: editForm.currency,
+        description: correctedDescription,
+        context,
+        reference: editForm.reference || undefined,
+        entityId: editForm.entityId || originalTransaction.entity_id || undefined,
+        // Correction lineage: point back to the row being replaced and carry the
+        // chain root forward (inherited if the original was itself a correction)
+        // so the whole chain is reconstructable in O(1).
+        corrected_from_transaction_id: originalTransaction.id,
+        chain_root_id: originalTransaction.chain_root_id || originalTransaction.id
+      });
 
       if (correctedResult.success && reversalTransaction) {
-        // Step 3: Mark original transaction with metadata for audit trail
-        // This links the original, reversal, and correction together
+        // Step 3: Supersede the original. The load-bearing state now lives in
+        // TYPED columns (status + superseded_by_transaction_id) which the list
+        // filter reads — not the mutable `metadata.corrected` flag. The metadata
+        // block is kept purely as a human-readable audit trail (who/when/why).
         try {
           const originalTransactionWithMetadata = originalTransaction as any;
           const existingMetadata = originalTransactionWithMetadata.metadata || {};
           await raw.updateTransaction(editingPayment.id, {
+            status: 'superseded',
+            superseded_by_transaction_id: correctedResult.transactionId || null,
             metadata: {
               ...existingMetadata,
               corrected: true,
@@ -605,9 +588,30 @@ export default function RecentPayments({
             }
           });
         } catch (metadataError) {
-          console.warn('Could not update transaction metadata:', metadataError);
+          console.warn('Could not update transaction status/metadata:', metadataError);
           // Non-critical, continue
         }
+
+        // Record the correction as a business-action audit row ('update'), mirroring
+        // how payment creation is audited (auditService.record is best-effort and
+        // never throws). The field deltas land in the audit `changes[]` array.
+        const auditChanges: Array<{ field: string; old: unknown; new: unknown }> = [];
+        if (amountChanged) auditChanges.push({ field: 'amount', old: originalTransaction.amount, new: amount });
+        if (currencyChanged) auditChanges.push({ field: 'currency', old: originalTransaction.currency, new: editForm.currency });
+        if (descriptionChanged) auditChanges.push({ field: 'description', old: originalDescription, new: editForm.description });
+        if (referenceChanged) auditChanges.push({ field: 'reference', old: originalTransaction.reference || null, new: editForm.reference || null });
+        if (entityChanged) auditChanges.push({ field: 'entity_id', old: originalTransaction.entity_id || null, new: editForm.entityId || null });
+        await auditService.record({
+          storeId: userProfile.store_id,
+          branchId: raw.currentBranchId || userProfile.store_id,
+          changedBy: userProfile.id,
+          entityType: 'payment',
+          entityId: editingPayment.id,
+          action: 'update',
+          changes: auditChanges,
+          changeReason: `Payment corrected — reversal ${reversalTransaction.id}, correction ${correctedResult.transactionId}`,
+          reference: editForm.reference || originalTransaction.reference || null,
+        });
 
         console.log('✅ Payment correction completed successfully');
         showToast(
@@ -699,6 +703,7 @@ export default function RecentPayments({
       const reversalsCount = (transactions || []).filter((t: any) =>
         t.reversal_of_transaction_id === transactionId &&
         !t._deleted &&
+        t.status !== 'voided' &&
         (t.metadata as any)?.deleted !== true
       ).length;
       return reversalsCount > 0;
@@ -784,6 +789,19 @@ export default function RecentPayments({
       const result = await transactionService.deleteTransaction(deletingPayment.id, context);
 
       if (result.success) {
+        // Record the cancellation as a business-action audit row ('void' — the
+        // payment is reversed but preserved, not hard-deleted). Best-effort.
+        await auditService.record({
+          storeId: userProfile.store_id,
+          branchId: raw.currentBranchId || userProfile.store_id,
+          changedBy: userProfile.id,
+          entityType: 'payment',
+          entityId: deletingPayment.id,
+          action: 'void',
+          changeReason: `Payment voided: ${formatCurrencyWithSymbol(deletingPayment.amount, deletingPayment.currency)} (${deletingPayment.entityName})`,
+          reference: deletingPayment.reference || null,
+        });
+
         showToast(t('payments.paymentDeletedSuccessfully') || 'Payment deleted successfully', 'success');
         setDeletingPayment(null);
         setDeletionDetails(null);
@@ -874,8 +892,9 @@ export default function RecentPayments({
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="all">{t('dashboard.allCurrencies') || 'All Currencies'}</option>
-              <option value="USD">{t('common.currency.USD') || 'USD'}</option>
-              <option value="LBP">{t('common.currency.LBP') || 'LBP'}</option>
+              {acceptedCurrencies.map((code) => (
+                <option key={code} value={code}>{t(`common.currency.${code}`) || code}</option>
+              ))}
             </select>
           </div>
         </div>
@@ -979,9 +998,9 @@ export default function RecentPayments({
                     return (
                     <React.Fragment key={row.id}>
                       {/* Main transaction row */}
-                      <tr 
+                      <tr
                         id={`payment-${row.id}`}
-                        className={`${
+                        className={`${row.isReversal ? 'bg-gray-50 border-l-4 border-orange-400' : ''} ${
                           isHighlighted ? 'border-2 border-blue-400' : ''
                         }`}
                       >
@@ -990,15 +1009,14 @@ export default function RecentPayments({
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            row.type === 'Customer Payment' 
-                              ? 'bg-green-100 text-green-800'
-                              : row.type === 'Supplier Payment'
-                              ? 'bg-blue-100 text-blue-800'
-                              : row.type === 'Employee Payment'
-                              ? 'bg-purple-100 text-purple-800'
-                              : 'bg-orange-100 text-orange-800'
+                            row.isReversal
+                              ? 'bg-orange-100 text-orange-800'
+                              :
+                               'bg-green-100 text-green-800'
+                              
                           }`}>
                             {t(getPaymentTypeTranslationKey(row.type)) || row.type}
+                            {row.isReversal ? ` (${t('payments.reversal') || 'Reversal'})` : ''}
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -1011,7 +1029,9 @@ export default function RecentPayments({
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex flex-col gap-1">
                             <span className={`text-sm font-semibold ${
-                              row.type === 'Customer Payment' ? 'text-green-600' : 'text-red-600'
+                              row.isReversal
+                                ? 'text-orange-600'
+                                : row.type === 'Customer Payment' ? 'text-green-600' : 'text-red-600'
                             }`}>
                               {formatCurrencyWithSymbol(row.amount, row.currency)}
                             </span>
@@ -1071,61 +1091,6 @@ export default function RecentPayments({
                           </div>
                         </td>
                       </tr>
-                      {/* Reversal transactions nested under original */}
-                      {row.reversalTransactions && row.reversalTransactions.length > 0 && row.reversalTransactions.map((reversal) => {
-                        const isReversalHighlighted = highlightedPaymentId === reversal.id;
-                        return (
-                        <tr 
-                          key={reversal.id} 
-                          id={`payment-${reversal.id}`}
-                          className={`hover:bg-gray-50 bg-gray-50 border-l-4 border-orange-400 transition-all duration-500 ${
-                            isReversalHighlighted ? 'border-2 border-blue-400 shadow-xl animate-pulse bg-blue-50' : ''
-                          }`}
-                        >
-                          <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-600 pl-12">
-                            {new Date(reversal.date).toLocaleDateString()} {new Date(reversal.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </td>
-                          <td className="px-6 py-3 whitespace-nowrap">
-                            <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
-                              {t(getPaymentTypeTranslationKey(reversal.type)) || reversal.type} ({t('payments.reversal') || 'Reversal'})
-                            </span>
-                          </td>
-                          <td className="px-6 py-3 whitespace-nowrap">
-                            <div className="flex items-center">
-                              <User className="w-4 h-4 text-gray-400 mr-2" />
-                              <span className="text-sm text-gray-600">{reversal.entityName}</span>
-                              <span className="ml-2 text-xs text-gray-500 capitalize">({reversal.entityType})</span>
-                            </div>
-                          </td>
-                          <td className="px-6 py-3 whitespace-nowrap">
-                            <span className="text-sm font-semibold text-orange-600">
-                              {formatCurrencyWithSymbol(reversal.amount, reversal.currency)}
-                            </span>
-                          </td>
-                          <td className="px-6 py-3 whitespace-nowrap">
-                            <div className="flex items-center gap-2">
-                              <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
-                                {t('payments.reversal') || 'Reversal'}
-                              </span>
-                              {reversal.status === 'reversed' && (
-                                <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">
-                                  {t('payments.canceled') || 'Canceled'}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-500">
-                            {reversal.reference || '-'}
-                          </td>
-                          <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-600">
-                            {reversal.createdByName}
-                          </td>
-                          <td className="px-6 py-3 whitespace-nowrap text-sm font-medium">
-                            {/* Reversals typically don't have actions */}
-                          </td>
-                        </tr>
-                        );
-                      })}
                     </React.Fragment>
                     );
                   })}
@@ -1161,6 +1126,24 @@ export default function RecentPayments({
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {t('payments.entity') || 'Entity'} <span className="text-xs font-normal text-gray-400 capitalize">({editingPayment.entityType})</span> *
+                </label>
+                <SearchableSelect
+                  options={editEntityOptions}
+                  value={editForm.entityId}
+                  onChange={(val) => setEditForm(prev => ({ ...prev, entityId: val as string }))}
+                  placeholder={t('payments.selectEntity') || 'Select entity...'}
+                  searchPlaceholder={t('dashboard.search') || 'Search...'}
+                  portal
+                />
+                {editForm.entityId !== (editingPayment.entityId || '') && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    {t('payments.changingEntityNote') || 'Changing the entity reverses the original on the previous entity and posts the correction to the selected one.'}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   {t('payments.amount') || 'Amount'} *
                 </label>
                 <input
@@ -1181,8 +1164,11 @@ export default function RecentPayments({
                   onChange={(e) => setEditForm(prev => ({ ...prev, currency: e.target.value as CurrencyCode }))}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
-                  <option value="USD">USD</option>
-                  <option value="LBP">LBP</option>
+                  {/* Union with the payment's own currency so a value that's no
+                      longer in the accepted list still renders as selected. */}
+                  {Array.from(new Set([editForm.currency, ...acceptedCurrencies])).map((code) => (
+                    <option key={code} value={code}>{t(`common.currency.${code}`) || code}</option>
+                  ))}
                 </select>
               </div>
               <div>

@@ -231,7 +231,7 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
         changeReason: 'Supplier created',
       });
 
-      await refreshData();
+      await refreshData(['entities']);
       resetAutoSyncTimer();
 
       await emitEntityEvent(
@@ -321,7 +321,7 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
         changeReason: 'Customer created',
       });
 
-      await refreshData();
+      await refreshData(['entities']);
       resetAutoSyncTimer();
 
       await emitEntityEvent(
@@ -405,7 +405,7 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
         });
       }
 
-      await refreshData();
+      await refreshData(['entities']);
       resetAutoSyncTimer();
 
       await emitEntityEvent(id, buildEventOptions(storeId!, currentBranchId, userProfileId, 'update', {
@@ -490,7 +490,7 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
         });
       }
 
-      await refreshData();
+      await refreshData(['entities']);
       resetAutoSyncTimer();
 
       await emitEntityEvent(id, buildEventOptions(storeId!, currentBranchId, userProfileId, 'update', {

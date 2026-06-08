@@ -458,8 +458,8 @@ export class AccountStatementService {
       // but we don't emit a visible row for them.
       const isReversalTransaction = transaction && (transaction.is_reversal === true || transaction.reversal_of_transaction_id);
       const isReversalEntry = accountEntry.entry_type === 'reversal';
-      const isCorrectedOriginal = transaction && (transaction.metadata as any)?.corrected === true;
-      const isDeleted = transaction && (transaction.metadata as any)?.deleted === true;
+      const isCorrectedOriginal = transaction && ((transaction as any).status === 'superseded' || (transaction.metadata as any)?.corrected === true);
+      const isDeleted = transaction && ((transaction as any).status === 'voided' || (transaction.metadata as any)?.deleted === true);
 
       // Normalize to the per-currency amounts map. Falls back to legacy USD/LBP columns
       // for entries written before Phase 11 dual-write landed.

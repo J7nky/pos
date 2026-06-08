@@ -38,19 +38,19 @@ export function useSyncStateLayer(adapter: SyncStateLayerAdapter): SyncStateLaye
     autoSyncTimerRef,
   } = adapter;
 
-  const updateUnsyncedCount = useCallback(async () => {
+  const updateUnsyncedCount = useCallback(async (optimisticDelta?: number) => {
+    // Optimistic, synchronous bump so the badge reflects a just-completed write
+    // immediately instead of waiting for the O(history) recount below. The
+    // recount then reconciles to the exact total. Functional updater keeps it
+    // correct under rapid successive writes.
+    if (optimisticDelta) {
+      setUnsyncedCount(prev => Math.max(0, prev + optimisticDelta));
+    }
     try {
-      const { total, byTable } = await crudHelperService.getUnsyncedCount();
-      const unsyncedTables = Object.entries(byTable)
-        .filter(([_, count]) => count > 0)
-        .map(([table, count]) => ({ table, count }));
-      if (unsyncedTables.length > 0) {
-        debug('🔍 Unsynced records by table:', unsyncedTables);
-        const detailedCount = await crudHelperService.getDetailedUnsyncedCount();
-        if (total > 0) {
-          console.log('🔍 [COUNT-DEBUG] Detailed breakdown:', detailedCount.summary);
-        }
-      }
+      // Note: previously this also called getDetailedUnsyncedCount() — a SECOND
+      // full-table scan — purely to console.log a breakdown. Removed: it doubled
+      // the recount cost (the dominant post-write latency on large stores).
+      const { total } = await crudHelperService.getUnsyncedCount();
       setUnsyncedCount(total);
     } catch (error) {
       console.error('Error counting unsynced records:', error);

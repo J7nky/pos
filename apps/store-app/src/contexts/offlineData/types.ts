@@ -8,6 +8,7 @@ import type { CurrencyCode } from '@pos-platform/shared';
 import type { Database } from '../../types/database';
 import type { SyncResult } from '../../services/syncOrchestrator';
 import type { Branch, NotificationRecord, NotificationType, NotificationPreferences } from '../../types';
+import type { RefreshScope } from './offlineDataContextContract';
 
 export type Tables = Database['public']['Tables'];
 
@@ -38,7 +39,8 @@ export interface EntityDataLayerAdapter {
   userProfileId: string | undefined;
   pushUndo: (data: { type: string; affected: Array<{ table: string; id: string }>; steps: any[] }) => void;
   resetAutoSyncTimer: () => void;
-  refreshData: () => Promise<void>;
+  /** Scope-aware: entity CRUD passes ['entities'] to skip the full rehydration. */
+  refreshData: (scope?: RefreshScope) => Promise<void>;
 }
 
 /** Return type of useEntityDataLayer. */
@@ -69,6 +71,13 @@ export interface TransactionDataLayerResult {
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
   updateTransaction: (id: string, updates: any) => Promise<void>;
   hydrate: (transactionsData: Tables['transactions']['Row'][]) => void;
+  /**
+   * Surgically merge one or more transaction rows into in-memory state by id
+   * (upsert), WITHOUT re-reading the whole transactions table from Dexie. The
+   * rows must already be persisted. Lets a write path that created/updated a
+   * single transaction make it visible without an O(history) full reload.
+   */
+  upsertTransactions: (rows: Tables['transactions']['Row'][]) => void;
 }
 
 /** Adapter passed to BillDataLayer: deps for bill state and read/audit operations. */

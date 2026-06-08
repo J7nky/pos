@@ -13,6 +13,7 @@ import { auditService } from '../../../services/auditService';
 import type { CurrencyCode } from '@pos-platform/shared';
 import { currencyService } from '../../../services/currencyService';
 import { assertValidCurrency } from '../../../utils/currencyValidation';
+import type { RefreshScope } from '../offlineDataContextContract';
 
 type Tables = Database['public']['Tables'];
 
@@ -22,7 +23,7 @@ export interface InventoryItemDeps {
   userProfileId: string | undefined;
   currency: string;
   pushUndo: (undoData: any) => void;
-  refreshData: () => Promise<void>;
+  refreshData: (scope?: RefreshScope) => Promise<void>;
   updateUnsyncedCount: () => Promise<void>;
   resetAutoSyncTimer: () => void;
   debouncedSync: () => void;
@@ -251,7 +252,7 @@ export async function archiveInventoryItem(
   });
 
   resetAutoSyncTimer();
-  await refreshData();
+  await refreshData(['inventory']);
 }
 
 export async function unarchiveInventoryItem(
@@ -279,7 +280,7 @@ export async function unarchiveInventoryItem(
   });
 
   resetAutoSyncTimer();
-  await refreshData();
+  await refreshData(['inventory']);
 }
 
 export async function deleteInventoryItem(
@@ -353,7 +354,9 @@ export async function deleteInventoryItem(
 
     console.log(`🗑️ Inventory item ${id} deleted successfully`);
 
-    await refreshData();
+    // Delete reverses the item's journal entries (creating reversal transactions)
+    // and removes the item → reload inventory + transactions.
+    await refreshData(['inventory', 'transactions']);
   } catch (error) {
     console.error('Error deleting inventory item:', error);
     throw new Error(`Failed to delete inventory item: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -389,7 +392,7 @@ export async function deductInventoryQuantity(
       qtyToDeduct -= deduct;
     }
 
-    await deps.refreshData();
+    await deps.refreshData(['inventory']);
     await deps.updateUnsyncedCount();
     deps.debouncedSync();
   } catch (error) {
@@ -437,7 +440,7 @@ export async function restoreInventoryQuantity(
       await getDB().inventory_items.add(newInventoryItem);
     }
 
-    await deps.refreshData();
+    await deps.refreshData(['inventory']);
     await deps.updateUnsyncedCount();
     deps.debouncedSync();
   } catch (error) {

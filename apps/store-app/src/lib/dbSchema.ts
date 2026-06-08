@@ -2,7 +2,7 @@ import type { Transaction as DexieTransaction } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
 import type { SyncMetadata, PendingSync } from '../types';
 
-export const CURRENT_DB_VERSION = 69;
+export const CURRENT_DB_VERSION = 70;
 
 export const V54_STORES = {
   stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
@@ -232,6 +232,15 @@ export const V68_STORES = {
 /** v69 — drop the legacy `bill_audit_logs` store (null = delete table). */
 export const V69_STORES = {
   bill_audit_logs: null,
+} as const;
+
+// v70 (transaction correction lifecycle): redefines `transactions` to index the
+// new typed `status` column (and a [store_id+branch_id+status] compound for
+// efficient active-row filtering), replacing the legacy mutable
+// `metadata.corrected` flag. Only the transactions table is redefined; Dexie
+// merges this delta so every other table keeps its prior schema.
+export const V70_STORES = {
+  transactions: 'id, store_id, branch_id, type, category, created_at, created_by, currency, customer_id, supplier_id, employee_id, entity_id, reversal_of_transaction_id, status, [store_id+branch_id], [store_id+branch_id+status], [entity_id], _synced, _deleted',
 } as const;
 
 export async function upgradeV54(_tx: DexieTransaction): Promise<void> {
@@ -731,4 +740,36 @@ export async function upgradeV69(_tx: DexieTransaction): Promise<void> {
   // `audit_logs` service (bills now audited semantically at the operation layer).
   console.log('🔧 Migrating database schema v68 → v69 (drop legacy bill_audit_logs)');
   console.log('   ✅ v69 migration complete');
+}
+
+/**
+ * v70 (transaction correction lifecycle): backfills the new typed `status`
+ * column from the legacy `metadata.corrected` flag so the list filter and the
+ * "original amount" annotation keep working after the read paths switch to
+ * typed columns. Corrected originals become `status='superseded'` and carry
+ * `superseded_by_transaction_id` (lifted from `metadata.correctedTransactionId`);
+ * every other row becomes `status='active'`. The forward `chain_root_id` /
+ * `corrected_from_transaction_id` pointers are populated for corrections created
+ * after this migration; pre-existing test rows keep null lineage (best-effort).
+ */
+export async function upgradeV70(tx: DexieTransaction): Promise<void> {
+  console.log('🔧 Migrating database schema v69 → v70 (transaction correction status)');
+  let superseded = 0;
+  await tx
+    .table('transactions')
+    .toCollection()
+    .modify((t: Record<string, unknown>) => {
+      if (t.status) return; // already set (idempotent)
+      const meta = (t.metadata ?? {}) as Record<string, unknown>;
+      if (meta.corrected === true) {
+        t.status = 'superseded';
+        if (!t.superseded_by_transaction_id && typeof meta.correctedTransactionId === 'string') {
+          t.superseded_by_transaction_id = meta.correctedTransactionId;
+        }
+        superseded += 1;
+      } else {
+        t.status = 'active';
+      }
+    });
+  console.log(`   ✅ v70 migration complete (${superseded} superseded rows backfilled)`);
 }

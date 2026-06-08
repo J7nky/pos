@@ -5,6 +5,7 @@ import { useErrorHandler } from '../hooks/useErrorHandler';
 import { crudHelperService } from '../services/crudHelperService';
 import { getDB } from '../lib/db';
 import { formatDateTime } from '../utils/numberFormat';
+import { getTranslatedString } from '../utils/multilingual';
 import { 
   RefreshCw, 
   AlertCircle, 
@@ -53,7 +54,7 @@ const TABLE_METADATA: Record<string, TableMetadata> = {
 };
 
 export default function UnsyncedItems() {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const { handleError } = useErrorHandler();
   const {
     sync,
@@ -189,12 +190,21 @@ export default function UnsyncedItems() {
   };
 
   const formatRecordPreview = (record: any, tableName: string): string => {
+    // Resolve a field that may be a plain string OR a multilingual object
+    // ({ en, ar, fr }) into the display string for the current language.
+    // Without this, calling .substring() on a multilingual object throws.
+    const asText = (value: unknown): string =>
+      getTranslatedString(value as never, language as 'en' | 'ar' | 'fr');
+
     // Create a preview string based on common fields
-    if (record.name) return record.name;
-    if (record.bill_number) return record.bill_number;
-    if (record.product_name) return record.product_name;
-    if (record.description) return record.description.substring(0, 50);
-    if (record.id) return record.id.substring(0, 8) + '...';
+    const name = asText(record.name);
+    if (name) return name;
+    if (record.bill_number) return String(record.bill_number);
+    const productName = asText(record.product_name);
+    if (productName) return productName;
+    const description = asText(record.description);
+    if (description) return description.substring(0, 50);
+    if (record.id) return String(record.id).substring(0, 8) + '...';
     return 'Record';
   };
 

@@ -30,12 +30,32 @@ import type { CurrencyCode } from '@pos-platform/shared';
 type Tables = Database['public']['Tables'];
 
 /**
- * Scope for refreshData(): 'all' = full rehydration of every domain layer;
- * 'sale' = only the tables a sale mutates (bills, line items, inventory,
- * transactions); 'financial' = only transactions + cash-drawer status (expenses,
- * income, standalone transactions). Narrow scopes skip the full re-render cascade.
+ * Individual data domains that {@link OfflineDataContextType.refreshData} can
+ * rehydrate in isolation. Each maps to one or two Dexie tables + the matching
+ * domain layer. Composing these lets a write path reload ONLY what it mutated
+ * instead of the full ~18-table cascade — the dominant cost for large stores.
+ *
+ * Note: the journal/accounting layer (journal_entries, chart_of_accounts,
+ * balance_snapshots) is intentionally NOT a domain — no mounted view reads it
+ * from context, and entity balances are journal-derived independently via
+ * `useEntityBalances`/`entityBalanceCache`. So no scope ever reloads it.
  */
-export type RefreshScope = 'all' | 'sale' | 'financial';
+export type RefreshDomain =
+  | 'transactions'  // transactions table → transactionLayer
+  | 'inventory'     // inventory_items + inventory_bills → inventoryLayer
+  | 'bills'         // bills + bill_line_items → billLayer
+  | 'entities'      // entities (store-level) → entityLayer (names, advance_balances, max balances)
+  | 'cashDrawer';   // cash-drawer status (no table reload)
+
+/**
+ * Scope for refreshData():
+ * - `'all'` = full rehydration of every domain layer (default).
+ * - `'sale'` = alias for `['transactions','inventory','bills']` — what a sale mutates.
+ * - `'financial'` = alias for `['transactions','cashDrawer']` — expenses, income, payments.
+ * - a {@link RefreshDomain}[] = reload exactly those domains.
+ * Narrow scopes skip the full re-render cascade.
+ */
+export type RefreshScope = 'all' | 'sale' | 'financial' | RefreshDomain[];
 
 /** Persisted receipt/print layout settings (stored in localStorage, merged with store data). */
 type ReceiptSettings = {
@@ -427,6 +447,12 @@ export interface OfflineDataContextType {
   deleteSale: (id: string) => Promise<void>;
   updateBillsForSaleItem: (saleItemId: string) => Promise<void>;
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
+  /**
+   * Patch fields on an existing transaction (e.g. correction supersede:
+   * status / superseded_by_transaction_id / metadata). Marks the row unsynced,
+   * refreshes, and triggers sync. Implemented by the transaction data layer.
+   */
+  updateTransaction: (id: string, updates: Record<string, unknown>) => Promise<void>;
   addExpenseCategory: (category: Omit<ExpenseCategory, 'id' | 'created_at'>) => Promise<void>;
   updateInventoryBatch: (id: string, updates: Partial<Tables['inventory_bills']['Update']>) => Promise<void>;
   deleteInventoryBatch: (id: string) => Promise<void>;

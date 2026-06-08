@@ -6,6 +6,7 @@ const ar = {
     loading: 'جار التحميل...'
   },
   common: {
+    recent: 'مؤخرًا',
     closed: 'مغلق',
     loading: 'جار التحميل...',
     active: 'مفعل',
@@ -128,7 +129,14 @@ const ar = {
       connectionRestored: 'تم استعادة الاتصال',
       autoSyncingChanges: 'جاري مزامنة تغييراتك تلقائيًا...'
     },
-    currency: { USD: 'دولار أمريكي', LBP: 'ليرة لبنانية' },
+    currency: {
+      USD: 'دولار أمريكي', LBP: 'ليرة لبنانية', EUR: 'يورو', GBP: 'جنيه إسترليني',
+      SAR: 'ريال سعودي', AED: 'درهم إماراتي', EGP: 'جنيه مصري', JOD: 'دينار أردني',
+      SYP: 'ليرة سورية', IQD: 'دينار عراقي', TRY: 'ليرة تركية', MAD: 'درهم مغربي',
+      TND: 'دينار تونسي', DZD: 'دينار جزائري', LYD: 'دينار ليبي', SDG: 'جنيه سوداني',
+      YER: 'ريال يمني', KWD: 'دينار كويتي', BHD: 'دينار بحريني', QAR: 'ريال قطري',
+      OMR: 'ريال عماني',
+    },
     previous: 'السابق',
     next: 'التالي',
     showing: 'عرض',
@@ -275,7 +283,9 @@ const ar = {
     demoAccount: 'حساب تجريبي',
     invalidCredentials: 'البريد الإلكتروني أو كلمة المرور غير صحيحة',
     signupFailed: 'فشل إنشاء الحساب. حاول مجددًا.',
-    genericError: 'حدث خطأ. حاول مجددًا.'
+    genericError: 'حدث خطأ. حاول مجددًا.',
+    lockedTitle: 'محاولات فاشلة كثيرة',
+    lockedMessage: 'تم تعطيل تسجيل الدخول مؤقتًا. حاول مجددًا خلال {{time}}.'
   },
   settings: {
     header: 'الإعدادات',
@@ -827,6 +837,14 @@ const ar = {
     duplicateSupplierNameError: 'يوجد مورد بهذا الاسم بالفعل.'
   },
   accounting: {
+    tabs: {
+      dashboard: 'لوحة التحكم',
+      nonpriced: 'عناصر غير مسعّرة',
+      billsManagement: 'إدارة الفواتير',
+      receivedBills: 'الفواتير المستلمة',
+      payments: 'المدفوعات الأخيرة',
+      cashDrawer: 'درج النقود',
+    },
     errorLoadingData: 'خطأ في تحميل البيانات',
     unableToLoadData: 'غير قادر على تحميل بيانات المحاسبة. يرجى تحديث الصفحة أو التحقق من الاتصال.',
     loadingData: 'جاري تحميل بيانات المحاسبة...',
@@ -935,6 +953,11 @@ const ar = {
     supplierPayment: 'دفعة مورد',
     customerPayment: 'دفعة زبون',
     refund: 'دفعة مستردة',
+    selectEntity: 'اختر الجهة...',
+    pleaseSelectEntity: 'يرجى اختيار الجهة',
+    changingEntityNote: 'تغيير الجهة يعكس العملية الأصلية على الجهة السابقة ويسجّل التصحيح على الجهة المختارة.',
+    cannotCorrectNonActive: 'تم تصحيح هذه الدفعة أو عكسها بالفعل ولا يمكن تعديلها بعد الآن.',
+    cannotDeleteNonActive: 'هذه الدفعة لم تعد نشطة ولا يمكن حذفها.',
     completed: 'مكتمل',
     reversed: 'معدل',
     canceled: 'ملغاة',
@@ -1514,12 +1537,13 @@ const ar = {
     actions: {
       create: 'إنشاء', update: 'تعديل', delete: 'حذف', void: 'إلغاء',
       reactivate: 'إعادة تفعيل', archive: 'أرشفة', unarchive: 'إلغاء الأرشفة', open: 'فتح', close: 'إغلاق',
+      login: 'تسجيل الدخول', logout: 'تسجيل الخروج',
     },
     entityTypes: {
       entity: 'عميل / مورّد', product: 'منتج', user: 'موظف', branch: 'فرع',
       bill: 'فاتورة بيع', payment: 'دفعة', cash_drawer_session: 'درج النقد', inventory_item: 'صنف مخزون',
       inventory_batch: 'دفعة مخزون', product_category: 'فئة', unit_of_measure: 'وحدة',
-      store_settings: 'إعدادات المتجر', user_permission: 'صلاحية',
+      store_settings: 'إعدادات المتجر', user_permission: 'صلاحية', auth: 'المصادقة',
     },
     billSummary: {
       created: 'تم إنشاء الفاتورة بعدد {{count}} صنف (الإجمالي **{{total}} {{currency}}**)',

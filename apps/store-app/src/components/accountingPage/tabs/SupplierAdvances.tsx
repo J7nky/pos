@@ -39,7 +39,7 @@ const ADVANCE_CATEGORIES: string[] = [
 
 function isVisibleAdvance(t: any): boolean {
   if (!t) return false;
-  if (t._deleted || (t.metadata as any)?.deleted === true) return false;
+  if (t._deleted || t.status === 'voided' || (t.metadata as any)?.deleted === true) return false;
   return ADVANCE_CATEGORIES.includes(t.category);
 }
 

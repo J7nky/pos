@@ -8,6 +8,7 @@ import {
   FileText as Document,
   DollarSign,
 } from "lucide-react";
+import { useI18n } from "../../../i18n";
 type AccountingTab =
   | "dashboard"
   | "nonpriced"
@@ -27,13 +28,15 @@ const ActionTabsBar: React.FC<ActionTabsBarProps> = ({
   setActiveTab,
   filteredNonPricedItems,
 }) => {
-  const tabs: { id: AccountingTab; label: string; icon: React.ElementType }[] = [
-    { id: "dashboard", label: "Dashboard", icon: BarChart3 },
-    { id: "nonpriced", label: "Non Priced Items", icon: AlertCircle },
-    { id: "bills-management", label: "Bills Management", icon: Document },
-    { id: "received-bills", label: "Received Bills", icon: FileText },
-    { id: "payments", label: "Recent Payments", icon: DollarSign },
-    { id: "cash-drawer", label: "Cash Drawer", icon: Wallet },
+  const { t } = useI18n();
+  const tabs: { id: AccountingTab; labelKey: string; icon: React.ElementType }[] = [
+    // Dashboard tab archived — kept for restore; remove the comment to re-enable.
+    // { id: "dashboard", labelKey: "accounting.tabs.dashboard", icon: BarChart3 },
+    { id: "bills-management", labelKey: "accounting.tabs.billsManagement", icon: Document },
+    { id: "nonpriced", labelKey: "accounting.tabs.nonpriced", icon: AlertCircle },
+    { id: "received-bills", labelKey: "accounting.tabs.receivedBills", icon: FileText },
+    { id: "payments", labelKey: "accounting.tabs.payments", icon: DollarSign },
+    { id: "cash-drawer", labelKey: "accounting.tabs.cashDrawer", icon: Wallet },
   ];
 
   return (
@@ -51,7 +54,7 @@ const ActionTabsBar: React.FC<ActionTabsBarProps> = ({
             }`}
           >
             <tab.icon className="w-4 h-4 mr-2" />
-            {tab.label}
+            {t(tab.labelKey)}
             {tab.id === "nonpriced" && filteredNonPricedItems.length > 0 && (
               <span className="ml-2 bg-red-500 text-white text-xs rounded-full px-2 py-1 min-w-[20px] h-5 flex items-center justify-center">
                 {filteredNonPricedItems.length}

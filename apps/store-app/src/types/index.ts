@@ -510,6 +510,19 @@ export interface Transaction {
   _deleted?: boolean;
   is_reversal?: boolean;
   reversal_of_transaction_id?: string | null;
+
+  // Correction/lifecycle state (replaces the legacy mutable `metadata.corrected`
+  // flag). Typed + indexable + SQL-queryable. `superseded` rows are hidden from
+  // the live list; the four states leave room for the delete flow to adopt
+  // `voided` later without a schema change.
+  status?: 'active' | 'superseded' | 'reversed' | 'voided';
+  // When this row was corrected, the id of the correction that replaced it.
+  superseded_by_transaction_id?: string | null;
+  // On a correction, the id of the row it replaced (back-pointer).
+  corrected_from_transaction_id?: string | null;
+  // On every row in a correction chain, the id of the very first original
+  // (O(1) lineage — no reverse scan needed to find the chain root).
+  chain_root_id?: string | null;
 }
 
 export interface CashDrawer {
@@ -795,7 +808,12 @@ export type AuditAction =
   | 'archive'
   | 'unarchive'
   | 'open'
-  | 'close';
+  | 'close'
+  // Authentication events. Unlike the verbs above they describe a session, not a
+  // row mutation: entity_type is 'auth', entity_id is the user, and changes[] is
+  // always empty. See auditService.recordAuth().
+  | 'login'
+  | 'logout';
 
 /** A single before/after field delta within an `update` action. */
 export interface AuditChange {

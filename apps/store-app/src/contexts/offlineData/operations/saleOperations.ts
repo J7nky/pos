@@ -16,6 +16,7 @@ import { currencyService } from '../../../services/currencyService';
 import { auditService } from '../../../services/auditService';
 import { roundHalfEven } from '../../../utils/currencyRounding';
 import { LegacyCurrencyMissingError, CurrencyLockError } from '../../../errors/currencyErrors';
+import type { RefreshScope } from '../offlineDataContextContract';
 
 /** Line-item unit price in `billCurrency` (identity or convert + banker's round). */
 // transactionService.createTransaction uses finalized cart line `unit_price` values from the bill payload — no second conversion in the service layer.
@@ -58,7 +59,7 @@ export interface SaleDeps {
   userProfileId: string | undefined;
   currency: string;
   pushUndo: (undoData: any) => void;
-  refreshData: () => Promise<void>;
+  refreshData: (scope?: RefreshScope) => Promise<void>;
   updateUnsyncedCount: () => Promise<void>;
   resetAutoSyncTimer: () => void;
   debouncedSync: () => void;
@@ -248,7 +249,7 @@ export async function updateSale(
     }
   });
 
-  await refreshData();
+  await refreshData('sale');
   await updateUnsyncedCount();
   resetAutoSyncTimer();
   debouncedSync();
@@ -316,7 +317,7 @@ export async function deleteSale(deps: SaleDeps, id: string): Promise<void> {
     });
   }
 
-  await refreshData();
+  await refreshData('sale');
   await updateUnsyncedCount();
   resetAutoSyncTimer();
   debouncedSync();

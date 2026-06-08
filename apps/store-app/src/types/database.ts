@@ -828,6 +828,11 @@ export interface Database {
           entity_id?: string | null; // Unified field for customer_id, supplier_id, or employee_id
           is_reversal: boolean;
           reversal_of_transaction_id?: string | null;
+          // Correction lifecycle (added in migration 20260606130000)
+          status?: 'active' | 'superseded' | 'reversed' | 'voided';
+          superseded_by_transaction_id?: string | null;
+          corrected_from_transaction_id?: string | null;
+          chain_root_id?: string | null;
         };
         Insert: {
           id: string;
@@ -846,6 +851,10 @@ export interface Database {
           entity_id?: string | null; // Unified field for customer_id, supplier_id, or employee_id
           is_reversal?: boolean;
           reversal_of_transaction_id?: string | null;
+          status?: 'active' | 'superseded' | 'reversed' | 'voided';
+          superseded_by_transaction_id?: string | null;
+          corrected_from_transaction_id?: string | null;
+          chain_root_id?: string | null;
         };
         Update: {
           id: string;
@@ -858,6 +867,10 @@ export interface Database {
           entity_id?: string | null; // Unified field for customer_id, supplier_id, or employee_id
           is_reversal?: boolean;
           reversal_of_transaction_id?: string | null;
+          status?: 'active' | 'superseded' | 'reversed' | 'voided';
+          superseded_by_transaction_id?: string | null;
+          corrected_from_transaction_id?: string | null;
+          chain_root_id?: string | null;
         };
       };
       missed_products: {

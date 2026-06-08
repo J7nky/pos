@@ -1016,7 +1016,7 @@ ${dashSeparator}`;
       return;
     }
     setCustomerError(null);
-    
+
     try {
       // Validate accounting foundation is synced before selling
       const storeId = raw.storeId || userProfile?.store_id;
@@ -1025,7 +1025,7 @@ ${dashSeparator}`;
         setIsProcessing(false);
         return;
       }
-      
+
       try {
         await accountingInitService.validateAccountingSetup(storeId);
       } catch (accountingError) {
@@ -1036,7 +1036,7 @@ ${dashSeparator}`;
         setIsProcessing(false);
         return;
       }
-      
+
       // Check if cash drawer is open
       const currentCashDrawerStatus = await raw.getCurrentCashDrawerStatus();
       console.log('Current cash drawer status:', currentCashDrawerStatus);
@@ -1059,7 +1059,7 @@ ${dashSeparator}`;
       
       // If drawer is open, proceed with sale
       await processSale();
-      
+
     } catch (error) {
       handleError(error);
       showToast('error', 'Failed to check cash drawer status');
@@ -1105,7 +1105,7 @@ ${dashSeparator}`;
 
   const processSale = async () => {
     setIsProcessing(true);
-    
+
     try {
       const storeId = raw.storeId || userProfile?.store_id;
       if (!storeId) {
@@ -1241,7 +1241,7 @@ ${dashSeparator}`;
       }
 
       await handlePrint(billData, lineItemsData, entity, qrCodeData);
-      
+
       // NOTE: do NOT call raw.refreshData() here. createBill() already runs a full
       // refreshData() + refreshCashDrawerStatus() internally before it returns
       // (see billOperations.ts), so the UI is already in sync. A second call would
@@ -1465,7 +1465,7 @@ ${dashSeparator}`;
                             id: customer.id,
                             label: customer.name,
                             value: customer.id,
-                            category: `${t('common.labels.customer')}`
+                            category: `${t('payments.customer')}`
                           }))
                         : [
                             { id: '', label: `${t('common.labels.walkInCustomer')}`, value: '', category: `${t('soldBills.customer')}` },
@@ -1473,7 +1473,7 @@ ${dashSeparator}`;
                               id: customer.id,
                               label: customer.name,
                               value: customer.id,
-                              category: `${t('common.labels.customer')}`
+                              category: `${t('payments.customer')}`
                             }))
                           ];
                       
@@ -1481,7 +1481,7 @@ ${dashSeparator}`;
                         id: supplier.id,
                         label: supplier.name,
                         value: supplier.id,
-                        category: `${t('customers.supplier')}`
+                        category: `${t('payments.supplier')}`
                       }));
 
                       const employeeOptions = employees.map(employee => ({

@@ -49,7 +49,7 @@ import {
   useTaxonomyDataLayer,
   useAuditLogDataLayer,
 } from './offlineData';
-import type { OfflineDataContextType, OfflineSyncSessionState, RefreshScope } from './offlineData/offlineDataContextContract';
+import type { OfflineDataContextType, OfflineSyncSessionState, RefreshScope, RefreshDomain } from './offlineData/offlineDataContextContract';
 import { useStoreSwitchLifecycle } from './offlineData/useStoreSwitchLifecycle';
 import { useBranchBootstrapEffects } from './offlineData/useBranchBootstrapEffects';
 import { useOfflineInitialization } from './offlineData/useOfflineInitialization';
@@ -178,7 +178,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const pushUndoRef = useRef<(data: any) => void>(() => {});
   const refreshDataRef = useRef<(scope?: RefreshScope) => Promise<void>>(async () => {});
   const resetAutoSyncTimerRef = useRef<() => void>(() => {});
-  const updateUnsyncedCountRef = useRef<() => Promise<void>>(async () => {});
+  const updateUnsyncedCountRef = useRef<(optimisticDelta?: number) => Promise<void>>(async () => {});
   const debouncedSyncRef = useRef<() => void>(() => {});
   const performSyncRef = useRef<(auto?: boolean) => Promise<SyncResult>>(
     async () => ({ success: false, errors: ['not ready'], synced: { uploaded: 0, downloaded: 0 }, conflicts: 0 })
@@ -186,13 +186,15 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const checkUndoValidityRef = useRef<() => Promise<void>>(async () => {});
 
   const stablePushUndo = useCallback((data: any) => pushUndoRef.current(data), []);
-  const stableRefreshData = useCallback(() => refreshDataRef.current(), []);
+  // Forwards the scope so callers can request a narrow refresh (e.g. entity CRUD
+  // passes ['entities']). No-arg callers keep getting the full 'all' refresh.
+  const stableRefreshData = useCallback((scope?: RefreshScope) => refreshDataRef.current(scope), []);
   // Financial-scoped refresh (transactions + cash drawer) for the transaction
   // data layer — avoids rehydrating product/entity/inventory layers after an
   // expense / income / standalone transaction. See refreshData('financial').
   const stableRefreshFinancialData = useCallback(() => refreshDataRef.current('financial'), []);
   const stableResetAutoSyncTimer = useCallback(() => resetAutoSyncTimerRef.current(), []);
-  const stableUpdateUnsyncedCount = useCallback(() => updateUnsyncedCountRef.current(), []);
+  const stableUpdateUnsyncedCount = useCallback((optimisticDelta?: number) => updateUnsyncedCountRef.current(optimisticDelta), []);
   const stableDebouncedSync = useCallback(() => debouncedSyncRef.current(), []);
   const stablePerformSync = useCallback((auto?: boolean) => performSyncRef.current(auto), []);
   const stableCheckUndoValidity = useCallback(() => checkUndoValidityRef.current(), []);
@@ -279,8 +281,16 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   // StoreSettings needs performSync (via stable ref)
   const reloadCurrencyStateRef = useRef<(sid: string | null) => Promise<void>>(async () => {});
 
-  const [acceptedCurrencies, setAcceptedCurrencies] = useState<CurrencyCode[]>(['USD']);
-  const [preferredCurrency, setPreferredCurrency] = useState<CurrencyCode>('USD');
+  // Seed from currencyService (the source of truth) rather than hardcoding a
+  // currency. These are the pre-hydration defaults; reloadCurrencyState() below
+  // refreshes them from the store row once it loads. Keeping the default in one
+  // place means it can't drift from currencyService's own default.
+  const [acceptedCurrencies, setAcceptedCurrencies] = useState<CurrencyCode[]>(
+    () => currencyService.getAcceptedCurrencies()
+  );
+  const [preferredCurrency, setPreferredCurrency] = useState<CurrencyCode>(
+    () => currencyService.getPreferredCurrency()
+  );
 
   const settingsLayer = useStoreSettingsDataLayer({
     storeId, currentBranchId, userProfileId: userProfile?.id, isOnline, isSyncing,
@@ -448,48 +458,57 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const refreshData = useCallback(async (scope: RefreshScope = 'all') => {
     if (!storeId) return;
 
-    // ── Targeted post-sale refresh ────────────────────────────────────────────
-    // A completed sale (createBill) only mutates bills, bill_line_items,
-    // inventory_items, inventory_bills (bill-completion can close one) and
-    // transactions. Reloading just those layers avoids the full ~18-table
-    // rehydration — notably the O(N) product scan in loadAllStoreData — which is
-    // the bulk of the post-sale spinner. The loaders below are identical to the
-    // full path's, so hydration is byte-for-byte the same, just fewer tables.
-    // Entity balances are journal-derived via entityBalanceCache and are not
-    // refreshed by refreshData in EITHER mode, so scoping does not regress them.
-    if (scope === 'sale') {
+    // ── Targeted (scoped) refresh ─────────────────────────────────────────────
+    // Any scope other than 'all' reloads ONLY the domains it names, skipping the
+    // full ~18-table rehydration — notably the O(N) product scan in
+    // loadAllStoreData and every other table irrelevant to the write. This is
+    // the dominant cost for stores with large histories, where reloading
+    // products/entities/inventory/bills/journal after (say) a payment is pure
+    // waste. The per-domain loaders below are identical to the full path's, so
+    // hydration is byte-for-byte the same, just fewer tables.
+    //
+    // Deliberately NOT a domain: the journal/accounting layer — no mounted view
+    // reads journal_entries/chart_of_accounts/balance_snapshots from context,
+    // and entity balances are journal-derived independently via
+    // entityBalanceCache (see useEntityBalances). So scoping never regresses
+    // balances regardless of which domains are reloaded.
+    if (scope !== 'all') {
+      const domains: RefreshDomain[] =
+        scope === 'sale' ? ['transactions', 'inventory', 'bills']
+        : scope === 'financial' ? ['transactions', 'cashDrawer']
+        : scope;
+      const want = new Set(domains);
       try {
-        const [inventoryData, batchesData, transactionsData, billsData, billLineItemsData] =
-          await Promise.all([
-            crudHelperService.getEntitiesByStoreBranch('inventory_items', storeId, currentBranchId),
-            crudHelperService.getEntitiesByStoreBranch('inventory_bills', storeId, currentBranchId),
-            crudHelperService.getEntitiesByStoreBranch('transactions', storeId, currentBranchId),
-            crudHelperService.getEntitiesByStoreBranch('bills', storeId, currentBranchId),
-            crudHelperService.getEntitiesByStoreBranch('bill_line_items', storeId, currentBranchId),
-          ]);
-        transactionLayer.hydrate(transactionsData as unknown as Tables['transactions']['Row'][]);
-        await billLayer.hydrate(billsData, billLineItemsData);
-        inventoryLayer.hydrate(inventoryData, batchesData);
-        debug('✅ Targeted post-sale refresh completed');
+        await Promise.all([
+          want.has('transactions')
+            ? crudHelperService
+                .getEntitiesByStoreBranch('transactions', storeId, currentBranchId)
+                .then(d => transactionLayer.hydrate(d as unknown as Tables['transactions']['Row'][]))
+            : null,
+          want.has('inventory')
+            ? Promise.all([
+                crudHelperService.getEntitiesByStoreBranch('inventory_items', storeId, currentBranchId),
+                crudHelperService.getEntitiesByStoreBranch('inventory_bills', storeId, currentBranchId),
+              ]).then(([items, batches]) => inventoryLayer.hydrate(items, batches))
+            : null,
+          want.has('bills')
+            ? Promise.all([
+                crudHelperService.getEntitiesByStoreBranch('bills', storeId, currentBranchId),
+                crudHelperService.getEntitiesByStoreBranch('bill_line_items', storeId, currentBranchId),
+              ]).then(([bills, lineItems]) => billLayer.hydrate(bills, lineItems))
+            : null,
+          // Entities are store-scoped (not branch-filtered) — matches the full
+          // path's `getEntitiesByStore('entities', storeId)` exactly.
+          want.has('entities')
+            ? crudHelperService
+                .getEntitiesByStore('entities', storeId)
+                .then(d => entityLayer.hydrate((d as any[]) || []))
+            : null,
+          want.has('cashDrawer') ? cashDrawerLayer.refreshCashDrawerStatus() : null,
+        ]);
+        debug(`✅ Targeted refresh completed [${domains.join(', ')}]`);
       } catch (error) {
-        console.error('❌ Error during targeted sale refresh:', error);
-      }
-      return;
-    }
-
-    // ── Targeted financial refresh (transactions + cash drawer) ───────────────
-    // Expenses, income and standalone transactions only mutate the transactions
-    // table (+ the cash drawer for cash). Skipping the other layers avoids the
-    // full re-render cascade. Entity balances are journal-derived via
-    // entityBalanceCache and are unaffected by refreshData in any mode.
-    if (scope === 'financial') {
-      try {
-        const transactionsData = await crudHelperService.getEntitiesByStoreBranch('transactions', storeId, currentBranchId);
-        transactionLayer.hydrate(transactionsData as unknown as Tables['transactions']['Row'][]);
-        await cashDrawerLayer.refreshCashDrawerStatus();
-        debug('✅ Targeted financial refresh completed');
-      } catch (error) {
-        console.error('❌ Error during targeted financial refresh:', error);
+        console.error(`❌ Error during targeted refresh [${domains.join(', ')}]:`, error);
       }
       return;
     }
@@ -696,10 +715,14 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         .and(account => account.is_active)
         .first();
       if (!currentAccount) return 0;
-      const acctCurrency = (currentAccount as any)?.currency || 'USD';
+      const acctCurrency = (currentAccount as any)?.currency || currencyService.getPreferredCurrency();
       const { cashDrawerUpdateService } = await import('../services/cashDrawerUpdateService');
       const balances = await cashDrawerUpdateService.getCurrentCashDrawerBalances(sid, currentBranchId);
-      return acctCurrency === 'LBP' ? balances.LBP : balances.USD;
+      // Pick the balance for the account's own currency instead of assuming a
+      // USD/LBP binary. getCurrentCashDrawerBalances still only tracks USD + LBP,
+      // so an account in any other currency reads 0 (honest "untracked") rather
+      // than silently returning the USD figure.
+      return (balances as Record<string, number>)[acctCurrency] ?? 0;
     } catch (error) {
       console.error('Error getting cash drawer balance:', error);
       return 0;
@@ -797,8 +820,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   billCreateDepsRef.current = {
     storeId, currentBranchId, userProfileId: userProfile?.id,
     // Post-sale uses the targeted refresh — only the tables a sale mutates — to
-    // keep the post-sale spinner short. See refreshData('sale') above.
-    pushUndo, refreshData: () => refreshData('sale'),
+    // keep the post-sale spinner short. createBill scopes its own refresh
+    // (inventory+bills) and surgically upserts the new transaction rows, so the
+    // huge transactions table is never reloaded. See createBill in billOperations.
+    pushUndo, refreshData,
+    upsertTransactions: transactionLayer.upsertTransactions,
     updateUnsyncedCount: syncStateLayer.updateUnsyncedCount,
     resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer,
     debouncedSync: syncStateLayer.debouncedSync,
@@ -872,6 +898,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     currentBranchId, customers, suppliers,
     exchangeRate: settingsLayer.exchangeRate,
     createCashDrawerUndoData, pushUndo, refreshData,
+    upsertTransactions: transactionLayer.upsertTransactions,
     updateUnsyncedCount: stableUpdateUnsyncedCount,
     debouncedSync: stableDebouncedSync,
     i18n: { en: enLocale, ar: arLocale },
@@ -882,6 +909,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   processEmployeePaymentDepsRef.current = {
     storeId, currentBranchId, employees: employeeLayer.employees,
     exchangeRate: settingsLayer.exchangeRate, refreshData,
+    upsertTransactions: transactionLayer.upsertTransactions,
     updateUnsyncedCount: stableUpdateUnsyncedCount,
     debouncedSync: stableDebouncedSync,
     i18n: { en: enLocale, ar: arLocale },
@@ -1261,12 +1289,12 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         lowStockAlertsEnabled: false,
         lowStockThreshold: 10,
         defaultCommissionRate: 10,
-        currency: 'USD',
-        preferredCurrency: 'USD',
-        acceptedCurrencies: ['USD'],
+        currency: currencyService.getPreferredCurrency(),
+        preferredCurrency: currencyService.getPreferredCurrency(),
+        acceptedCurrencies: currencyService.getAcceptedCurrencies(),
         isCurrencyAccepted: () => false,
         isMultiCurrency: false,
-        formatAmount: () => '$0.00',
+        formatAmount: (amount, currency) => currencyService.format(amount, currency),
         exchangeRate: 1,
         language: 'ar',
         cashDrawer: null,
@@ -1301,6 +1329,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         deleteSale: async () => {},
         updateBillsForSaleItem: async () => {},
         addTransaction: async () => {},
+        updateTransaction: async () => {},
         addExpenseCategory: async () => {},
         updateInventoryBatch: async () => {},
         deleteInventoryBatch: async () => {},
@@ -1401,6 +1430,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       inventory: inventoryLayer.inventory,
       inventoryBills: inventoryLayer.inventoryBills,
       transactions: transactionLayer.transactions,
+      updateTransaction: transactionLayer.updateTransaction,
       expenseCategories,
       bills: billLayer.bills,
       billLineItems: billLayer.billLineItems,

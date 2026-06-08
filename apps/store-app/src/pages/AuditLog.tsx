@@ -17,7 +17,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
   Activity, Banknote, Boxes, Building2, Calendar, ChevronDown,
-  ChevronUp, Eye, FileText, Filter, Hash, KeyRound, Layers, Package,
+  ChevronUp, Eye, FileText, Filter, Hash, KeyRound, Layers, LogIn, Package,
   Pencil, ReceiptText, RotateCcw, Scale, ScrollText, Search, Settings2, Tags,
   Trash2, UserCog, Users, Wallet,
 } from 'lucide-react';
@@ -34,12 +34,13 @@ const PAGE_SIZE = 100;
 
 const ACTIONS: AuditAction[] = [
   'create', 'update', 'delete', 'void', 'reactivate', 'archive', 'unarchive', 'open', 'close',
+  'login', 'logout',
 ];
 
 const ENTITY_TYPES = [
   'entity', 'product', 'user', 'branch', 'bill', 'payment', 'cash_drawer_session',
   'inventory_item', 'inventory_batch', 'product_category', 'unit_of_measure',
-  'store_settings', 'user_permission',
+  'store_settings', 'user_permission', 'auth',
 ];
 
 /** Per-entity-type glyphs so each row is scannable at a glance. */
@@ -48,6 +49,7 @@ const ENTITY_ICON: Record<string, LucideIcon> = {
   bill: ReceiptText, payment: Banknote, cash_drawer_session: Wallet,
   inventory_item: Boxes, inventory_batch: Layers, product_category: Tags,
   unit_of_measure: Scale, store_settings: Settings2, user_permission: KeyRound,
+  auth: LogIn,
 };
 
 export default function AuditLog() {

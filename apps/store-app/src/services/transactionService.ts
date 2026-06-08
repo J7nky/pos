@@ -68,6 +68,14 @@ export interface CreateTransactionParams {
   is_reversal?: boolean;
   reversal_of_transaction_id?: string | null;
   /**
+   * Correction lineage. A correction created to replace a superseded row sets
+   * `corrected_from_transaction_id` (the row it replaces) and `chain_root_id`
+   * (the first original in the chain). `status` defaults to 'active'.
+   */
+  status?: 'active' | 'superseded' | 'reversed' | 'voided';
+  corrected_from_transaction_id?: string | null;
+  chain_root_id?: string | null;
+  /**
    * Optional caller-supplied id. Enables idempotent posting (e.g., monthly
    * salary accruals use a deterministic id so two offline devices collide
    * on sync rather than producing duplicates).
@@ -79,6 +87,20 @@ export interface CreateTransactionParams {
   // Behavior flags
   updateBalances?: boolean;
   updateCashDrawer?: boolean;
+  /**
+   * Skip the (read-only) cash-drawer impact computation in
+   * `updateCashDrawerAtomic`. That step sums the ENTIRE account-1100 ledger to
+   * derive an absolute previous/new balance — an O(history) scan that is the
+   * main cost of recording a payment on large stores. It writes nothing; its
+   * only output is `cashDrawerImpact`, which callers like processPayment ignore
+   * (the cash balance lives in the journal entries, and the displayed balance is
+   * recomputed session-scoped elsewhere). Set this for those callers to skip the
+   * scan. The cash-drawer SESSION is still auto-opened (gated separately by
+   * `updateCashDrawer`), so cash handling is unaffected. Leave undefined/false
+   * for callers that consume `cashDrawerImpact` (inventory purchase, cash-drawer
+   * transactions). Default: false (impact is computed).
+   */
+  skipCashDrawerImpact?: boolean;
   createAuditLog?: boolean;
   _synced?: boolean;
 }
@@ -273,6 +295,12 @@ export class TransactionService {
         _deleted: false,
         is_reversal: params.is_reversal ?? false,
         reversal_of_transaction_id: params.reversal_of_transaction_id ?? null,
+        // Correction lifecycle: new rows are born 'active'. A row only becomes
+        // 'superseded' when a later correction replaces it (set via update).
+        status: params.status ?? 'active',
+        superseded_by_transaction_id: null,
+        corrected_from_transaction_id: params.corrected_from_transaction_id ?? null,
+        chain_root_id: params.chain_root_id ?? null,
         metadata: {
           ...params.metadata,
           correlationId,
@@ -361,7 +389,7 @@ export class TransactionService {
 
       // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK ⭐⭐⭐
       // ALL database write operations happen atomically
-      await getDB().transaction('rw', 
+      await getDB().transaction('rw',
         [getDB().transactions, getDB().cash_drawer_sessions, getDB().journal_entries, getDB().entities, getDB().chart_of_accounts, getDB().cash_drawer_accounts], 
         async () => {
           // Create timestamp inside transaction block for accurate commit time.
@@ -413,7 +441,13 @@ export class TransactionService {
             isCashDrawerCategory: this.isCashDrawerCategory(params.category)
           });
           
-          if (shouldUpdateCashDrawer) {
+          if (shouldUpdateCashDrawer && params.skipCashDrawerImpact) {
+            // Caller doesn't consume cashDrawerImpact → skip the O(history)
+            // all-1100-ledger scan in updateCashDrawerAtomic (it writes nothing;
+            // the 1100 journal entry was already posted above, and the displayed
+            // balance is recomputed session-scoped on refresh).
+            console.log(`[CREATE_TRANSACTION] Skipping cash drawer impact computation (skipCashDrawerImpact)`);
+          } else if (shouldUpdateCashDrawer) {
             console.log(`[CREATE_TRANSACTION] Updating cash drawer for transaction: ${transactionId}`);
             cashDrawerImpact = await this.updateCashDrawerAtomic(
               transaction,
@@ -427,7 +461,7 @@ export class TransactionService {
         }
       );
       // ⭐⭐⭐ END ATOMIC TRANSACTION ⭐⭐⭐
-      
+
       // Verify journal entries are persisted after transaction commits
       const persistedEntries = await getDB().journal_entries
         .where('transaction_id')
@@ -487,6 +521,7 @@ export class TransactionService {
         }
       }
 
+
       // 9. RETURN RESULT
       return {
         success: true,
@@ -532,7 +567,7 @@ export class TransactionService {
     currency: CurrencyCode,
     description: MultilingualString,
     context: TransactionContext,
-    options: { reference?: string; updateCashDrawer?: boolean } = {}
+    options: { reference?: string; updateCashDrawer?: boolean; skipCashDrawerImpact?: boolean } = {}
   ): Promise<TransactionResult> {
     return this.createTransaction({
       category: TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT,
@@ -542,7 +577,8 @@ export class TransactionService {
       context,
       entityId,
       reference: options.reference,
-      updateCashDrawer: options.updateCashDrawer
+      updateCashDrawer: options.updateCashDrawer,
+      skipCashDrawerImpact: options.skipCashDrawerImpact
     });
   }
 
@@ -555,7 +591,7 @@ export class TransactionService {
     currency: CurrencyCode,
     description: MultilingualString,
     context: TransactionContext,
-    options: { reference?: string; updateCashDrawer?: boolean } = {}
+    options: { reference?: string; updateCashDrawer?: boolean; skipCashDrawerImpact?: boolean } = {}
   ): Promise<TransactionResult> {
     return this.createTransaction({
       category: TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT,
@@ -565,7 +601,8 @@ export class TransactionService {
       context,
       entityId,
       reference: options.reference,
-      updateCashDrawer: options.updateCashDrawer
+      updateCashDrawer: options.updateCashDrawer,
+      skipCashDrawerImpact: options.skipCashDrawerImpact
     });
   }
 
@@ -967,8 +1004,9 @@ export class TransactionService {
         };
       }
 
-      // Check if already deleted (either via _deleted flag or metadata.deleted)
-      if (transaction._deleted || (transaction.metadata as any)?.deleted === true) {
+      // Check if already deleted/voided (typed status, or the legacy _deleted /
+      // metadata.deleted flags for rows written before the status column existed)
+      if (transaction._deleted || (transaction as any).status === 'voided' || (transaction.metadata as any)?.deleted === true) {
         return {
           success: false,
           error: 'Transaction already deleted',
@@ -1067,9 +1105,12 @@ export class TransactionService {
             }
           }
 
-          // Mark transaction as canceled using metadata (preserves history)
+          // Mark transaction as voided (preserves history). The typed `status`
+          // column is authoritative; the metadata block is retained as a
+          // human-readable audit trail (who/when/why + the reversal link).
           const existingMetadata = transaction.metadata || {};
           await getDB().transactions.update(transactionId, {
+            status: 'voided',
             metadata: {
               ...existingMetadata,
               deleted: true,

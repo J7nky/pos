@@ -22,6 +22,8 @@ export const AUDIT_ACTION_BADGE: Record<string, string> = {
   unarchive: 'bg-gray-100 text-gray-700',
   open: 'bg-emerald-100 text-emerald-800',
   close: 'bg-amber-100 text-amber-800',
+  login: 'bg-indigo-100 text-indigo-800',
+  logout: 'bg-slate-100 text-slate-700',
 };
 
 interface EntityAuditHistoryProps {

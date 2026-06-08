@@ -35,6 +35,18 @@ import type { AuditLog, AuditChange, AuditAction } from '../types';
  */
 const NON_AUDITED = new Set<string>(['notification', 'notification_preferences']);
 
+/** Entity type used for authentication (login/logout) audit rows. */
+export const AUTH_ENTITY_TYPE = 'auth';
+
+/**
+ * Branch sentinel for auth events recorded before a branch is selected (e.g. an
+ * admin, whose users.branch_id is null, signing in). `audit_logs.branch_id` is
+ * `UUID NOT NULL` with NO foreign key, so a nil-UUID is a valid, FK-safe value;
+ * auth rows are read by-actor and by-store feed, never via the branch index, so
+ * the sentinel never surfaces in a real branch's activity.
+ */
+export const AUTH_EVENT_BRANCH = '00000000-0000-0000-0000-000000000000';
+
 export interface AuditRecordInput {
   /** Store scope. */
   storeId: string | null | undefined;
@@ -158,6 +170,43 @@ class AuditService {
       console.error('[audit] Failed to record audit log:', error);
       return null;
     }
+  }
+
+  /**
+   * Record an authentication event (login / logout) in the audit trail.
+   *
+   * Auth events differ from business-action audits and are normalised here so
+   * call sites stay trivial:
+   *   • No field deltas — `changes` is always empty (an action-row with no
+   *     before/after, per audit_log_design_decisions).
+   *   • Not branch-scoped — a user authenticates before choosing a branch, so we
+   *     record their assigned branch when known (cashier/manager), else the
+   *     nil-UUID sentinel (admin / unknown). See AUTH_EVENT_BRANCH.
+   *
+   * `created_at` is stamped from device time inside record(), so it reflects the
+   * moment of the auth event (works offline) — not a later sync. Retention is the
+   * same 4-month prune as every other audit row. Best-effort: never throws; a
+   * missing store/actor is skipped (see record()).
+   */
+  async recordAuth(input: {
+    action: Extract<AuditAction, 'login' | 'logout'>;
+    /** Acting user id — also the row's entity_id and changed_by. Must be a UUID. */
+    userId: string | null | undefined;
+    storeId: string | null | undefined;
+    /** Assigned branch when known; falls back to the nil-UUID sentinel. */
+    branchId?: string | null;
+    reference?: string | null;
+  }): Promise<string | null> {
+    return this.record({
+      storeId: input.storeId,
+      branchId: input.branchId || AUTH_EVENT_BRANCH,
+      changedBy: input.userId,
+      entityType: AUTH_ENTITY_TYPE,
+      entityId: input.userId ?? '',
+      action: input.action,
+      changes: [],
+      reference: input.reference ?? null,
+    });
   }
 
   /**

@@ -71,7 +71,14 @@ const fr = {
       yourCartIsEmpty: 'Votre panier est vide', startAddingProductsToBeginYourSale: 'Commencez à ajouter des produits pour commencer votre vente', addNewProduct: 'Ajouter un nouveau produit', createNewProductForInventory: 'Créer un nouveau produit pour votre stock', productInformation: 'Informations du produit', enterProductName: 'Entrer le nom du produit', category: 'Catégorie', fruits: 'Fruits', vegetables: 'Légumes', leafy: 'Légumes à feuilles', nuts: 'Noix', others: 'Autres', productImage: 'Image du produit', productPhoto: 'Photo du produit', clickToUploadImage: 'Cliquer pour télécharger une image', pngJpgUpTo5Mb: 'PNG, JPG jusqu\'à 5MB', cancel: 'Annuler', adding: 'Ajout en cours...', addProduct: 'Ajouter le produit', units: 'unités', kg: 'kg', piece: 'Pièce', box: 'Boîte', bag: 'Sac', bundle: 'Lot', dozen: 'Douzaine', image: 'Image', name: 'Nom', product: 'Produit', supplier: 'Fournisseur', type: 'Type', searchProducts: 'Rechercher des produits ou fournisseurs...' },
     confirmations: { fullResyncConfirm: 'Cela effacera les données locales et retéléchargera depuis le serveur. Continuer ?' },
     alerts: { connectionRestored: 'Connexion rétablie', autoSyncingChanges: 'Synchronisation automatique de vos modifications...' },
-    currency: { USD: 'Dollar américain', LBP: 'Livre libanaise' },
+    currency: {
+      USD: 'Dollar américain', LBP: 'Livre libanaise', EUR: 'Euro', GBP: 'Livre sterling',
+      SAR: 'Riyal saoudien', AED: 'Dirham des Émirats', EGP: 'Livre égyptienne',
+      JOD: 'Dinar jordanien', SYP: 'Livre syrienne', IQD: 'Dinar irakien', TRY: 'Livre turque',
+      MAD: 'Dirham marocain', TND: 'Dinar tunisien', DZD: 'Dinar algérien', LYD: 'Dinar libyen',
+      SDG: 'Livre soudanaise', YER: 'Riyal yéménite', KWD: 'Dinar koweïtien',
+      BHD: 'Dinar bahreïni', QAR: 'Riyal qatari', OMR: 'Rial omanais',
+    },
     previous: 'Précédent',
     next: 'Suivant',
     showing: 'Affichage',
@@ -472,6 +479,14 @@ const fr = {
     close: 'Fermer'
   },
   accounting: {
+    tabs: {
+      dashboard: 'Tableau de Bord',
+      nonpriced: 'Articles Non Tarifés',
+      billsManagement: 'Gestion des Factures',
+      receivedBills: 'Factures Reçues',
+      payments: 'Paiements Récents',
+      cashDrawer: 'Tiroir-Caisse',
+    },
     errorLoadingData: 'Erreur de Chargement des Données',
     unableToLoadData: 'Impossible de charger les données comptables. Veuillez actualiser la page ou vérifier votre connexion.',
     loadingData: 'Chargement des données comptables...',
@@ -524,6 +539,12 @@ const fr = {
     errorDeletingSale: 'Erreur lors de la suppression de la vente'
   },
   payments: {
+    refund: 'Remboursement',
+    selectEntity: 'Sélectionner une entité...',
+    pleaseSelectEntity: 'Veuillez sélectionner une entité',
+    changingEntityNote: 'Changer l\'entité annule l\'original sur l\'entité précédente et enregistre la correction sur l\'entité sélectionnée.',
+    cannotCorrectNonActive: 'Ce paiement a déjà été corrigé ou annulé et ne peut plus être modifié.',
+    cannotDeleteNonActive: 'Ce paiement n\'est plus actif et ne peut pas être supprimé.',
     totalPayments: 'Total des paiements',
     paymentsReceived: 'Paiements reçus',
     paymentsMade: 'Paiements effectués',

@@ -6,6 +6,8 @@ import { getDB } from '../lib/db';
 import { syncService } from '../services/syncOrchestrator';
 import { localAuthService } from '../services/localAuthService';
 import { credentialStorageService } from '../services/credentialStorageService';
+import { auditService } from '../services/auditService';
+import { loginThrottleService, type LockStatus } from '../services/loginThrottleService';
 
 interface UserProfile {
   id: string;
@@ -33,7 +35,9 @@ interface SupabaseAuthContextType {
   userProfile: UserProfile | null;
   loading: boolean;
   error: string | null;
-  signIn: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  signIn: (email: string, password: string) => Promise<{ success: boolean; error?: string; lockedUntil?: number }>;
+  /** Current failed-login lockout status for an email (drives the login UI countdown). */
+  getLoginLockout: (email: string) => LockStatus;
   signUp: (email: string, password: string, profile: Omit<UserProfile, 'id' | 'email'>) => Promise<{ success: boolean; error?: string }>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
@@ -486,11 +490,19 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const signIn = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
+  const signIn = async (email: string, password: string): Promise<{ success: boolean; error?: string; lockedUntil?: number }> => {
     try {
       setError(null);
       setLoading(true);
-      
+
+      // Progressive failed-login lockout (per-email, offline-safe). Reject before
+      // any auth attempt while locked — do NOT count this as a new failure.
+      const lock = loginThrottleService.getStatus(email);
+      if (lock.locked) {
+        setLoading(false);
+        return { success: false, error: 'account_locked', lockedUntil: lock.until ?? undefined };
+      }
+
       const isOnline = navigator.onLine;
       
       // Try Supabase authentication first if online
@@ -499,7 +511,9 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
           const { data, error } = await supabase.auth.signInWithPassword({ email, password });
           
           if (!error && data?.user) {
-            // Successfully authenticated with Supabase
+            // Successfully authenticated with Supabase — clear the failed-login counter.
+            loginThrottleService.reset(email);
+
             // Store credentials locally for offline access
             try {
               // Find local user by email to get userId
@@ -544,6 +558,23 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
               }
             }
             
+            // Audit the successful sign-in (best-effort: empty changes, device-time
+            // stamp). Store/branch come from the cached profile, falling back to the
+            // local users row so a first-ever login (no cache yet) is still recorded.
+            try {
+              const auditUser = cachedProfile
+                ? null
+                : await getDB().users.where('email').equals(email).first();
+              await auditService.recordAuth({
+                action: 'login',
+                userId: data.user.id,
+                storeId: cachedProfile?.store_id ?? auditUser?.store_id,
+                branchId: cachedProfile?.branch_id ?? auditUser?.branch_id ?? null,
+              });
+            } catch (auditError) {
+              console.warn('Failed to record login audit event:', auditError);
+            }
+
             // Note: onAuthStateChange will handle loading fresh profile
             return { success: true };
           }
@@ -559,7 +590,10 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       // Offline or Supabase failed - try local authentication
       try {
         const localUser = await localAuthService.signIn(email, password);
-        
+
+        // Successful local sign-in — clear the failed-login counter.
+        loginThrottleService.reset(email);
+
         // Load user profile from local storage
         const localProfile = await localAuthService.getUserProfile(localUser.id);
         if (localProfile) {
@@ -609,13 +643,27 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
           };
           window.addEventListener('online', syncOnOnline);
         }
-        
+
+        // Audit the successful (offline/local) sign-in — best-effort, empty changes.
+        try {
+          await auditService.recordAuth({
+            action: 'login',
+            userId: localUser.id,
+            storeId: localProfile?.store_id ?? localUser.store_id,
+            branchId: localProfile?.branch_id ?? localUser.branch_id ?? null,
+          });
+        } catch (auditError) {
+          console.warn('Failed to record login audit event:', auditError);
+        }
+
         return { success: true };
       } catch (localError: any) {
+        // Both Supabase and local auth rejected the credentials → one real failure.
+        const lock = loginThrottleService.recordFailure(email);
         const errorMessage = localError?.message || 'Invalid email or password';
         setError(errorMessage);
         setLoading(false);
-        return { success: false, error: errorMessage };
+        return { success: false, error: errorMessage, lockedUntil: lock.until ?? undefined };
       }
     } catch (error: any) {
       const errorMessage = error?.message || 'An unexpected error occurred';
@@ -673,7 +721,23 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
   const signOut = async (): Promise<void> => {
     try {
       setError(null);
-      
+
+      // Audit the sign-out before we tear down the session/profile state below.
+      // Best-effort, empty changes; pairs with the 'login' event for a full
+      // session trail.
+      if (userProfile?.id) {
+        try {
+          await auditService.recordAuth({
+            action: 'logout',
+            userId: userProfile.id,
+            storeId: userProfile.store_id,
+            branchId: userProfile.branch_id ?? null,
+          });
+        } catch (auditError) {
+          console.warn('Failed to record logout audit event:', auditError);
+        }
+      }
+
       // Record check-out for employee attendance tracking before signing out
       if (userProfile?.id && userProfile?.store_id) {
         try {
@@ -842,6 +906,8 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const getLoginLockout = (email: string): LockStatus => loginThrottleService.getStatus(email);
+
   const clearError = () => {
     setError(null);
   };
@@ -863,6 +929,7 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       loading,
       error,
       signIn,
+      getLoginLockout,
       signUp,
       signOut,
       resetPassword,

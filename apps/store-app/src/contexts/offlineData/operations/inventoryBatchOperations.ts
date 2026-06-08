@@ -12,6 +12,7 @@ import enLocale from '../../../i18n/locales/en';
 import arLocale from '../../../i18n/locales/ar';
 import type { Database } from '../../../types/database';
 import type { CurrencyCode } from '@pos-platform/shared';
+import type { RefreshScope } from '../offlineDataContextContract';
 
 type Tables = Database['public']['Tables'];
 
@@ -30,7 +31,7 @@ export interface InventoryBatchDeps {
   userProfileId: string | undefined;
   currency: CurrencyCode;
   pushUndo: (data: any) => void;
-  refreshData: () => Promise<void>;
+  refreshData: (scope?: RefreshScope) => Promise<void>;
   updateUnsyncedCount: () => Promise<void>;
   resetAutoSyncTimer: () => void;
   debouncedSync: () => void;
@@ -197,7 +198,8 @@ export async function addInventoryBatch(
     reference: inventoryRef(batchId),
   });
 
-  await refreshData();
+  // Purchase writes inventory + purchase transactions + (cash purchases) drawer.
+  await refreshData(['inventory', 'transactions', 'cashDrawer']);
   await updateUnsyncedCount();
   resetAutoSyncTimer();
   debouncedSync();
@@ -343,7 +345,8 @@ export async function updateInventoryBatch(
     });
   }
 
-  await refreshData();
+  // Edit may adjust journal/cash via price/supplier change → inventory + txns + drawer.
+  await refreshData(['inventory', 'transactions', 'cashDrawer']);
   await updateUnsyncedCount();
   resetAutoSyncTimer();
   debouncedSync();
@@ -428,7 +431,8 @@ export async function deleteInventoryBatch(
     reference: inventoryRef(id),
   });
 
-  await refreshData();
+  // Delete reverses journal/cash and removes items → inventory + txns + drawer.
+  await refreshData(['inventory', 'transactions', 'cashDrawer']);
   await updateUnsyncedCount();
   resetAutoSyncTimer();
   debouncedSync();
@@ -462,7 +466,8 @@ export async function applyCommissionRateToBatch(
     reference: inventoryRef(batchId),
   });
 
-  await refreshData();
+  // Only flips the batch's commission_rate field → inventory only.
+  await refreshData(['inventory']);
   await updateUnsyncedCount();
   resetAutoSyncTimer();
   debouncedSync();

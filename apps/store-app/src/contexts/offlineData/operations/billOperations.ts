@@ -14,6 +14,7 @@ import { receivedBillMonitoringService } from '../../../services/receivedBillMon
 import { validateBillCreation } from '../../../services/businessValidationService';
 import type { CashDrawerAtomicResult } from './cashDrawerTransactionOperations';
 import type { MultilingualString } from '../../../utils/multilingual';
+import type { RefreshScope } from '../offlineDataContextContract';
 import type { CurrencyCode } from '@pos-platform/shared';
 import { currencyService } from '../../../services/currencyService';
 import { assertValidCurrency } from '../../../utils/currencyValidation';
@@ -27,8 +28,8 @@ export interface BillUpdateDeleteDeps {
   storeId: string | null | undefined;
   currentBranchId: string | null;
   pushUndo: (undoData: any) => void;
-  refreshData: () => Promise<void>;
-  updateUnsyncedCount: () => Promise<void>;
+  refreshData: (scope?: RefreshScope) => Promise<void>;
+  updateUnsyncedCount: (optimisticDelta?: number) => Promise<void>;
   resetAutoSyncTimer: () => void;
   debouncedSync: () => void;
 }
@@ -38,8 +39,10 @@ export interface BillCreateDeps {
   currentBranchId: string | null;
   userProfileId: string | undefined;
   pushUndo: (undoData: any) => void;
-  refreshData: () => Promise<void>;
-  updateUnsyncedCount: () => Promise<void>;
+  refreshData: (scope?: RefreshScope) => Promise<void>;
+  /** Surgically merge the sale's new transaction rows instead of reloading the whole table. */
+  upsertTransactions: (rows: any[]) => void;
+  updateUnsyncedCount: (optimisticDelta?: number) => Promise<void>;
   resetAutoSyncTimer: () => void;
   debouncedSync: () => void;
   createCashDrawerTransactionAtomic: (
@@ -69,8 +72,8 @@ export interface BillReactivateDeps {
   currentBranchId: string | null;
   userProfileId: string | undefined;
   pushUndo: (undoData: any) => void;
-  refreshData: () => Promise<void>;
-  updateUnsyncedCount: () => Promise<void>;
+  refreshData: (scope?: RefreshScope) => Promise<void>;
+  updateUnsyncedCount: (optimisticDelta?: number) => Promise<void>;
   debouncedSync: () => void;
 }
 
@@ -131,7 +134,8 @@ export async function updateBill(
     });
   }
 
-  await refreshData();
+  // Metadata-only update (status, payment method, etc.) → reload bills only.
+  await refreshData(['bills']);
   await updateUnsyncedCount();
   resetAutoSyncTimer();
   debouncedSync();
@@ -329,7 +333,8 @@ export async function deleteBill(
     reference: (bill.bill_number ?? '').replace(/^BILL-/i, 'B-') || null,
   });
 
-  await refreshData();
+  // Cancel reverses transactions, restores inventory and may refund cash.
+  await refreshData(['transactions', 'inventory', 'bills', 'cashDrawer']);
   await updateUnsyncedCount();
   debouncedSync();
 }
@@ -347,6 +352,7 @@ export async function createBill(
     userProfileId,
     pushUndo,
     refreshData,
+    upsertTransactions,
     updateUnsyncedCount,
     resetAutoSyncTimer,
     debouncedSync,
@@ -358,6 +364,7 @@ export async function createBill(
   if (!storeId) throw new Error('No store ID available');
   if (!userProfileId) throw new Error('No user ID available - user not authenticated');
   if (!currentBranchId) throw new Error('No branch selected. Please select a branch before creating a bill.');
+
 
   const billCurrency = assertValidCurrency(
     billData.currency,
@@ -738,9 +745,26 @@ export async function createBill(
     }
   }
 
-  await refreshData();
-  await refreshCashDrawerStatus();
-  await updateUnsyncedCount();
+  // A sale creates at most two transaction rows (credit-sale + cash-drawer).
+  // Surgically merge those into state instead of reloading the ENTIRE
+  // transactions table — which is O(history) and was ~1.4s of the post-sale
+  // wait on large stores. Inventory (stock, shown on POS) and bills are cheap
+  // and still reload normally.
+  try {
+    const newTxIds = [creditSaleTransactionId, cashDrawerTransactionId].filter(Boolean) as string[];
+    if (newTxIds.length) {
+      const newTxs = (await getDB().transactions.bulkGet(newTxIds)).filter(Boolean);
+      if (newTxs.length) upsertTransactions(newTxs);
+    }
+  } catch (e) { console.warn('Transaction upsert failed (non-critical):', e); }
+  await refreshData(['inventory', 'bills']);
+  // Both reads below are O(history) and feed off-screen / self-refreshing widgets
+  // (the drawer widget also updates via the notifyCashDrawerUpdate event above,
+  // and the unsynced badge self-heals) — fire and forget so the sale returns.
+  void refreshCashDrawerStatus().catch(e => console.warn('Cash drawer refresh failed (non-critical):', e));
+  // Optimistic +1 so the unsynced badge ticks up immediately; the background
+  // recount reconciles to the exact total a moment later.
+  void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count refresh failed (non-critical):', e));
   resetAutoSyncTimer();
   debouncedSync();
 
@@ -924,7 +948,8 @@ export async function reactivateBill(
     reference: (bill.bill_number ?? '').replace(/^BILL-/i, 'B-') || null,
   });
 
-  await refreshData();
+  // Reactivation re-posts transactions, re-deducts inventory and may move cash.
+  await refreshData(['transactions', 'inventory', 'bills', 'cashDrawer']);
   await updateUnsyncedCount();
   debouncedSync();
 }

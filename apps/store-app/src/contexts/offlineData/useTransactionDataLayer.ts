@@ -66,6 +66,21 @@ export function useTransactionDataLayer(
     setTransactions(prev => (sameRowList(prev, transactionsData) ? prev : transactionsData));
   }, []);
 
+  // Surgical upsert: merge rows into state by id without re-reading the whole
+  // transactions table. Drops rows now flagged _deleted so a reversal/void is
+  // reflected too. Consumers sort themselves, so insertion order is irrelevant.
+  const upsertTransactions = useCallback((rows: Tables['transactions']['Row'][]) => {
+    if (!rows || rows.length === 0) return;
+    setTransactions(prev => {
+      const next = new Map(prev.map(t => [t.id, t]));
+      for (const row of rows) {
+        if ((row as { _deleted?: boolean })._deleted) next.delete(row.id);
+        else next.set(row.id, row);
+      }
+      return Array.from(next.values());
+    });
+  }, []);
+
   const addTransaction = useCallback(
     async (transactionData: Omit<Tables['transactions']['Insert'], 'store_id'>): Promise<void> => {
       if (!storeId) throw new Error('No store ID available');
@@ -200,5 +215,6 @@ export function useTransactionDataLayer(
     addTransaction,
     updateTransaction,
     hydrate,
+    upsertTransactions,
   };
 }

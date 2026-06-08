@@ -11,6 +11,7 @@ import { getFiscalPeriodForDate } from '../utils/fiscalPeriod';
 import { getLocalDateString } from '../utils/dateUtils';
 import type { JournalEntry } from '../types/accounting';
 import type { CurrencyCode } from '@pos-platform/shared';
+import { getTranslatedString, parseMultilingualString, createMultilingualFromString } from '../utils/multilingual';
 
 export interface RunningBalance {
   /** Per-currency running balance. Keys are present only when the currency has activity. */
@@ -467,8 +468,18 @@ export class AccountBalanceService {
         throw new Error(`Original transaction not found: ${originalTransactionId}`);
       }
 
-      // Create opposite transaction using transactionService
-      const reversalDescription = `Reversal of ${originalTransaction.description} - Reason: ${reason}`;
+      // Create opposite transaction using transactionService.
+      // Extract a human-readable string from the (possibly multilingual or
+      // stringified-JSON) original description — interpolating the object
+      // directly would render "[object Object]". Wrap the result back into a
+      // multilingual value per the project's storage convention.
+      const originalDescriptionText =
+        getTranslatedString(parseMultilingualString(originalTransaction.description), 'en') ||
+        originalTransaction.reference ||
+        originalTransaction.id.substring(0, 8);
+      const reversalDescription = createMultilingualFromString(
+        `Reversal of "${originalDescriptionText}" - Reason: ${reason}`
+      );
       const reversalAmount = originalTransaction.amount;
       const reversalCurrency = originalTransaction.currency as CurrencyCode;
       
