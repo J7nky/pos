@@ -457,6 +457,8 @@ export interface OfflineDataContextType {
   updateInventoryBatch: (id: string, updates: Partial<Tables['inventory_bills']['Update']>) => Promise<void>;
   deleteInventoryBatch: (id: string) => Promise<void>;
   applyCommissionRateToBatch: (batchId: string, commissionRate: number) => Promise<void>;
+  getInventoryBatch: (batchId: string) => Promise<any | null>;
+  getInventoryItemsForBatch: (batchId: string) => Promise<any[]>;
 
   createBill: (billData: CreateBillInput, lineItems: BillLineItemInput[], customerBalanceUpdate?: { customerId: string; amountDue: number; originalBalance: number }) => Promise<string>;
   updateBill: (billId: string, updates: Partial<Bill>, changedBy: string, changeReason?: string) => Promise<void>;

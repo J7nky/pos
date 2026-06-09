@@ -787,7 +787,9 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   // ─── Sale CRUD ─────────────────────────────────────────────────────────────
   const _buildSaleDeps = (): saleOps.SaleDeps => ({
     storeId, currentBranchId, userProfileId: userProfile?.id, currency: preferredCurrency,
-    pushUndo, refreshData, updateUnsyncedCount: syncStateLayer.updateUnsyncedCount,
+    pushUndo, refreshData,
+    upsertTransactions: transactionLayer.upsertTransactions,
+    updateUnsyncedCount: syncStateLayer.updateUnsyncedCount,
     resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer, debouncedSync: syncStateLayer.debouncedSync,
     deductInventoryQuantity: (productId, quantity) => inventoryItemOps.deductInventoryQuantity(
       { storeId, refreshData, updateUnsyncedCount: syncStateLayer.updateUnsyncedCount, debouncedSync: syncStateLayer.debouncedSync }, productId, quantity
@@ -811,6 +813,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   billOpsDepsRef.current = {
     storeId, currentBranchId,
     pushUndo, refreshData,
+    upsertTransactions: transactionLayer.upsertTransactions,
     updateUnsyncedCount: syncStateLayer.updateUnsyncedCount,
     resetAutoSyncTimer: syncStateLayer.resetAutoSyncTimer,
     debouncedSync: syncStateLayer.debouncedSync,
@@ -838,6 +841,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   billReactivateDepsRef.current = {
     storeId, currentBranchId, userProfileId: userProfile?.id,
     pushUndo, refreshData,
+    upsertTransactions: transactionLayer.upsertTransactions,
     updateUnsyncedCount: syncStateLayer.updateUnsyncedCount,
     debouncedSync: syncStateLayer.debouncedSync,
   };
@@ -929,6 +933,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       await crudHelperService.updateEntity('entities', id, { ...updates, _synced: false });
     },
     createCashDrawerUndoData, pushUndo, refreshData,
+    upsertTransactions: transactionLayer.upsertTransactions,
   };
 
   const processPaymentDelegate = useCallback(
@@ -1429,6 +1434,8 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       sales: billLayer.sales,
       inventory: inventoryLayer.inventory,
       inventoryBills: inventoryLayer.inventoryBills,
+      getInventoryBatch: inventoryLayer.getInventoryBatch,
+      getInventoryItemsForBatch: inventoryLayer.getInventoryItemsForBatch,
       transactions: transactionLayer.transactions,
       updateTransaction: transactionLayer.updateTransaction,
       expenseCategories,

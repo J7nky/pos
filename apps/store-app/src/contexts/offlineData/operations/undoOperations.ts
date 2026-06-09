@@ -190,11 +190,12 @@ export async function undoLastAction(deps: UndoDeps): Promise<boolean> {
       setCanUndo(false);
 
       // The DB transaction above already deleted the pending_syncs rows and
-      // reset _synced flags, so the new unsynced count is correct without
-      // waiting on context layer rehydration. Update the badge first so the
-      // user sees immediate confirmation, then fan out cache invalidations,
-      // events, and the heavier refreshData() in the background.
-      await updateUnsyncedCount();
+      // reset _synced flags, so the recount is correct. Fire it non-blocking —
+      // the count is a 14-table O(history) scan — so undoLastAction resolves
+      // immediately and the UndoToastManager drops its busy state; the badge
+      // reconciles a beat later, alongside the background refreshData() below.
+      // (No optimistic delta: an undo can move the count either direction.)
+      void updateUnsyncedCount().catch(e => console.warn('Unsynced count update failed (non-critical):', e));
 
       entityBalanceCache.invalidateAll();
 

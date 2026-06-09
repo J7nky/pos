@@ -146,6 +146,8 @@ export interface SupplierAdvanceDeps {
   ) => any;
   pushUndo: (data: any) => void;
   refreshData: (scope?: RefreshScope) => Promise<void>;
+  /** Surgically merge the advance's transaction rows instead of reloading the whole table. */
+  upsertTransactions: (rows: any[]) => void;
 }
 
 // ─── processPayment ─────────────────────────────────────────────────────────
@@ -517,7 +519,7 @@ export async function processSupplierAdvance(
     reviewDate?: string;
   }
 ): Promise<void> {
-  const { storeId, currentBranchId, userProfileId, userStoreId, suppliers, updateSupplier, pushUndo, refreshData } = deps;
+  const { storeId, currentBranchId, userProfileId, userStoreId, suppliers, updateSupplier, pushUndo, refreshData, upsertTransactions } = deps;
   const { supplierId, amount, currency, type, description, reviewDate } = params;
 
   if (isNaN(amount) || amount <= 0) throw new Error('Please enter a valid positive amount');
@@ -597,9 +599,19 @@ export async function processSupplierAdvance(
     reference: advanceRef,
   });
 
-  // Advances post to transactions + cash drawer AND mutate the supplier's
-  // supplier_data.advance_balances (shown on the Advances tab) → reload entities.
-  await refreshData(['transactions', 'cashDrawer', 'entities']);
+  // Surgically merge the one new advance transaction instead of reloading the
+  // whole transactions table (O(history) on large stores). The supplier's
+  // advance_balances and the cash drawer still reload — both are bounded, not
+  // history-growing.
+  try {
+    if (transactionId) {
+      const newTx = (await getDB().transactions.bulkGet([transactionId])).filter(Boolean);
+      if (newTx.length) upsertTransactions(newTx);
+    }
+  } catch (e) {
+    console.warn('Transaction upsert failed (non-critical):', e);
+  }
+  await refreshData(['cashDrawer', 'entities']);
 }
 
 // ─── deleteSupplierAdvance ───────────────────────────────────────────────────
@@ -608,7 +620,7 @@ export async function deleteSupplierAdvance(
   deps: SupplierAdvanceDeps,
   transactionId: string
 ): Promise<void> {
-  const { storeId, currentBranchId, userProfileId, suppliers, updateSupplier, pushUndo, refreshData } = deps;
+  const { storeId, currentBranchId, userProfileId, suppliers, updateSupplier, pushUndo, refreshData, upsertTransactions } = deps;
 
   const transaction = await getDB().transactions.get(transactionId);
   if (!transaction) throw new Error('Transaction not found');
@@ -643,9 +655,16 @@ export async function deleteSupplierAdvance(
     reference: transaction.reference ?? null,
   });
 
-  // Advances post to transactions + cash drawer AND mutate the supplier's
-  // supplier_data.advance_balances (shown on the Advances tab) → reload entities.
-  await refreshData(['transactions', 'cashDrawer', 'entities']);
+  // deleteTransaction voids the original row in place (status:'voided') and adds
+  // only reversal journal entries — so just the one transaction row changed.
+  // Surgically merge it instead of reloading the whole transactions table.
+  try {
+    const voided = (await getDB().transactions.bulkGet([transactionId])).filter(Boolean);
+    if (voided.length) upsertTransactions(voided);
+  } catch (e) {
+    console.warn('Transaction upsert failed (non-critical):', e);
+  }
+  await refreshData(['cashDrawer', 'entities']);
 }
 
 // ─── updateSupplierAdvance ───────────────────────────────────────────────────
@@ -667,7 +686,7 @@ export async function updateSupplierAdvance(
     reviewDate?: string;
   }
 ): Promise<void> {
-  const { storeId, currentBranchId, userProfileId, suppliers, updateSupplier, pushUndo, refreshData } = deps;
+  const { storeId, currentBranchId, userProfileId, suppliers, updateSupplier, pushUndo, refreshData, upsertTransactions } = deps;
 
   const oldTransaction = await getDB().transactions.get(transactionId);
   if (!oldTransaction) throw new Error('Transaction not found');
@@ -755,7 +774,15 @@ export async function updateSupplierAdvance(
     reference: newRef,
   });
 
-  // Advances post to transactions + cash drawer AND mutate the supplier's
-  // supplier_data.advance_balances (shown on the Advances tab) → reload entities.
-  await refreshData(['transactions', 'cashDrawer', 'entities']);
+  // Reverse-and-repost touches exactly two transaction rows: the original
+  // (voided in place by deleteTransaction) and the freshly posted advance.
+  // Surgically merge both instead of reloading the whole transactions table.
+  try {
+    const ids = [transactionId, newTransactionId].filter(Boolean) as string[];
+    const changed = (await getDB().transactions.bulkGet(ids)).filter(Boolean);
+    if (changed.length) upsertTransactions(changed);
+  } catch (e) {
+    console.warn('Transaction upsert failed (non-critical):', e);
+  }
+  await refreshData(['cashDrawer', 'entities']);
 }

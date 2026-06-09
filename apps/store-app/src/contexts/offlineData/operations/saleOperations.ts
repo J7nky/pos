@@ -60,7 +60,8 @@ export interface SaleDeps {
   currency: string;
   pushUndo: (undoData: any) => void;
   refreshData: (scope?: RefreshScope) => Promise<void>;
-  updateUnsyncedCount: () => Promise<void>;
+  upsertTransactions: (rows: any[]) => void;
+  updateUnsyncedCount: (optimisticDelta?: number) => Promise<void>;
   resetAutoSyncTimer: () => void;
   debouncedSync: () => void;
   deductInventoryQuantity: (productId: string, quantity: number) => Promise<void>;
@@ -72,13 +73,18 @@ export async function updateSale(
   id: string,
   updates: any
 ): Promise<void> {
-  const { storeId, currentBranchId, userProfileId, currency, pushUndo, refreshData, updateUnsyncedCount, resetAutoSyncTimer, debouncedSync, deductInventoryQuantity, restoreInventoryQuantity } = deps;
+  const { storeId, currentBranchId, userProfileId, currency, pushUndo, refreshData, upsertTransactions, updateUnsyncedCount, resetAutoSyncTimer, debouncedSync, deductInventoryQuantity, restoreInventoryQuantity } = deps;
   if (!storeId) throw new Error('No store ID available');
 
   if (!userProfileId) throw new Error('No user ID available - user not authenticated');
 
   const originalSale = await getDB().bill_line_items.get(id);
   if (!originalSale) throw new Error('Sale item not found');
+
+  // Track the (rare) credit-sale transaction this edit may create, so we can
+  // surgically merge it into the in-memory layer instead of reloading the whole
+  // transactions table. Only the zero-price→priced credit-bill path sets this.
+  let creditSaleTransactionId: string | null = null;
 
   const dbUpdates = BillLineItemTransforms.toDbUpdate(updates);
 
@@ -140,6 +146,7 @@ export async function updateSale(
           const entityType = entity.entity_type as 'customer' | 'supplier' | 'employee';
           const now = new Date().toISOString();
           const transactionId = createId();
+          creditSaleTransactionId = transactionId;
 
           const creditSaleTransaction: Transaction = {
             id: transactionId,
@@ -249,8 +256,19 @@ export async function updateSale(
     }
   });
 
-  await refreshData('sale');
-  await updateUnsyncedCount();
+  // Surgically merge the at-most-one new transaction instead of reloading the
+  // whole transactions table (O(history) on large stores), then refresh only
+  // the domains this edit actually mutates (inventory + bills/line-items).
+  try {
+    if (creditSaleTransactionId) {
+      const newTxs = (await getDB().transactions.bulkGet([creditSaleTransactionId])).filter(Boolean);
+      if (newTxs.length) upsertTransactions(newTxs);
+    }
+  } catch (e) {
+    console.warn('Transaction upsert failed (non-critical):', e);
+  }
+  await refreshData(['inventory', 'bills']);
+  void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count update failed (non-critical):', e));
   resetAutoSyncTimer();
   debouncedSync();
 }
@@ -317,8 +335,11 @@ export async function deleteSale(deps: SaleDeps, id: string): Promise<void> {
     });
   }
 
-  await refreshData('sale');
-  await updateUnsyncedCount();
+  // Deleting a sale line touches only bill_line_items + inventory (it creates no
+  // transactions), so refresh just those domains and keep the unsynced recount
+  // off the critical path — avoids the full transactions reload on large stores.
+  await refreshData(['inventory', 'bills']);
+  void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count update failed (non-critical):', e));
   resetAutoSyncTimer();
   debouncedSync();
 }

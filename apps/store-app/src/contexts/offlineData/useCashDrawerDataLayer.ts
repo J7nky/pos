@@ -80,7 +80,10 @@ export function useCashDrawerDataLayer(adapter: CashDrawerDataLayerAdapter): Cas
           openingAmount: amount,
         });
 
-        await refreshCashDrawerStatus();
+        // State is already set optimistically above with the exact opening
+        // values, so reconcile the recomputed status in the background instead
+        // of blocking the open.
+        void refreshCashDrawerStatus().catch(e => console.warn('Cash drawer refresh failed (non-critical):', e));
 
         if (typeof window !== 'undefined') {
           window.dispatchEvent(
@@ -109,7 +112,9 @@ export function useCashDrawerDataLayer(adapter: CashDrawerDataLayerAdapter): Cas
           changeReason: `Cash drawer opened with ${amount}`,
         });
 
-        await updateUnsyncedCount();
+        // Opening writes a session + account row; tick the badge optimistically
+        // and reconcile the exact count off the critical path.
+        void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count update failed (non-critical):', e));
         resetAutoSyncTimer();
         debouncedSync();
       } catch (error) {
@@ -177,7 +182,9 @@ export function useCashDrawerDataLayer(adapter: CashDrawerDataLayerAdapter): Cas
           changeReason: notes ? `Cash drawer closed (${actualAmount}) — ${notes}` : `Cash drawer closed (${actualAmount})`,
         });
 
-        await updateUnsyncedCount();
+        // Closing updates the session + account row; tick the badge
+        // optimistically and reconcile the exact count off the critical path.
+        void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count update failed (non-critical):', e));
         resetAutoSyncTimer();
         debouncedSync();
 

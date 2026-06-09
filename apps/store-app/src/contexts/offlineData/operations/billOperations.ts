@@ -29,6 +29,8 @@ export interface BillUpdateDeleteDeps {
   currentBranchId: string | null;
   pushUndo: (undoData: any) => void;
   refreshData: (scope?: RefreshScope) => Promise<void>;
+  /** Surgically merge the cancellation's cash-reversal transaction instead of reloading the whole table. */
+  upsertTransactions: (rows: any[]) => void;
   updateUnsyncedCount: (optimisticDelta?: number) => Promise<void>;
   resetAutoSyncTimer: () => void;
   debouncedSync: () => void;
@@ -73,6 +75,8 @@ export interface BillReactivateDeps {
   userProfileId: string | undefined;
   pushUndo: (undoData: any) => void;
   refreshData: (scope?: RefreshScope) => Promise<void>;
+  /** Surgically merge the reactivation's cash-restoration transaction instead of reloading the whole table. */
+  upsertTransactions: (rows: any[]) => void;
   updateUnsyncedCount: (optimisticDelta?: number) => Promise<void>;
   debouncedSync: () => void;
 }
@@ -147,13 +151,19 @@ export async function deleteBill(
   deletedBy: string,
   deleteReason?: string
 ): Promise<void> {
-  const { storeId, currentBranchId, pushUndo, refreshData, updateUnsyncedCount, debouncedSync } = deps;
+  const { storeId, currentBranchId, pushUndo, refreshData, upsertTransactions, updateUnsyncedCount, debouncedSync } = deps;
   if (!storeId) throw new Error('No store ID available');
 
   const now = new Date().toISOString();
 
   const bill = await getDB().bills.get(billId);
   if (!bill) throw new Error('Bill not found');
+
+  // The cancellation adds at most ONE transactions-table row (the cash refund,
+  // only for cash/card bills with amount_paid > 0). The non-cash reversal is
+  // journal-entries-only. Capture that id so we can surgically merge it instead
+  // of reloading the entire transactions table.
+  let cashReversalTransactionId: string | null = null;
 
   const lineItems = await getDB().bill_line_items.where('bill_id').equals(billId).toArray();
 
@@ -265,7 +275,7 @@ export async function deleteBill(
         try {
           const cashTransaction = billTransactions.find((t: any) => t.category === TRANSACTION_CATEGORIES.CASH_DRAWER_SALE);
           if (cashTransaction?.id) {
-            const cashReversalTransactionId = createId();
+            cashReversalTransactionId = createId();
             const reversalTransaction: Transaction = {
               id: cashReversalTransactionId,
               store_id: storeId,
@@ -333,9 +343,21 @@ export async function deleteBill(
     reference: (bill.bill_number ?? '').replace(/^BILL-/i, 'B-') || null,
   });
 
-  // Cancel reverses transactions, restores inventory and may refund cash.
-  await refreshData(['transactions', 'inventory', 'bills', 'cashDrawer']);
-  await updateUnsyncedCount();
+  // Surgically merge the at-most-one cash-reversal transaction instead of
+  // reloading the whole transactions table (O(history) on large stores), then
+  // refresh only the domains the cancellation mutates (inventory + bills). The
+  // cash-drawer reload is pushed off the critical path.
+  try {
+    if (cashReversalTransactionId) {
+      const newTxs = (await getDB().transactions.bulkGet([cashReversalTransactionId])).filter(Boolean);
+      if (newTxs.length) upsertTransactions(newTxs);
+    }
+  } catch (e) {
+    console.warn('Transaction upsert failed (non-critical):', e);
+  }
+  await refreshData(['inventory', 'bills']);
+  void refreshData(['cashDrawer']).catch(e => console.warn('Cash drawer refresh failed (non-critical):', e));
+  void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count update failed (non-critical):', e));
   debouncedSync();
 }
 
@@ -786,7 +808,7 @@ export async function reactivateBill(
   reactivatedBy: string,
   reactivationReason?: string
 ): Promise<void> {
-  const { storeId, currentBranchId, userProfileId, pushUndo, refreshData, updateUnsyncedCount, debouncedSync } = deps;
+  const { storeId, currentBranchId, userProfileId, pushUndo, refreshData, upsertTransactions, updateUnsyncedCount, debouncedSync } = deps;
   if (!storeId) throw new Error('No store ID available');
 
   const now = new Date().toISOString();
@@ -796,6 +818,11 @@ export async function reactivateBill(
   if (bill.status !== 'cancelled') {
     throw new Error('Bill is not cancelled. Only cancelled bills can be reactivated.');
   }
+
+  // Reactivation adds at most ONE transactions-table row (the cash restoration,
+  // only for cash/card bills with amount_paid > 0); the rest is journal-entries
+  // only. Capture it for a surgical merge instead of a full transactions reload.
+  let cashRestorationTransactionId: string | null = null;
 
   const lineItems = await getDB().bill_line_items.where('bill_id').equals(billId).toArray();
 
@@ -892,7 +919,7 @@ export async function reactivateBill(
     if ((bill.payment_method === 'cash' || bill.payment_method === 'card') && bill.amount_paid > 0) {
       try {
         if (cashReversalTransaction) {
-          const cashRestorationTransactionId = createId();
+          cashRestorationTransactionId = createId();
           const restorationTransaction: Transaction = {
             id: cashRestorationTransactionId,
             store_id: storeId,
@@ -948,8 +975,20 @@ export async function reactivateBill(
     reference: (bill.bill_number ?? '').replace(/^BILL-/i, 'B-') || null,
   });
 
-  // Reactivation re-posts transactions, re-deducts inventory and may move cash.
-  await refreshData(['transactions', 'inventory', 'bills', 'cashDrawer']);
-  await updateUnsyncedCount();
+  // Surgically merge the at-most-one cash-restoration transaction instead of
+  // reloading the whole transactions table, then refresh only the domains the
+  // reactivation mutates (inventory + bills). Cash-drawer reload is off the
+  // critical path.
+  try {
+    if (cashRestorationTransactionId) {
+      const newTxs = (await getDB().transactions.bulkGet([cashRestorationTransactionId])).filter(Boolean);
+      if (newTxs.length) upsertTransactions(newTxs);
+    }
+  } catch (e) {
+    console.warn('Transaction upsert failed (non-critical):', e);
+  }
+  await refreshData(['inventory', 'bills']);
+  void refreshData(['cashDrawer']).catch(e => console.warn('Cash drawer refresh failed (non-critical):', e));
+  void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count update failed (non-critical):', e));
   debouncedSync();
 }

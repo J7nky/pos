@@ -56,7 +56,6 @@ export function useTransactionDataLayer(
     userProfileId,
     pushUndo,
     resetAutoSyncTimer,
-    refreshData,
     updateUnsyncedCount,
     debouncedSync,
   } = adapter;
@@ -175,8 +174,16 @@ export function useTransactionDataLayer(
         steps: [{ op: 'delete', table: 'transactions', id: transactionId }],
       });
 
-      await refreshData();
-      await updateUnsyncedCount();
+      // Surgically merge the one new row into state instead of a full ~18-table
+      // reload. This path writes a single transaction with updateBalances:false
+      // and updateCashDrawer:false, so no other domain changed.
+      try {
+        const newTxs = (await getDB().transactions.bulkGet([transactionId])).filter(Boolean);
+        if (newTxs.length) upsertTransactions(newTxs as Tables['transactions']['Row'][]);
+      } catch (e) {
+        console.warn('Transaction upsert failed (non-critical):', e);
+      }
+      void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count update failed (non-critical):', e));
       resetAutoSyncTimer();
       debouncedSync();
     },
@@ -186,7 +193,7 @@ export function useTransactionDataLayer(
       userProfileId,
       pushUndo,
       resetAutoSyncTimer,
-      refreshData,
+      upsertTransactions,
       updateUnsyncedCount,
       debouncedSync,
     ]
@@ -200,14 +207,19 @@ export function useTransactionDataLayer(
           updated_at: new Date().toISOString(),
           _synced: false,
         });
-        await refreshData();
+        // Surgically merge the edited row instead of reloading the whole table.
+        const updated = (await getDB().transactions.bulkGet([id])).filter(Boolean);
+        if (updated.length) upsertTransactions(updated as Tables['transactions']['Row'][]);
+        // The edit flips the row to _synced:false; tick the badge immediately
+        // (the original full-refresh path never updated it until the next sync).
+        void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count update failed (non-critical):', e));
         debouncedSync();
       } catch (error) {
         console.error('Error updating transaction:', error);
         throw error;
       }
     },
-    [refreshData, debouncedSync]
+    [upsertTransactions, updateUnsyncedCount, debouncedSync]
   );
 
   return {

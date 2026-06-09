@@ -133,7 +133,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
           _synced: false,
           updated_at: new Date().toISOString(),
         });
-        await updateUnsyncedCount();
+        void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count update failed (non-critical):', e));
         recordSettingsAudit([{ field: 'low_stock_alert', old: !enabled, new: enabled }]);
         if (isOnline && !isSyncing) performSync(true);
         else debouncedSync();
@@ -161,7 +161,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
           _synced: false,
           updated_at: new Date().toISOString(),
         });
-        await updateUnsyncedCount();
+        void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count update failed (non-critical):', e));
         resetAutoSyncTimer();
         if (prev !== rate) {
           recordSettingsAudit([{ field: 'preferred_commission_rate', old: prev, new: rate }]);
@@ -188,7 +188,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
           updated_at: new Date().toISOString(),
         });
         await reloadCurrencyState?.(storeId);
-        await updateUnsyncedCount();
+        void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count update failed (non-critical):', e));
         resetAutoSyncTimer();
         if (prev !== newCurrency) {
           recordSettingsAudit(
@@ -229,7 +229,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
           updated_at: new Date().toISOString(),
         });
         await reloadCurrencyState?.(storeId);
-        await updateUnsyncedCount();
+        void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count update failed (non-critical):', e));
         resetAutoSyncTimer();
         if (prev !== rate) {
           recordSettingsAudit([{ field: 'exchange_rate', old: prev, new: rate }]);
@@ -272,7 +272,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
         }
         await getDB().stores.update(storeId, updates);
         await reloadCurrencyState?.(storeId);
-        await updateUnsyncedCount();
+        void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count update failed (non-critical):', e));
         resetAutoSyncTimer();
         if ((prevMap[currencyCode] ?? null) !== (nextMap[currencyCode] ?? null)) {
           recordSettingsAudit(
@@ -315,7 +315,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
           updated_at: new Date().toISOString(),
         });
         await reloadCurrencyState?.(storeId);
-        await updateUnsyncedCount();
+        void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count update failed (non-critical):', e));
         resetAutoSyncTimer();
         if (!prevList.includes(currencyCode)) {
           recordSettingsAudit(
@@ -394,7 +394,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
         updated_at: new Date().toISOString(),
       });
       await reloadCurrencyState?.(storeId);
-      await updateUnsyncedCount();
+      void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count update failed (non-critical):', e));
       resetAutoSyncTimer();
       recordSettingsAudit(
         [{ field: 'accepted_currencies', old: prevList, new: list }],
@@ -417,7 +417,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
           _synced: false,
           updated_at: new Date().toISOString(),
         });
-        await updateUnsyncedCount();
+        void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count update failed (non-critical):', e));
         if (prev !== newLanguage) {
           recordSettingsAudit([{ field: 'preferred_language', old: prev, new: newLanguage }]);
         }
@@ -447,7 +447,7 @@ export function useStoreSettingsDataLayer(adapter: StoreSettingsDataLayerAdapter
           _synced: false,
           updated_at: new Date().toISOString(),
         });
-        await updateUnsyncedCount();
+        void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count update failed (non-critical):', e));
         resetAutoSyncTimer();
         {
           const fiscalChanges: AuditChange[] = [];

@@ -32,7 +32,7 @@ export interface InventoryBatchDeps {
   currency: CurrencyCode;
   pushUndo: (data: any) => void;
   refreshData: (scope?: RefreshScope) => Promise<void>;
-  updateUnsyncedCount: () => Promise<void>;
+  updateUnsyncedCount: (optimisticDelta?: number) => Promise<void>;
   resetAutoSyncTimer: () => void;
   debouncedSync: () => void;
   /** Store's preferred UI language — used to localize audit summaries at write time. */
@@ -198,9 +198,14 @@ export async function addInventoryBatch(
     reference: inventoryRef(batchId),
   });
 
-  // Purchase writes inventory + purchase transactions + (cash purchases) drawer.
-  await refreshData(['inventory', 'transactions', 'cashDrawer']);
-  await updateUnsyncedCount();
+  // The Inventory page only needs the inventory domain to re-render, so await
+  // just that (cheap). The purchase's transactions + cash-drawer reload (the
+  // O(history) transactions table scan) and the unsynced recount are pushed off
+  // the critical path — they matter for the Accounting/drawer views, which
+  // reconcile a beat later. Same pattern as the payment/sale paths.
+  await refreshData(['inventory']);
+  void refreshData(['transactions', 'cashDrawer']).catch(e => console.warn('Background refresh failed (non-critical):', e));
+  void updateUnsyncedCount(1 + items.length).catch(e => console.warn('Unsynced count update failed (non-critical):', e));
   resetAutoSyncTimer();
   debouncedSync();
 
@@ -345,9 +350,12 @@ export async function updateInventoryBatch(
     });
   }
 
-  // Edit may adjust journal/cash via price/supplier change → inventory + txns + drawer.
-  await refreshData(['inventory', 'transactions', 'cashDrawer']);
-  await updateUnsyncedCount();
+  // Edit may adjust journal/cash via price/supplier change. Await only the
+  // inventory re-render; push the transactions/drawer reload + recount to the
+  // background (off the critical path on large stores).
+  await refreshData(['inventory']);
+  void refreshData(['transactions', 'cashDrawer']).catch(e => console.warn('Background refresh failed (non-critical):', e));
+  void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count update failed (non-critical):', e));
   resetAutoSyncTimer();
   debouncedSync();
 }
@@ -431,9 +439,11 @@ export async function deleteInventoryBatch(
     reference: inventoryRef(id),
   });
 
-  // Delete reverses journal/cash and removes items → inventory + txns + drawer.
-  await refreshData(['inventory', 'transactions', 'cashDrawer']);
-  await updateUnsyncedCount();
+  // Delete reverses journal/cash and removes items. Await only the inventory
+  // re-render; push the transactions/drawer reload + recount to the background.
+  await refreshData(['inventory']);
+  void refreshData(['transactions', 'cashDrawer']).catch(e => console.warn('Background refresh failed (non-critical):', e));
+  void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count update failed (non-critical):', e));
   resetAutoSyncTimer();
   debouncedSync();
 }
@@ -468,7 +478,7 @@ export async function applyCommissionRateToBatch(
 
   // Only flips the batch's commission_rate field → inventory only.
   await refreshData(['inventory']);
-  await updateUnsyncedCount();
+  void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count update failed (non-critical):', e));
   resetAutoSyncTimer();
   debouncedSync();
 }

@@ -61,7 +61,7 @@ export interface TransactionDataLayerAdapter {
   pushUndo: (data: { type: string; affected: Array<{ table: string; id: string }>; steps: any[] }) => void;
   resetAutoSyncTimer: () => void;
   refreshData: () => Promise<void>;
-  updateUnsyncedCount: () => Promise<void>;
+  updateUnsyncedCount: (optimisticDelta?: number) => Promise<void>;
   debouncedSync: () => void;
 }
 
@@ -210,7 +210,7 @@ export interface CashDrawerDataLayerAdapter {
   currency: CurrencyCode;
   exchangeRate: number;
   pushUndo: (data: { type: string; affected: Array<{ table: string; id: string }>; steps: any[] }) => void;
-  updateUnsyncedCount: () => Promise<void>;
+  updateUnsyncedCount: (optimisticDelta?: number) => Promise<void>;
   resetAutoSyncTimer: () => void;
   debouncedSync: () => void;
 }
@@ -239,7 +239,7 @@ export interface StoreSettingsDataLayerAdapter {
   userProfileId: string | undefined;
   isOnline: boolean;
   isSyncing: boolean;
-  updateUnsyncedCount: () => Promise<void>;
+  updateUnsyncedCount: (optimisticDelta?: number) => Promise<void>;
   performSync: (isAutomatic?: boolean) => Promise<unknown>;
   resetAutoSyncTimer: () => void;
   debouncedSync: () => void;

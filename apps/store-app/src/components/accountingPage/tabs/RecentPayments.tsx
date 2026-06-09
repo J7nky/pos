@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { Pagination } from '../../common/Pagination';
 import Toast from '../../common/Toast';
-import SearchableSelect from '../../common/SearchableSelect';
+import UnifiedPaymentModal from '../../common/UnifiedPaymentModal';
 import type { CurrencyCode } from '@pos-platform/shared';
 
 interface RecentPaymentsProps {
@@ -69,6 +69,43 @@ const getPaymentTypeTranslationKey = (type: PaymentType): string => {
     'Refund': 'refund'
   };
   return `payments.${typeMap[type]}`;
+};
+
+// Map a payment's transaction category to its UI "direction" (receive = they pay
+// us, pay = we pay them) and back. Editing the direction re-posts the correction
+// under the opposite category, so these must stay in lockstep with the
+// create-flow mapping in paymentOperations.ts / transactionService. The chosen
+// categories are also the only ones the list's payment/refund filter renders.
+const directionFromCategory = (
+  entityType: 'customer' | 'supplier' | 'employee',
+  category: string
+): 'receive' | 'pay' => {
+  if (entityType === 'customer') {
+    return category === TRANSACTION_CATEGORIES.CUSTOMER_REFUND ? 'pay' : 'receive';
+  }
+  if (entityType === 'supplier') {
+    return category === TRANSACTION_CATEGORIES.SUPPLIER_REFUND ? 'receive' : 'pay';
+  }
+  return category === TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT_RECEIVED ? 'receive' : 'pay';
+};
+
+const categoryFromDirection = (
+  entityType: 'customer' | 'supplier' | 'employee',
+  direction: 'receive' | 'pay'
+): string => {
+  if (entityType === 'customer') {
+    return direction === 'receive'
+      ? TRANSACTION_CATEGORIES.CUSTOMER_PAYMENT
+      : TRANSACTION_CATEGORIES.CUSTOMER_REFUND;
+  }
+  if (entityType === 'supplier') {
+    return direction === 'pay'
+      ? TRANSACTION_CATEGORIES.SUPPLIER_PAYMENT
+      : TRANSACTION_CATEGORIES.SUPPLIER_REFUND;
+  }
+  return direction === 'pay'
+    ? TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT
+    : TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT_RECEIVED;
 };
 
 export default function RecentPayments({
@@ -135,7 +172,8 @@ export default function RecentPayments({
     currency: 'USD' as CurrencyCode,
     description: '',
     reference: '',
-    entityId: ''
+    entityId: '',
+    direction: 'receive' as 'receive' | 'pay'
   });
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error'; visible: boolean }>({
     message: '',
@@ -349,10 +387,16 @@ export default function RecentPayments({
     // (monotonic-date) timeline. The previous design nested each reversal under
     // its original, which pinned a recent reversal beneath a much older payment
     // and broke chronological order. Reversal rows are styled distinctly in the
-    // table via row.isReversal. When the toggle is off, reversals stay hidden.
+    // table via row.isReversal.
+    //
+    // When the toggle is off we hide both reversal rows AND canceled (deleted)
+    // payments, so the default view shows only live/completed payments. A
+    // deleted payment isn't erased — flipping the toggle on reveals it again
+    // with its 'canceled' status. (Reversal rows live in reversalRows; the
+    // voided original is a non-reversal row carrying status === 'canceled'.)
     const groupedRows: PaymentRow[] = showReversals
       ? [...nonReversalRows, ...reversalRows]
-      : [...nonReversalRows];
+      : nonReversalRows.filter(row => row.status !== 'canceled');
 
     // Apply filters
     let filtered = groupedRows;
@@ -428,6 +472,15 @@ export default function RecentPayments({
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [entities, editingPayment]);
 
+  // The original payment's direction — used to show the "direction changed" note
+  // and detect a direction change on save. Memoized so it doesn't recompute on
+  // every keystroke in the edit form.
+  const editOriginalDirection = useMemo<'receive' | 'pay'>(() => {
+    if (!editingPayment) return 'receive';
+    const tx = transactions.find(t => t.id === editingPayment.id);
+    return tx ? directionFromCategory(editingPayment.entityType, tx.category) : 'receive';
+  }, [editingPayment, transactions]);
+
   const handleEditPayment = async (payment: PaymentRow) => {
     // Get the full transaction to populate form
     const transaction = transactions.find(t => t.id === payment.id);
@@ -446,7 +499,8 @@ export default function RecentPayments({
         currency: transaction.currency || 'USD',
         description,
         reference: transaction.reference || '',
-        entityId: transaction.entity_id || payment.entityId || ''
+        entityId: transaction.entity_id || payment.entityId || '',
+        direction: directionFromCategory(payment.entityType, transaction.category)
       });
       setEditingPayment(payment);
     }
@@ -514,10 +568,19 @@ export default function RecentPayments({
           ? ((originalTransaction.description as { en?: string; ar?: string; fr?: string }).en || (originalTransaction.description as { en?: string; ar?: string; fr?: string }).ar || (originalTransaction.description as { en?: string; ar?: string; fr?: string }).fr || JSON.stringify(originalTransaction.description))
           : JSON.stringify(originalTransaction.description));
       const descriptionChanged = originalDescription !== editForm.description;
-      const referenceChanged = (originalTransaction.reference || '') !== (editForm.reference || '');
       const entityChanged = (originalTransaction.entity_id || '') !== (editForm.entityId || '');
 
-      if (!amountChanged && !currencyChanged && !descriptionChanged && !referenceChanged && !entityChanged) {
+      // Direction edit: re-post the correction under the category that matches the
+      // chosen direction (receive ⇆ pay). When the direction is unchanged we keep
+      // the original category verbatim so an existing 'Customer Payment' row isn't
+      // silently rewritten to a synonym category.
+      const originalDirection = directionFromCategory(editingPayment.entityType, originalTransaction.category);
+      const directionChanged = editForm.direction !== originalDirection;
+      const correctedCategory = directionChanged
+        ? categoryFromDirection(editingPayment.entityType, editForm.direction)
+        : originalTransaction.category;
+
+      if (!amountChanged && !currencyChanged && !descriptionChanged && !entityChanged && !directionChanged) {
         showToast(t('payments.noChangesDetected') || 'No changes detected', 'error');
         setEditingPayment(null);
         return;
@@ -552,7 +615,7 @@ export default function RecentPayments({
       // no longer populates. updateCashDrawer is left to createTransaction's
       // category-based default so it mirrors the reversal's cash-drawer impact.
       const correctedResult = await transactionService.createTransaction({
-        category: originalTransaction.category as any,
+        category: correctedCategory as any,
         amount,
         currency: editForm.currency,
         description: correctedDescription,
@@ -584,7 +647,7 @@ export default function RecentPayments({
               correctedBy: userProfile.id,
               reversalTransactionId: reversalTransaction.id,
               correctedTransactionId: correctedResult.transactionId,
-              correctionReason: 'Payment amount/currency/description/reference corrected'
+              correctionReason: 'Payment amount/currency/description/entity/direction corrected'
             }
           });
         } catch (metadataError) {
@@ -599,8 +662,8 @@ export default function RecentPayments({
         if (amountChanged) auditChanges.push({ field: 'amount', old: originalTransaction.amount, new: amount });
         if (currencyChanged) auditChanges.push({ field: 'currency', old: originalTransaction.currency, new: editForm.currency });
         if (descriptionChanged) auditChanges.push({ field: 'description', old: originalDescription, new: editForm.description });
-        if (referenceChanged) auditChanges.push({ field: 'reference', old: originalTransaction.reference || null, new: editForm.reference || null });
         if (entityChanged) auditChanges.push({ field: 'entity_id', old: originalTransaction.entity_id || null, new: editForm.entityId || null });
+        if (directionChanged) auditChanges.push({ field: 'direction', old: originalDirection, new: editForm.direction });
         await auditService.record({
           storeId: userProfile.store_id,
           branchId: raw.currentBranchId || userProfile.store_id,
@@ -1114,102 +1177,42 @@ export default function RecentPayments({
         )}
       </div>
 
-      {/* Edit Payment Modal */}
+      {/* Edit Payment Modal — reuses the UnifiedPaymentModal in edit mode so the
+          correction form matches the record-payment UI elsewhere in the app. */}
       {editingPayment && (
-        <div className="animate-modal-fade fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="animate-modal-pop bg-white rounded-lg max-w-md w-full">
-            <div className="p-6 border-b">
-              <h2 className="text-xl font-semibold text-gray-900">
-                {t('payments.editPayment') || 'Edit Payment'}
-              </h2>
-            </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t('payments.entity') || 'Entity'} <span className="text-xs font-normal text-gray-400 capitalize">({editingPayment.entityType})</span> *
-                </label>
-                <SearchableSelect
-                  options={editEntityOptions}
-                  value={editForm.entityId}
-                  onChange={(val) => setEditForm(prev => ({ ...prev, entityId: val as string }))}
-                  placeholder={t('payments.selectEntity') || 'Select entity...'}
-                  searchPlaceholder={t('dashboard.search') || 'Search...'}
-                  portal
-                />
-                {editForm.entityId !== (editingPayment.entityId || '') && (
-                  <p className="text-xs text-amber-600 mt-1">
-                    {t('payments.changingEntityNote') || 'Changing the entity reverses the original on the previous entity and posts the correction to the selected one.'}
-                  </p>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t('payments.amount') || 'Amount'} *
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={editForm.amount}
-                  onChange={(e) => setEditForm(prev => ({ ...prev, amount: e.target.value }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t('dashboard.currency') || 'Currency'} *
-                </label>
-                <select
-                  value={editForm.currency}
-                  onChange={(e) => setEditForm(prev => ({ ...prev, currency: e.target.value as CurrencyCode }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  {/* Union with the payment's own currency so a value that's no
-                      longer in the accepted list still renders as selected. */}
-                  {Array.from(new Set([editForm.currency, ...acceptedCurrencies])).map((code) => (
-                    <option key={code} value={code}>{t(`common.currency.${code}`) || code}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t('payments.description') || 'Description'}
-                </label>
-                <textarea
-                  value={editForm.description}
-                  onChange={(e) => setEditForm(prev => ({ ...prev, description: e.target.value }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  rows={3}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t('payments.reference') || 'Reference'}
-                </label>
-                <input
-                  type="text"
-                  value={editForm.reference}
-                  onChange={(e) => setEditForm(prev => ({ ...prev, reference: e.target.value }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-              </div>
-            </div>
-            <div className="p-6 border-t flex justify-end gap-3">
-              <button
-                onClick={() => setEditingPayment(null)}
-                className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                {t('dashboard.cancel') || 'Cancel'}
-              </button>
-              <button
-                onClick={handleSaveEdit}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                {t('dashboard.save') || 'Save'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <UnifiedPaymentModal
+          isEditing
+          entityType={editingPayment.entityType}
+          editEntityOptions={editEntityOptions}
+          selectedEntityId={editForm.entityId}
+          onEntityChange={(id) => setEditForm(prev => ({ ...prev, entityId: id }))}
+          originalEntityId={editingPayment.entityId || ''}
+          // Direction is only editable for customer/supplier payments — employee
+          // payments have no displayable "received" category, so the toggle is
+          // hidden for them.
+          allowDirectionEdit={editingPayment.entityType !== 'employee'}
+          paymentDirection={editForm.direction}
+          setPaymentDirection={(dir) => setEditForm(prev => ({ ...prev, direction: dir }))}
+          originalDirection={editOriginalDirection}
+          paymentForm={{
+            amount: editForm.amount,
+            currency: editForm.currency,
+            description: editForm.description,
+            reference: editForm.reference,
+          }}
+          setPaymentForm={(action) => setEditForm(prev => {
+            const slice = {
+              amount: prev.amount,
+              currency: prev.currency,
+              description: prev.description,
+              reference: prev.reference,
+            };
+            const next = typeof action === 'function' ? action(slice) : action;
+            return { ...prev, ...next };
+          })}
+          onSubmit={(e) => { e.preventDefault(); handleSaveEdit(); }}
+          onClose={() => setEditingPayment(null)}
+        />
       )}
 
       {/* Delete Confirmation Modal */}
