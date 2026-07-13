@@ -438,6 +438,9 @@ export class CRUDHelperService {
       // read transaction so they aren't a second round-trip on every refresh.
       () => this.getEntitiesByStore('product_categories' as any, storeId),
       () => this.getEntitiesByStore('units_of_measure' as any, storeId),
+      // Inventory loss ledger (spec 019) — appended last to keep positional
+      // indices of the earlier results stable.
+      () => this.getEntitiesByStoreBranch('inventory_loss_events' as any, storeId, branchId),
     ];
 
     const startTime = Date.now();
@@ -470,6 +473,7 @@ export class CRUDHelperService {
       balanceSnapshotsData: results[16] || [],
       categoriesData: results[17] || [],
       unitsOfMeasureData: results[18] || [],
+      lossEventsData: results[19] || [],
     };
     
   }
@@ -488,7 +492,7 @@ export class CRUDHelperService {
       'cash_drawer_accounts',
       'inventory_bills', 'inventory_items', 'transactions', 'journal_entries',
       'bills', 'bill_line_items', 'cash_drawer_sessions',
-      'missed_products', 'reminders'
+      'missed_products', 'reminders', 'inventory_loss_events'
     ];
 
     // Get all table references first
@@ -537,7 +541,7 @@ export class CRUDHelperService {
       'cash_drawer_accounts',
       'inventory_bills', 'inventory_items', 'transactions', 'journal_entries',
       'bills', 'bill_line_items', 'cash_drawer_sessions',
-      'missed_products', 'reminders'
+      'missed_products', 'reminders', 'inventory_loss_events'
     ];
 
     const tables = tableNames.map(name => (db as any)[name]).filter(Boolean);

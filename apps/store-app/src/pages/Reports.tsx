@@ -15,6 +15,7 @@ import { MissedProductsHistory } from '../components/MissedProductsHistory';
 import ProfitLossReport from '../components/reports/ProfitLossReport';
 import TrialBalance from '../components/reports/TrialBalance';
 import BalanceSheet from '../components/reports/BalanceSheet';
+import SpoilageReport from '../components/reports/SpoilageReport';
 import { getLocalDateString, getTodayLocalDate } from '../utils/dateUtils';
 import { formatNumber } from '../utils/numberFormat';
 
@@ -47,7 +48,7 @@ export default function Reports() {
     startDate: getTodayLocalDate(),
     endDate: getTodayLocalDate(),
   });
-  const [reportType, setReportType] = useState<'sales' | 'inventory' | 'customers' | 'profit' | 'trial-balance' | 'balance-sheet' | 'missed-products'>('sales');
+  const [reportType, setReportType] = useState<'sales' | 'inventory' | 'customers' | 'profit' | 'trial-balance' | 'balance-sheet' | 'missed-products' | 'losses'>('sales');
 
   const filteredSales = sales.filter(sale => {
     if (!sale.createdAt) return false;
@@ -123,6 +124,7 @@ export default function Reports() {
               { value: 'trial-balance', label: 'Trial Balance', icon: Scale },
               { value: 'balance-sheet', label: 'Balance Sheet', icon: Scale },
               { value: 'missed-products', label: 'Missed Products', icon: Package },
+              { value: 'losses', label: 'Inventory Losses', icon: TrendingUp },
             ].map(({ value, label, icon: Icon }) => (
               <button
                 key={value}
@@ -422,6 +424,10 @@ export default function Reports() {
 
       {reportType === 'balance-sheet' && raw.storeId && (
         <BalanceSheet storeId={raw.storeId} branchId={raw.currentBranchId || undefined} />
+      )}
+
+      {reportType === 'losses' && (
+        <SpoilageReport startDate={dateRange.startDate} endDate={dateRange.endDate} />
       )}
 
       {reportType === 'missed-products' && (

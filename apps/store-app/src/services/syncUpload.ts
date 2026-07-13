@@ -1016,6 +1016,33 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
                 console.error('[Event] Failed to emit inventory_received event:', eventError);
               }
             }));
+          } else if (tableName === 'inventory_loss_events') {
+            // Spec 019: one inventory_loss_posted event per loss row, emitted
+            // only after the batch upsert is confirmed (upload-then-emit).
+            await Promise.allSettled((batch as any[]).map(async (record) => {
+              try {
+                await eventEmissionService.emitInventoryLossPosted(
+                  record.store_id,
+                  record.branch_id,
+                  record.id,
+                  record.created_by,
+                  {
+                    reason: record.reason,
+                    source: record.source,
+                    loss_value: record.loss_value || 0,
+                    currency: record.currency,
+                    is_commission: record.is_commission === true,
+                    // A reversed original / reversal row syncs as an update.
+                    operation: record.status === 'reversed' || record.reversal_of_id
+                      ? 'update'
+                      : 'insert',
+                  }
+                );
+                console.log(`🎯 [Event] Emitted inventory_loss_posted event for loss ${record.id}`);
+              } catch (eventError) {
+                console.error('[Event] Failed to emit inventory_loss_posted event:', eventError);
+              }
+            }));
           } else if (tableName === 'entities') {
             // Emit events for entity updates (customer/supplier balance changes).
             // Batches of 2+ collapse into a single bulk event to avoid RPC storms;

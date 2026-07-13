@@ -81,6 +81,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
     selling_price_currency?: CurrencyCode;
     weight?: string;
     sku?: string;
+    weight_tracked?: boolean;
   }>>({});
   const selectRef = useRef<HTMLDivElement | null>(null);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
@@ -111,6 +112,9 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
     [units]
   );
   const defaultUnitCode = activeUnits[0]?.code ?? 'box';
+  // Weight-tracked default: checked when the selected unit is a mass unit (kg, g, ...).
+  const isMassUnitCode = (code?: string) =>
+    units.some((u) => u.code === code && u.system_role === 'mass');
   const acList = useMemo(
     () => (acceptedCurrencies.length > 0 ? acceptedCurrencies : [preferredCurrency]),
     [acceptedCurrencies, preferredCurrency]
@@ -424,7 +428,15 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
         if (!item || !item.quantity || isNaN(Number(item.quantity)) || Number(item.quantity) < 1) {
           errors[`quantity_${pid}`] = `${t('inventory.quantityMustBeAtLeast1')}`;
         }
-        
+
+        // Weight-tracked lots must have a received weight (> 0). Existing rows in
+        // edit mode are skipped — items are not re-persisted on batch edit.
+        const isExistingRow = isEditMode && pid.startsWith('edit_');
+        const rowWeightTracked = item ? (item.weight_tracked ?? isMassUnitCode(item.unit)) : false;
+        if (!isExistingRow && rowWeightTracked && (!item?.weight || isNaN(Number(item.weight)) || Number(item.weight) <= 0)) {
+          errors[`weight_${pid}`] = `${t('losses.weightRequired')}`;
+        }
+
         // Cash purchase validation - requires price and either weight or unit quantity
         if (form.type === 'cash') {
           if (!item || !item.price || isNaN(Number(item.price)) || Number(item.price) <= 0) {
@@ -508,6 +520,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
           currency: itemCurrency,
           status: form.status || undefined,
           sku: bi.sku?.trim() || undefined,
+          weight_tracked: bi.weight_tracked ?? isMassUnitCode(bi.unit),
         };
       });
       const plasticFee = form.empty_plastic
@@ -1117,6 +1130,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                         const productName = product?.name || '';
                         
                         const isEditingExisting = isEditMode && productId.startsWith('edit_');
+                        const weightTracked = item.weight_tracked ?? isMassUnitCode(item.unit);
                         return (
                           <tr key={productId} className={`hover:bg-gray-50 transition-colors duration-150 ${isEditingExisting ? 'bg-orange-50' : ''}`}>
                             <td className="py-3 px-2 min-w-[200px]">
@@ -1210,9 +1224,29 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                   ...prev,
                                   [productId]: { ...prev[productId], weight: e.target.value }
                                 }))}
-                                className="w-20 border border-gray-300 dark:border-slate-700 rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
+                                className={`w-20 border ${errors[`weight_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
                                 placeholder={t('inventory.kg')}
                               />
+                              {!isEditingExisting && (
+                                <label className="flex items-center gap-1 mt-1 cursor-pointer" title={t('losses.weightTrackedHint')}>
+                                  <input
+                                    type="checkbox"
+                                    checked={weightTracked}
+                                    onChange={(e) => setBulkItems(prev => ({
+                                      ...prev,
+                                      [productId]: { ...prev[productId], weight_tracked: e.target.checked }
+                                    }))}
+                                    className="w-3.5 h-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <span className="text-xs text-gray-600 dark:text-slate-400 whitespace-nowrap">{t('losses.weightTracked')}</span>
+                                </label>
+                              )}
+                              {!isEditingExisting && weightTracked && (
+                                <p className="text-[10px] text-gray-500 dark:text-slate-500 mt-0.5">{t('losses.weightTrackedHint')}</p>
+                              )}
+                              {errors[`weight_${productId}`] && (
+                                <p className="text-xs text-red-600 mt-1">{errors[`weight_${productId}`]}</p>
+                              )}
                             </td>
                             {form.type !== 'commission' && (
                               <td className="py-3 px-2 w-32">

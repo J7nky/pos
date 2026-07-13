@@ -71,6 +71,10 @@ export async function addInventoryBatch(
 
   const batchRecord = {
     id: batchId,
+    // Human-readable bill reference, auto-generated at receive time. Shares the
+    // same derivation as the audit reference so the bill number lines up with
+    // its audit-log history.
+    reference_number: inventoryRef(batchId),
     supplier_id: actualSupplierId,
     status: status || undefined,
     porterage_fee,
@@ -96,24 +100,34 @@ export async function addInventoryBatch(
     const now = new Date().toISOString();
     const itemCurrencyDefault = batchCurrency || deps.currency;
 
-    const mappedItems = items.map((it) => ({
-      id: createId(),
-      product_id: (it as any).product_id ?? '',
-      quantity: (it as any).quantity ?? 0,
-      unit: ((it as any).unit as string) || 'box',
-      store_id: storeId,
-      created_at: now,
-      _synced: false,
-      weight: (it as any).weight ?? null,
-      price: (it as any).price ?? null,
-      currency: (it as any).currency ?? itemCurrencyDefault,
-      selling_price: (it as any).selling_price ?? null,
-      received_quantity: (it as any).received_quantity ?? 0,
-      batch_id: batchId as string | null,
-      sku: (it as any).sku ?? null,
-      branch_id: currentBranchId || '',
-      updated_at: now
-    }));
+    const mappedItems = items.map((it) => {
+      const weight = it.weight ?? null;
+      const quantity = it.quantity ?? 0;
+      const weightTracked = it.weight_tracked ?? false;
+      return {
+        id: createId(),
+        product_id: (it as any).product_id ?? '',
+        quantity,
+        unit: ((it as any).unit as string) || 'box',
+        store_id: storeId,
+        created_at: now,
+        _synced: false,
+        weight,
+        price: (it as any).price ?? null,
+        currency: (it as any).currency ?? itemCurrencyDefault,
+        selling_price: (it as any).selling_price ?? null,
+        received_quantity: (it as any).received_quantity ?? 0,
+        batch_id: batchId as string | null,
+        sku: (it as any).sku ?? null,
+        branch_id: currentBranchId || '',
+        updated_at: now,
+        // Loss & shrinkage (spec 019): immutable per-lot tracking mode, live
+        // on-hand weight (starts at received weight), and per-unit snapshot.
+        weight_tracked: weightTracked,
+        weight_remaining: weight,
+        nominal_unit_weight: weight != null && quantity > 0 ? weight / quantity : null
+      };
+    });
 
     await getDB().inventory_items.bulkAdd(mappedItems);
 

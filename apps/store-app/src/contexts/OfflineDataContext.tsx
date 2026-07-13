@@ -20,6 +20,7 @@ import { emitUserEvent, buildEventOptions } from '../services/eventEmissionHelpe
 // import { PAYMENT_CATEGORIES } from '../constants/paymentCategories'; // Unused
 import enLocale from '../i18n/locales/en';
 import arLocale from '../i18n/locales/ar';
+import frLocale from '../i18n/locales/fr';
 import {
   createCashDrawerAtomics,
   processCashDrawerTransaction as cashDrawerTxOps_processCashDrawerTransaction,
@@ -30,6 +31,7 @@ import * as inventoryBatchOps from './offlineData/operations/inventoryBatchOpera
 import * as paymentOps from './offlineData/operations/paymentOperations';
 import * as inventoryItemOps from './offlineData/operations/inventoryItemOperations';
 import * as saleOps from './offlineData/operations/saleOperations';
+import * as lossOps from './offlineData/operations/lossOperations';
 import * as undoOps from './offlineData/operations/undoOperations';
 
 // Domain layer hooks (12 total — each owns state + CRUD for one domain)
@@ -48,6 +50,7 @@ import {
   useNotificationsDataLayer,
   useTaxonomyDataLayer,
   useAuditLogDataLayer,
+  useLossDataLayer,
 } from './offlineData';
 import type { OfflineDataContextType, OfflineSyncSessionState, RefreshScope, RefreshDomain } from './offlineData/offlineDataContextContract';
 import { useStoreSwitchLifecycle } from './offlineData/useStoreSwitchLifecycle';
@@ -205,6 +208,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const notificationsLayer = useNotificationsDataLayer({ storeId });
   const accountingLayer = useAccountingDataLayer({});
   const inventoryLayer = useInventoryDataLayer({});
+  const lossLayer = useLossDataLayer();
   const taxonomyLayer = useTaxonomyDataLayer({
     storeId,
     currentBranchId,
@@ -505,6 +509,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
                 .then(d => entityLayer.hydrate((d as any[]) || []))
             : null,
           want.has('cashDrawer') ? cashDrawerLayer.refreshCashDrawerStatus() : null,
+          want.has('losses')
+            ? crudHelperService
+                .getEntitiesByStoreBranch('inventory_loss_events' as any, storeId, currentBranchId)
+                .then(d => lossLayer.hydrate((d as any[]) || []))
+            : null,
         ]);
         debug(`✅ Targeted refresh completed [${domains.join(', ')}]`);
       } catch (error) {
@@ -539,6 +548,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         balanceSnapshotsData,
         categoriesData,
         unitsOfMeasureData,
+        lossEventsData,
       } = await crudHelperService.loadAllStoreData(storeId, currentBranchId);
 
       // Hydrate each domain layer
@@ -548,6 +558,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       transactionLayer.hydrate(transactionsData as unknown as Tables['transactions']['Row'][]);
       await billLayer.hydrate(billsData, billLineItemsData);
       inventoryLayer.hydrate(inventoryData, batchesData);
+      lossLayer.hydrate((lossEventsData as any[]) || []);
       accountingLayer.hydrate(journalEntriesData || [], chartOfAccountsData || [], balanceSnapshotsData || []);
       // Categories + units (v64) — bundled into loadAllStoreData's shared read
       // transaction. Sort happens here because the bundle returns raw arrays.
@@ -606,6 +617,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     storeId, currentBranchId,
     productLayer.hydrate, entityLayer.hydrate, employeeLayer.hydrate,
     transactionLayer.hydrate, billLayer.hydrate, inventoryLayer.hydrate,
+    lossLayer.hydrate,
     accountingLayer.hydrate, branchLayer.hydrate,
     taxonomyLayer.hydrate,
     reloadCurrencyState, notificationsLayer.loadNotifications,
@@ -905,7 +917,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     upsertTransactions: transactionLayer.upsertTransactions,
     updateUnsyncedCount: stableUpdateUnsyncedCount,
     debouncedSync: stableDebouncedSync,
-    i18n: { en: enLocale, ar: arLocale },
+    i18n: { en: enLocale, ar: arLocale, fr: frLocale },
     language: settingsLayer.language,
   };
 
@@ -916,7 +928,7 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
     upsertTransactions: transactionLayer.upsertTransactions,
     updateUnsyncedCount: stableUpdateUnsyncedCount,
     debouncedSync: stableDebouncedSync,
-    i18n: { en: enLocale, ar: arLocale },
+    i18n: { en: enLocale, ar: arLocale, fr: frLocale },
     pushUndo,
   };
 
@@ -958,6 +970,42 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
   const updateSupplierAdvanceDelegate = useCallback(
     (transactionId: string, updates: Parameters<typeof paymentOps.updateSupplierAdvance>[2]) =>
       paymentOps.updateSupplierAdvance(supplierAdvanceDepsRef.current, transactionId, updates),
+    []
+  );
+
+  // ─── Inventory loss delegates (spec 019) ───────────────────────────────────
+  const lossOpsDepsRef = useRef<lossOps.LossOperationDeps>(null!);
+  lossOpsDepsRef.current = {
+    storeId: storeId || '',
+    currentBranchId,
+    userProfileId: userProfile?.id ?? null,
+    pushUndo,
+    refreshData,
+    upsertTransactions: transactionLayer.upsertTransactions,
+    upsertLossEvents: lossLayer.upsertLossEvents,
+    updateUnsyncedCount: stableUpdateUnsyncedCount,
+    debouncedSync: stableDebouncedSync,
+    i18n: { en: enLocale, ar: arLocale, fr: frLocale },
+    language: settingsLayer.language,
+  };
+
+  const recordInventoryLossDelegate = useCallback(
+    (params: Parameters<typeof lossOps.recordInventoryLoss>[1]) =>
+      lossOps.recordInventoryLoss(lossOpsDepsRef.current, params),
+    []
+  );
+  const reverseInventoryLossDelegate = useCallback(
+    (params: Parameters<typeof lossOps.reverseInventoryLoss>[1]) =>
+      lossOps.reverseInventoryLoss(lossOpsDepsRef.current, params),
+    []
+  );
+  const getLotCloseReconciliationDelegate = useCallback(
+    (billId: string) => lossOps.getLotCloseReconciliation(lossOpsDepsRef.current, billId),
+    []
+  );
+  const reconcileAndCloseLossesDelegate = useCallback(
+    (billId: string, classifications: lossOps.CloseClassification[]) =>
+      lossOps.reconcileAndCloseLosses(lossOpsDepsRef.current, billId, classifications),
     []
   );
 
@@ -1393,6 +1441,11 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
         updateSupplierAdvance: async () => {},
         deleteSupplierAdvance: async () => {},
         processEmployeePayment: async () => ({ success: false, error: 'No store ID available' }),
+        lossEvents: [],
+        recordInventoryLoss: async () => ({ success: false, error: 'No store ID available' }),
+        reverseInventoryLoss: async () => ({ success: false, error: 'No store ID available' }),
+        getLotCloseReconciliation: async () => [],
+        reconcileAndCloseLosses: async () => ({ success: false, lossEventIds: [], error: 'No store ID available' }),
         notifications: [],
         unreadCount: 0,
         notificationPreferences: { ...DEFAULT_NOTIFICATION_PREFS },
@@ -1587,6 +1640,13 @@ export function OfflineDataProvider({ children }: { children: ReactNode }) {
       updateSupplierAdvance: updateSupplierAdvanceDelegate,
       deleteSupplierAdvance: deleteSupplierAdvanceDelegate,
       processEmployeePayment: processEmployeePaymentDelegate,
+
+      // Inventory loss & shrinkage (spec 019)
+      lossEvents: lossLayer.lossEvents,
+      recordInventoryLoss: recordInventoryLossDelegate,
+      reverseInventoryLoss: reverseInventoryLossDelegate,
+      getLotCloseReconciliation: getLotCloseReconciliationDelegate,
+      reconcileAndCloseLosses: reconcileAndCloseLossesDelegate,
 
       // Notifications from notificationsLayer
       notifications: notificationsLayer.notifications,

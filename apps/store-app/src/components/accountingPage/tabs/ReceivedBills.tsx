@@ -366,6 +366,7 @@ export default function ReceivedBills({
         bills.push({
           id: item.id,
           batchId: item.batch_id || null,
+          referenceNumber: batch?.reference_number ?? null,
           productId: item.product_id,
           productName: getProductName(product),
           supplierId: supplierId, // Now from batch if available, otherwise from item

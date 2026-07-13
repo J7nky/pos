@@ -81,6 +81,15 @@ const VALIDATION_RULES: Record<string, ValidationRule[]> = {
     { field: 'supplier_id', required: true, type: 'uuid', foreignKey: { table: 'entities', cacheKey: 'suppliers', entityType: 'supplier' } },
     { field: 'created_by', required: true, type: 'uuid', foreignKey: { table: 'users', cacheKey: 'users' } },
   ],
+  inventory_loss_events: [
+    { field: 'store_id', required: true, type: 'uuid' },
+    { field: 'inventory_item_id', required: true, type: 'uuid' },
+    { field: 'reason', required: true, enum: ['shrinkage', 'spoiled'] },
+    { field: 'source', required: true, enum: ['auto_close', 'manual'] },
+    { field: 'quantity', required: true, type: 'number', min: 0 },
+    { field: 'loss_value', required: true, type: 'number', min: 0 },
+    { field: 'created_by', required: true, type: 'uuid', foreignKey: { table: 'users', cacheKey: 'users' } },
+  ],
 };
 
 export class DataValidationService {

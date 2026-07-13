@@ -2,7 +2,7 @@ import type { Transaction as DexieTransaction } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
 import type { SyncMetadata, PendingSync } from '../types';
 
-export const CURRENT_DB_VERSION = 70;
+export const CURRENT_DB_VERSION = 71;
 
 export const V54_STORES = {
   stores: 'id, name, preferred_currency, preferred_language, preferred_commission_rate, exchange_rate, updated_at',
@@ -241,6 +241,16 @@ export const V69_STORES = {
 // merges this delta so every other table keeps its prior schema.
 export const V70_STORES = {
   transactions: 'id, store_id, branch_id, type, category, created_at, created_by, currency, customer_id, supplier_id, employee_id, entity_id, reversal_of_transaction_id, status, [store_id+branch_id], [store_id+branch_id+status], [entity_id], _synced, _deleted',
+} as const;
+
+// v71 (inventory loss & shrinkage, spec 019): adds the lot-scoped loss ledger.
+// One row per recorded loss (shrinkage | spoiled) against a specific
+// inventory_items lot. inventory_items itself gains three NON-indexed data
+// fields (weight_tracked, weight_remaining, nominal_unit_weight) — no store
+// string change needed for those; rows are backfilled in upgradeV71.
+export const V71_STORES = {
+  inventory_loss_events:
+    'id, store_id, branch_id, inventory_item_id, batch_id, product_id, reason, source, status, transaction_id, created_at, [store_id+branch_id], _synced, _deleted',
 } as const;
 
 export async function upgradeV54(_tx: DexieTransaction): Promise<void> {
@@ -772,4 +782,36 @@ export async function upgradeV70(tx: DexieTransaction): Promise<void> {
       }
     });
   console.log(`   ✅ v70 migration complete (${superseded} superseded rows backfilled)`);
+}
+
+/**
+ * v71 (inventory loss & shrinkage, spec 019): backfills the per-lot tracking
+ * mode columns on existing inventory_items. Every pre-existing lot becomes
+ * quantity-only (`weight_tracked=false` — the mandatory-weight rule applies to
+ * lots received after this feature); `weight_remaining` starts at the frozen
+ * received `weight`; `nominal_unit_weight` = received weight ÷ received units
+ * (used to attribute a proportional weight to whole-unit losses so unit losses
+ * and residual-weight shrinkage never double-count).
+ */
+export async function upgradeV71(tx: DexieTransaction): Promise<void> {
+  console.log('🔧 Migrating database schema v70 → v71 (inventory loss & shrinkage)');
+  let backfilled = 0;
+  await tx
+    .table('inventory_items')
+    .toCollection()
+    .modify((item: Record<string, unknown>) => {
+      if (item.weight_tracked === undefined) item.weight_tracked = false;
+      const weight = typeof item.weight === 'number' ? item.weight : null;
+      if (item.weight_remaining === undefined) {
+        item.weight_remaining = weight;
+      }
+      if (item.nominal_unit_weight === undefined) {
+        const receivedQty =
+          typeof item.received_quantity === 'number' ? item.received_quantity : 0;
+        item.nominal_unit_weight =
+          weight !== null && receivedQty > 0 ? weight / receivedQty : null;
+      }
+      backfilled += 1;
+    });
+  console.log(`   ✅ v71 migration complete (${backfilled} inventory lots backfilled)`);
 }

@@ -480,8 +480,27 @@ export async function createBill(
     ...item
   }));
 
+  // FR-002 (spec 019): weight-tracked lots require a weight > 0 on every sale
+  // line. Validate before any write so nothing partially commits.
+  const linesWithLot = mappedLineItems.filter(item => item.inventory_item_id);
+  if (linesWithLot.length > 0) {
+    const lotsForValidation = await getDB().inventory_items.bulkGet(
+      linesWithLot.map(item => item.inventory_item_id!)
+    );
+    const lotValidationMap = new Map(lotsForValidation
+      .filter((lot): lot is NonNullable<typeof lot> => lot !== undefined)
+      .map(lot => [lot.id, lot])
+    );
+    for (const item of linesWithLot) {
+      const lot = lotValidationMap.get(item.inventory_item_id!);
+      if (lot?.weight_tracked === true && !(typeof item.weight === 'number' && item.weight > 0)) {
+        throw new Error(`WEIGHT_REQUIRED: ${item.product_id || item.inventory_item_id}`);
+      }
+    }
+  }
+
   // Store inventory states for undo
-  const inventoryStates: Array<{ id: string; originalQuantity: number; wasSynced: boolean }> = [];
+  const inventoryStates: Array<{ id: string; originalQuantity: number; originalWeightRemaining?: number | null; weightTracked?: boolean; wasSynced: boolean }> = [];
   let creditSaleTransactionId: string | null = null;
   let cashDrawerTransactionId: string | null = null;
   let cashDrawerResult: CashDrawerAtomicResult | null = null;
@@ -512,13 +531,36 @@ export async function createBill(
         .map(item => [item.id, item])
       );
 
-      const inventoryUpdatesToSave: any[] = [];
+      // Aggregate per lot (several lines in one bill can target the same lot)
+      const lotPortions = new Map<string, { quantity: number; weight: number }>();
       for (const item of itemsWithInventoryId) {
-        const inventoryItem = inventoryMap.get(item.inventory_item_id!);
-        if (inventoryItem && inventoryItem.quantity >= item.quantity) {
-          inventoryStates.push({ id: item.inventory_item_id!, originalQuantity: inventoryItem.quantity, wasSynced: !!inventoryItem._synced });
-          const newQuantity = Math.max(0, inventoryItem.quantity - item.quantity);
-          inventoryUpdatesToSave.push({ ...inventoryItem, quantity: newQuantity, _synced: false });
+        const portion = lotPortions.get(item.inventory_item_id!) || { quantity: 0, weight: 0 };
+        portion.quantity += item.quantity || 0;
+        portion.weight += typeof item.weight === 'number' ? item.weight : 0;
+        lotPortions.set(item.inventory_item_id!, portion);
+      }
+
+      const inventoryUpdatesToSave: any[] = [];
+      for (const [lotId, portion] of lotPortions) {
+        const inventoryItem = inventoryMap.get(lotId);
+        if (inventoryItem && inventoryItem.quantity >= portion.quantity) {
+          inventoryStates.push({
+            id: lotId,
+            originalQuantity: inventoryItem.quantity,
+            originalWeightRemaining: inventoryItem.weight_remaining ?? null,
+            weightTracked: inventoryItem.weight_tracked === true,
+            wasSynced: !!inventoryItem._synced
+          });
+          const newQuantity = Math.max(0, inventoryItem.quantity - portion.quantity);
+          inventoryUpdatesToSave.push({
+            ...inventoryItem,
+            quantity: newQuantity,
+            _synced: false,
+            // FR-002 (spec 019): weight-tracked lots decrement live weight_remaining alongside quantity
+            ...(inventoryItem.weight_tracked === true && portion.weight > 0
+              ? { weight_remaining: Math.max(0, (inventoryItem.weight_remaining ?? 0) - portion.weight) }
+              : {})
+          });
         }
       }
       if (inventoryUpdatesToSave.length > 0) {
@@ -717,7 +759,11 @@ export async function createBill(
         op: 'update',
         table: 'inventory_items',
         id: state.id,
-        changes: { quantity: state.originalQuantity, _synced: state.wasSynced }
+        changes: {
+          quantity: state.originalQuantity,
+          _synced: state.wasSynced,
+          ...(state.weightTracked ? { weight_remaining: state.originalWeightRemaining ?? null } : {})
+        }
       })),
       ...(customerBalanceUpdate && creditSaleTransactionId ? [
         { op: 'delete', table: 'transactions', id: creditSaleTransactionId },

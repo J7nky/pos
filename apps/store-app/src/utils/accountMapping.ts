@@ -160,6 +160,22 @@ export const TRANSACTION_ACCOUNT_MAPPING: Record<TransactionCategory, AccountMap
     requiresEntity: false,
     defaultEntityCode: SYSTEM_ENTITY_CODES.INTERNAL
   },
+
+  [TRANSACTION_CATEGORIES.INVENTORY_LOSS]: {
+    debitAccount: '5950', // Inventory Loss / Shrinkage (expense increases)
+    creditAccount: '1300', // Inventory (asset decreases)
+    description: 'Inventory loss / shrinkage recorded',
+    requiresEntity: false,
+    defaultEntityCode: SYSTEM_ENTITY_CODES.INTERNAL
+  },
+
+  [TRANSACTION_CATEGORIES.INVENTORY_LOSS_REVERSAL]: {
+    debitAccount: '1300', // Inventory (asset restored)
+    creditAccount: '5950', // Inventory Loss / Shrinkage (expense reduced — contra)
+    description: 'Inventory loss reversed',
+    requiresEntity: false,
+    defaultEntityCode: SYSTEM_ENTITY_CODES.INTERNAL
+  },
   
   // Employee Transactions
   [TRANSACTION_CATEGORIES.EMPLOYEE_PAYMENT]: {

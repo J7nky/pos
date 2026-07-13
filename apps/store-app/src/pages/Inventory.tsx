@@ -4,7 +4,7 @@ import { useSupabaseAuth } from '../contexts/SupabaseAuthContext';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useInventoryForms } from '../hooks/useInventoryForms';
 import { useInventoryModals } from '../hooks/useInventoryModals';
-import { Plus, Search, Package, Truck, Archive } from 'lucide-react';
+import { Plus, Search, Package, Truck, Archive, PackageX } from 'lucide-react';
 import ReceiveFormModal from '../components/inventory/ReceiveFormModal';
 import AddProductModal from '../components/inventory/AddProductModal';
 import EditProductModal from '../components/inventory/EditProductModal';
@@ -14,6 +14,9 @@ import DeleteInventoryConfirm from '../components/inventory/DeleteInventoryConfi
 import RecentReceivesTable from '../components/inventory/RecentReceivesTable';
 import ProductTable from '../components/inventory/ProductTable';
 import ArchivedInventoryTab from '../components/inventory/ArchivedInventoryTab';
+import ReportLossModal from '../components/inventory/ReportLossModal';
+import LossEventsList from '../components/inventory/LossEventsList';
+import { useRolePermissions } from '../hooks/useRolePermissions';
 import { Product, Supplier, InventoryItem } from '../types/inventory';
 import { useI18n } from '../i18n';
 import { useErrorHandler } from '../hooks/useErrorHandler';
@@ -61,8 +64,11 @@ const Inventory: React.FC = () => {
   const [recentSuppliers, setRecentSuppliers] = useLocalStorage<string[]>('inventory_recent_suppliers', []);
 
   // Main state
-  const [activeTab, setActiveTab] = useState<'receive' | 'stock' | 'archived'>('receive');
+  const [activeTab, setActiveTab] = useState<'receive' | 'stock' | 'archived' | 'losses'>('receive');
   const [searchTerm, setSearchTerm] = useState('');
+  // Spec 019: manual loss recording — gated to admin/manager (record_inventory_loss).
+  const { isManager } = useRolePermissions();
+  const [reportLossItem, setReportLossItem] = useState<any | null>(null);
 
   // Custom hooks
   const {
@@ -342,6 +348,17 @@ return (
             </span>
           )}
         </button>
+        <button
+          onClick={() => setActiveTab('losses')}
+          className={`px-4 py-2 rounded-md transition-colors flex items-center gap-1.5 ${
+            activeTab === 'losses'
+              ? 'bg-white dark:bg-slate-900 text-red-600 shadow-sm'
+              : 'text-gray-600 dark:text-slate-300'
+          }`}
+        >
+          <PackageX className="w-4 h-4" />
+          {t('losses.title')}
+        </button>
       </div>
 
       {/* Content based on active tab */}
@@ -356,15 +373,23 @@ return (
 
       {activeTab === 'receive' && (
         <div className="space-y-6">
-          <RecentReceivesTable 
-            recentReceives={recentReceives} 
-            products={products} 
+          <RecentReceivesTable
+            recentReceives={recentReceives}
+            products={products}
             suppliers={suppliers}
             inventoryBills={inventoryBills}
-            onEdit={openEditInventory} 
-            onDelete={openDeleteInventory} 
+            onEdit={openEditInventory}
+            onDelete={openDeleteInventory}
+            onReportLoss={isManager ? (item: any) => setReportLossItem(item) : undefined}
           />
         </div>
+      )}
+
+      {activeTab === 'losses' && (
+        <LossEventsList
+          canRestore={isManager}
+          showToast={(message, type) => showToast(type ?? 'success', message)}
+        />
       )}
 
       {activeTab === 'stock' && (
@@ -446,6 +471,13 @@ return (
           }}
         />
       )}
+
+      <ReportLossModal
+        isOpen={!!reportLossItem}
+        onClose={() => setReportLossItem(null)}
+        item={reportLossItem}
+        showToast={(message, type) => showToast(type ?? 'success', message)}
+      />
 
       {deleteItem && (
         <DeleteInventoryConfirm

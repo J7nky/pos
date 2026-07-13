@@ -6,6 +6,7 @@ export interface ReceivedBill {
   // Core identifiers
   id: string;
   batchId: string | null;
+  referenceNumber: string | null;
   productId: string;
   productName: string;
   supplierId: string;

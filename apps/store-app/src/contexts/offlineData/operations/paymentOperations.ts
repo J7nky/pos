@@ -95,7 +95,7 @@ export interface ProcessPaymentDeps {
   upsertTransactions: (rows: any[]) => void;
   updateUnsyncedCount: (optimisticDelta?: number) => Promise<void>;
   debouncedSync: () => void;
-  i18n: { en: any; ar: any };
+  i18n: { en: any; ar: any; fr: any };
   /** Store's preferred UI language — used to localize audit summaries at write time. */
   language?: string;
 }
@@ -110,7 +110,7 @@ export interface ProcessEmployeePaymentDeps {
   upsertTransactions: (rows: any[]) => void;
   updateUnsyncedCount: (optimisticDelta?: number) => Promise<void>;
   debouncedSync: () => void;
-  i18n: { en: any; ar: any };
+  i18n: { en: any; ar: any; fr: any };
   pushUndo: (action: any) => void;
 }
 
@@ -167,7 +167,7 @@ export async function processPayment(
   }
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const { entityType, entityId, amount, currency, description: _description, reference, storeId, createdBy, paymentDirection } = params;
+    const { entityType, entityId, amount, currency, description, reference, storeId, createdBy, paymentDirection } = params;
     const { currentBranchId, customers, suppliers, exchangeRate, createCashDrawerUndoData, pushUndo, refreshData, upsertTransactions, updateUnsyncedCount, debouncedSync, i18n } = deps;
 
     if (!currentBranchId) {
@@ -200,14 +200,25 @@ export async function processPayment(
     // column / cross-navigation).
     const paymentRef = reference || generatePaymentReference();
 
-    const transactionDescription: MultilingualString = {
-      en: (paymentDirection === 'receive'
-        ? i18n.en.payments?.paymentReceivedFrom
-        : i18n.en.payments?.paymentSentTo)?.replace('{{entityName}}', entity.name) || `Payment ${paymentDirection === 'receive' ? 'received from' : 'sent to'} ${entity.name}`,
-      ar: (paymentDirection === 'receive'
-        ? i18n.ar.payments?.paymentReceivedFrom
-        : i18n.ar.payments?.paymentSentTo)?.replace('{{entityName}}', entity.name) || `Payment ${paymentDirection === 'receive' ? 'received from' : 'sent to'} ${entity.name}`,
-    };
+    // The user-entered note takes precedence: when present it becomes the
+    // payment's description, stored as a multilingual object via the single-key
+    // helper (same text across en/ar/fr). When the field is left blank we fall
+    // back to the auto-generated bilingual "Payment received from / sent to
+    // {entity}" description.
+    const typedNote = (description || '').trim();
+    const transactionDescription: MultilingualString = typedNote
+      ? createMultilingualFromString(typedNote)
+      : {
+          en: (paymentDirection === 'receive'
+            ? i18n.en.payments?.paymentReceivedFrom
+            : i18n.en.payments?.paymentSentTo)?.replace('{{entityName}}', entity.name) || `Payment ${paymentDirection === 'receive' ? 'received from' : 'sent to'} ${entity.name}`,
+          ar: (paymentDirection === 'receive'
+            ? i18n.ar.payments?.paymentReceivedFrom
+            : i18n.ar.payments?.paymentSentTo)?.replace('{{entityName}}', entity.name) || `Payment ${paymentDirection === 'receive' ? 'received from' : 'sent to'} ${entity.name}`,
+          fr: (paymentDirection === 'receive'
+            ? i18n.fr.payments?.paymentReceivedFrom
+            : i18n.fr.payments?.paymentSentTo)?.replace('{{entityName}}', entity.name) || `Payment ${paymentDirection === 'receive' ? 'received from' : 'sent to'} ${entity.name}`,
+        };
 
     const context = {
       userId: createdBy,
@@ -354,6 +365,10 @@ export async function processEmployeePayment(
         ?.replace('{{description}}', descriptionPart)
         ?.replace('{{amount}}', amountPart) || `Employee payment to ${employee.name}`,
       ar: i18n.ar.payments?.employeePayment
+        ?.replace('{{employeeName}}', employee.name)
+        ?.replace('{{description}}', descriptionPart)
+        ?.replace('{{amount}}', amountPart) || `Employee payment to ${employee.name}`,
+      fr: i18n.fr.payments?.employeePayment
         ?.replace('{{employeeName}}', employee.name)
         ?.replace('{{description}}', descriptionPart)
         ?.replace('{{amount}}', amountPart) || `Employee payment to ${employee.name}`,

@@ -41,24 +41,8 @@ export class RolePermissionService {
       throw new Error(`User not found: ${userId}`);
     }
 
-    // Check for user-specific module access record
-    const moduleAccess = await getDB().user_module_access
-      .where('[user_id+store_id+module]')
-      .equals([userId, storeId, module])
-      .first();
-
-    if (moduleAccess) {
-      // User has specific access record - use it
-      if (!moduleAccess.can_access) {
-        throw new Error(
-          `Access denied: You do not have access to the ${module} module. ` +
-          `Contact an administrator if you need access.`
-        );
-      }
-      return; // ✅ Access granted via user-specific record
-    }
-
-    // No specific record - fall back to role defaults
+    // The deprecated `user_module_access` table has been removed from the Dexie
+    // schema. Access is now determined purely by role defaults.
     const hasRoleAccess = this.roleHasModuleAccess(user.role, module);
     if (!hasRoleAccess) {
       throw new Error(
@@ -127,24 +111,13 @@ export class RolePermissionService {
       role = user.role;
     }
 
-    // Get all user-specific module access records
-    const userAccess = await getDB().user_module_access
-      .where('[user_id+store_id]')
-      .equals([userId, storeId])
-      .toArray();
-
+    // The deprecated `user_module_access` table has been removed from the Dexie
+    // schema. Module access is now derived purely from role defaults.
     const modules: ModuleName[] = ['pos', 'inventory', 'accounting', 'reports', 'settings', 'users'];
     const access: Record<ModuleName, boolean> = {} as any;
 
     for (const module of modules) {
-      // Check for user-specific record
-      const userRecord = userAccess.find(a => a.module === module);
-      if (userRecord) {
-        access[module] = userRecord.can_access;
-      } else {
-        // Fall back to role default
-        access[module] = this.roleHasModuleAccess(role, module);
-      }
+      access[module] = this.roleHasModuleAccess(role, module);
     }
 
     return access;
@@ -186,6 +159,7 @@ export class RolePermissionService {
         // Inventory
         'create_product', 'edit_product', 'delete_product',
         'receive_inventory', 'adjust_inventory',
+        'record_inventory_loss', 'reverse_inventory_loss',
         // Accounting
         'create_transaction', 'edit_transaction', 'delete_transaction',
         'view_reports',
@@ -199,6 +173,7 @@ export class RolePermissionService {
         'apply_discount', 'access_cash_drawer',
         // Inventory
         'create_product', 'edit_product', 'receive_inventory',
+        'record_inventory_loss', 'reverse_inventory_loss',
         // Accounting
         'create_transaction', 'view_reports',
         // Users (view only)

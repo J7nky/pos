@@ -42,15 +42,18 @@ interface RecentReceivesTableProps {
   inventoryBills?: any[]; // Add inventoryBills prop for supplier lookup
   onEdit: (item: any) => void;
   onDelete: (item: any) => void;
+  /** Spec 019: opens the Report Spoilage modal for a lot. Hidden when omitted (no permission). */
+  onReportLoss?: (item: any) => void;
 }
 
-const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({ 
-  recentReceives, 
-  products, 
+const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
+  recentReceives,
+  products,
   suppliers,
   inventoryBills = [],
-  onEdit, 
-  onDelete 
+  onEdit,
+  onDelete,
+  onReportLoss
 }) => {
   const { t } = useI18n();
   const { formatAmount, preferredCurrency } = useOfflineData();
@@ -153,6 +156,12 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
         }
       }
 
+      // Search by bill reference number
+      if (batch?.reference_number &&
+          batch.reference_number.toLowerCase().includes(searchTerm.toLowerCase().trim())) {
+        return true;
+      }
+
       // Search by bill type (batch type) - both translated and original
       const batchType = item.batch_type || '';
       const translatedBatchType = translateBatchType(batchType);
@@ -232,6 +241,9 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
                     {t('common.labels.supplier')}
                   </th>
                   <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
+                    {t('inventory.referenceNumber')}
+                  </th>
+                  <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
                     {t('common.labels.type')}
                   </th>
                   <th className="px-6 py-3 text-right rtl:text-right ltr:text-left text-xs font-medium text-gray-500 dark:text-slate-300 uppercase tracking-wider">
@@ -273,6 +285,13 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
                         </div>
                       </td>
                       <td className="px-6 py-4 text-gray-900 dark:text-slate-100">{translateSupplierName(supplier)}</td>
+                      <td className="px-6 py-4 rtl:text-right ltr:text-left">
+                        {batch?.reference_number ? (
+                          <span className="font-mono text-xs text-gray-700 dark:text-slate-300">{batch.reference_number}</span>
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )}
+                      </td>
                       <td className="px-6 py-4">
                         <span className={`px-2 py-1 text-xs rounded-full ${
                           item.batch_type === 'commission'
@@ -314,12 +333,20 @@ const RecentReceivesTable: React.FC<RecentReceivesTableProps> = ({
                           >
                             {t('common.actions.edit')}
                           </button>
-                          <button 
-                            onClick={() => onDelete(item)} 
+                          <button
+                            onClick={() => onDelete(item)}
                             className="text-red-600 hover:text-red-800 hover:underline transition-colors"
                           >
                             {t('common.actions.delete')}
                           </button>
+                          {onReportLoss && (item.quantity ?? 0) > 0 && !item.is_archived && (
+                            <button
+                              onClick={() => onReportLoss(item)}
+                              className="text-amber-600 hover:text-amber-800 hover:underline transition-colors"
+                            >
+                              {t('losses.reportSpoilage')}
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

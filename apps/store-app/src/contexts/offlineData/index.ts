@@ -17,6 +17,7 @@ export { useCashDrawerDataLayer } from './useCashDrawerDataLayer';
 export { useStoreSettingsDataLayer } from './useStoreSettingsDataLayer';
 export { useNotificationsDataLayer } from './useNotificationsDataLayer';
 export { useTaxonomyDataLayer } from './useTaxonomyDataLayer';
+export { useLossDataLayer } from './useLossDataLayer';
 export type {
   TaxonomyDataLayerAdapter,
   TaxonomyDataLayerResult,

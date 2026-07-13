@@ -109,7 +109,7 @@ export const UnifiedPaymentModal: React.FC<UnifiedPaymentModalProps> = ({
                     {(!isEditing || allowDirectionEdit) && (
                         <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
                             <label className="block text-sm font-medium text-gray-700 mb-3">
-                                {t('customers.paymentDirection') || 'Payment Direction'}
+                                {t('customers.paymentDirection.paymentDirection') || 'Payment Direction'}
                             </label>
                             <div className="flex gap-4">
                                 <button
@@ -121,7 +121,7 @@ export const UnifiedPaymentModal: React.FC<UnifiedPaymentModalProps> = ({
                                         }`}
                                 >
                                     <CheckCircle className="w-5 h-5" />
-                                    <span className="font-medium">{t('customers.theyPayUs') || 'They pay us'}</span>
+                                    <span className="font-medium">{t('customers.paymentDirection.theyPayUs') || 'They pay us'}</span>
                                 </button>
                                 <button
                                     type="button"
@@ -132,7 +132,7 @@ export const UnifiedPaymentModal: React.FC<UnifiedPaymentModalProps> = ({
                                         }`}
                                 >
                                     <TrendingDown className="w-5 h-5" />
-                                    <span className="font-medium">{t('customers.wePayThem') || 'We pay them'}</span>
+                                    <span className="font-medium">{t('customers.paymentDirection.wePayThem') || 'We pay them'}</span>
                                 </button>
                             </div>
                             {isEditing && originalDirection && paymentDirection !== originalDirection && (
@@ -174,7 +174,7 @@ export const UnifiedPaymentModal: React.FC<UnifiedPaymentModalProps> = ({
                         <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-gray-700 mb-2">
                                 {isEditing
-                                    ? <>{t('payments.entity') || 'Entity'} <span className="text-xs font-normal text-gray-400 capitalize">({entityType})</span> *</>
+                                    ? <>{t('payments.entity') || 'Entity'} <span className="text-xs font-normal text-gray-400">({entityTypeLabel})</span> *</>
                                     : entityTypeLabel}
                             </label>
                             {isEditing ? (
@@ -331,6 +331,8 @@ export const UnifiedPaymentModal: React.FC<UnifiedPaymentModalProps> = ({
                         <input
                             type="text"
                             value={paymentForm.description}
+                            readOnly={isEditing}
+
                             onChange={(e) => setPaymentForm(prev => ({ ...prev, description: e.target.value }))}
                             className={`w-full border border-gray-300 rounded-lg px-3 py-2 ${inputRing}`}
                             placeholder={t('customers.paymentDescriptionPlaceholder') || 'Add a note...'}

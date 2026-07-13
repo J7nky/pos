@@ -17,6 +17,7 @@ import {
   V68_STORES,
   V69_STORES,
   V70_STORES,
+  V71_STORES,
   upgradeV54,
   upgradeV55,
   upgradeV56,
@@ -34,15 +35,17 @@ import {
   upgradeV68,
   upgradeV69,
   upgradeV70,
+  upgradeV71,
 } from './dbSchema';
 import { PAYMENT_CATEGORIES } from '../constants/paymentCategories';
 import { 
   Product, 
   Supplier, 
   Customer, 
-  InventoryItem, 
-  Transaction, 
-  Bill, 
+  InventoryItem,
+  InventoryLossEvent,
+  Transaction,
+  Bill,
   BillLineItem,
   CashDrawerAccount,
   CashDrawerSession,
@@ -149,6 +152,7 @@ class POSDatabase extends Dexie {
   inventory_items!: Table<InventoryItem, string>;
   transactions!: Table<Transaction, string>;
   inventory_bills!: Table<inventory_bills, string>;
+  inventory_loss_events!: Table<InventoryLossEvent, string>;
   users!: Table<Employee, string>;
 
   // Bill management tables
@@ -241,6 +245,7 @@ class POSDatabase extends Dexie {
     this.version(68).stores(V68_STORES).upgrade(upgradeV68);
     this.version(69).stores(V69_STORES).upgrade(upgradeV69);
     this.version(70).stores(V70_STORES).upgrade(upgradeV70);
+    this.version(71).stores(V71_STORES).upgrade(upgradeV71);
 
     // Add hooks for cash drawer tables
     this.cash_drawer_accounts.hook('creating', this.addCreateFieldsWithUpdatedAt);
@@ -284,6 +289,7 @@ class POSDatabase extends Dexie {
     const syncableTables = [
       'stores', 'branches', 'products', 'users', 'entities',
       'inventory_items', 'inventory_bills', 'transactions', 'journal_entries',
+      'inventory_loss_events',
       'bills', 'bill_line_items',
       'cash_drawer_accounts', 'cash_drawer_sessions',
       'missed_products', 'reminders', 'chart_of_accounts',

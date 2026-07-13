@@ -170,6 +170,13 @@ export const DEFAULT_CHART_OF_ACCOUNTS: Omit<ChartOfAccounts, 'id' | 'store_id'>
     account_type: 'expense',
     requires_entity: false,
     is_active: true
+  },
+  {
+    account_code: '5950',
+    account_name: 'Inventory Loss / Shrinkage',
+    account_type: 'expense',
+    requires_entity: false, // Losses are internal, not tied to an entity
+    is_active: true
   }
 ];
 

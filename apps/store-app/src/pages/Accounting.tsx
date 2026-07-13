@@ -32,6 +32,7 @@ import ActionTabsBar from '../components/accountingPage/tabs/ActionTabsBar';
 import { CashDrawerBalanceReport } from '../components/CashDrawerBalanceReport';
 import { CurrentCashDrawerStatus } from '../components/CurrentCashDrawerStatus';
 import { getLocalDateString, getTodayLocalDate } from '../utils/dateUtils';
+import type { MultilingualString } from '../utils/multilingual';
 
 export default function Accounting() {
   const { t } = useI18n();
@@ -1155,7 +1156,7 @@ export default function Accounting() {
           id: raw.createId?.() || crypto.randomUUID(),
           type: 'income',
           category: 'Commission',
-          supplier_id: bill.supplier_id,
+          entity_id: batch.supplier_id,
           amount: safeCommissionAmount.amount,
           currency: safeCommissionAmount.currency,
           description: `Commission fee for ${bill.productName} sold on behalf of ${bill.supplierName}${safeCommissionAmount.wasConverted ? ` (Originally ${fees.commission} ${currency})` : ''}`,
@@ -1179,18 +1180,40 @@ export default function Accounting() {
           currency: 'USD' as CurrencyCode,
           wasConverted: currency !== 'USD',
         };
+        // Human-readable bill reference (INV-XXXXXXXX). Falls back to a
+        // reference derived from the batch id for bills created before the
+        // reference_number column existed.
+        const billRef = batch.reference_number || `INV-${(batch.id || '').slice(0, 8).toUpperCase()}`;
+        // Label reflects the bill type — ONLY commission bills are "قومسيون".
+        // A cash/credit purchase payment is a purchase, not a commission, so it
+        // must not be labelled as commission.
+        const labelByType: Record<string, { en: string; ar: string; fr: string }> = {
+          commission: { en: 'Commission', ar: 'قومسيون', fr: 'Commission' },
+          cash: { en: 'Cash Purchase', ar: 'شراء نقدي', fr: 'Achat en espèces' },
+          credit: { en: 'Credit Purchase', ar: 'شراء بالدين', fr: 'Achat à crédit' },
+        };
+        const label = labelByType[String(billType)]
+          ?? { en: 'Supplier Payment', ar: 'دفعة مورد', fr: 'Paiement fournisseur' };
+        // Localized description, e.g. commission → "قومسيون | Bill INV-A1B2C3D4",
+        // cash → "شراء نقدي | Bill INV-A1B2C3D4". Stored as a multilingual object
+        // so it renders in the viewer's language.
+        const supplierPaymentDescription: MultilingualString = {
+          en: `${label.en} | Bill ${billRef}`,
+          ar: `${label.ar} | Bill ${billRef}`,
+          fr: `${label.fr} | Bill ${billRef}`,
+        };
         await addTransaction({
           id: raw.createId?.() || crypto.randomUUID(),
-          supplier_id: bill.supplier_id,
+          entity_id: batch.supplier_id,
           type: 'expense',
           category: PAYMENT_CATEGORIES.SUPPLIER_PAYMENT,
           amount: safeSupplierAmount.amount,
           currency: safeSupplierAmount.currency,
-          description: `Payment to ${bill.supplierName} for ${bill.productName} sales${safeSupplierAmount.wasConverted ? ` (Originally ${fees.supplierAmount} ${currency})` : ''}`,
+          description: supplierPaymentDescription as unknown as string,
           reference: generatePaymentReference(),
           created_by: userProfile?.id || ''
         });
-        console.log('supplier', bill.supplier_id, 'fees.supplierAmount', fees.supplierAmount);
+        console.log('supplier', batch.supplier_id, 'fees.supplierAmount', fees.supplierAmount);
         // Balances are now calculated from journal entries - no need to update
         // The transaction above will create journal entries which automatically update the balance
       }

@@ -10,6 +10,7 @@ import type {
   CashDrawerSession,
   ExpenseCategory,
   inventory_bills,
+  InventoryLossEvent,
   MissedProduct,
   NotificationRecord,
   NotificationType,
@@ -45,7 +46,8 @@ export type RefreshDomain =
   | 'inventory'     // inventory_items + inventory_bills → inventoryLayer
   | 'bills'         // bills + bill_line_items → billLayer
   | 'entities'      // entities (store-level) → entityLayer (names, advance_balances, max balances)
-  | 'cashDrawer';   // cash-drawer status (no table reload)
+  | 'cashDrawer'    // cash-drawer status (no table reload)
+  | 'losses';       // inventory_loss_events → lossLayer (spec 019)
 
 /**
  * Scope for refreshData():
@@ -56,6 +58,34 @@ export type RefreshDomain =
  * Narrow scopes skip the full re-render cascade.
  */
 export type RefreshScope = 'all' | 'sale' | 'financial' | RefreshDomain[];
+
+/**
+ * Per-lot close reconciliation row (spec 019, FR-007/FR-011). Computed before
+ * a received bill closes: `unaccountedUnits` are recorded as spoiled
+ * automatically at close (no manual reason choice — there is only one);
+ * weight-tracked lots additionally show the projected residual-weight
+ * shrinkage that will auto-book on confirm.
+ */
+export interface LotCloseReconciliation {
+  inventoryItemId: string;
+  productId: string;
+  /** Product display name (multilingual object or legacy string). */
+  productName: unknown;
+  weightTracked: boolean;
+  receivedQuantity: number;
+  soldQuantity: number;
+  alreadyRecordedLossUnits: number;
+  /** received − sold − recorded losses ( = current on-hand). MUST be 0 to close. */
+  unaccountedUnits: number;
+  /** Projected residual shrinkage weight if all unaccounted units are classified (weight lots only). */
+  residualShrinkageWeight: number | null;
+  estimatedShrinkageValue: number | null;
+  /** Received weight ÷ received units (weight lots) — values a whole-unit loss. */
+  nominalUnitWeight: number | null;
+  unitCost: number;
+  currency: string;
+  isCommission: boolean;
+}
 
 /** Persisted receipt/print layout settings (stored in localStorage, merged with store data). */
 type ReceiptSettings = {
@@ -344,6 +374,8 @@ export interface OfflineDataContextType {
   sales: BillLineItem[];
   inventory: InventoryItem[];
   inventoryBills: inventory_bills[];
+  /** Inventory loss ledger (spec 019): shrinkage / spoiled events, branch-scoped. */
+  lossEvents: InventoryLossEvent[];
   transactions: Tables['transactions']['Row'][];
   expenseCategories: ExpenseCategory[];
   bills: Bill[];
@@ -623,6 +655,35 @@ export interface OfflineDataContextType {
     success: boolean;
     error?: string;
   }>;
+
+  // --- Inventory loss & shrinkage (spec 019) ---
+
+  /** Manual "Report Spoilage" action against a specific lot. Spoiled/wasted is the only reason — there is no separate "lost/missing" reason anywhere in the system. Quantity-based; RBAC `record_inventory_loss`. */
+  recordInventoryLoss: (params: {
+    inventoryItemId: string;
+    reason: 'spoiled';
+    quantity: number;
+    notes?: string;
+  }) => Promise<{ success: boolean; lossEventId?: string; transactionId?: string; error?: string }>;
+
+  /** Reverse a recorded loss: restores stock, reverses any journal, keeps both rows. RBAC `reverse_inventory_loss`. */
+  reverseInventoryLoss: (params: {
+    lossEventId: string;
+  }) => Promise<{ success: boolean; lossEventId?: string; transactionId?: string; error?: string }>;
+
+  /** Per-lot close reconciliation preview for a received bill (FR-007/FR-011). */
+  getLotCloseReconciliation: (billId: string) => Promise<LotCloseReconciliation[]>;
+
+  /**
+   * Close-time loss settlement (FR-005/FR-011/FR-012): validates every lot's
+   * unaccounted units are fully accounted for as spoiled, records those unit
+   * losses, then auto-books residual-weight shrinkage per weight-tracked lot.
+   * Call BEFORE flipping the bill status to CLOSED; abort the close on failure.
+   */
+  reconcileAndCloseLosses: (
+    billId: string,
+    classifications: Array<{ inventoryItemId: string; spoiledUnits: number }>
+  ) => Promise<{ success: boolean; lossEventIds: string[]; error?: string }>;
 
   notifications: NotificationRecord[];
   unreadCount: number;

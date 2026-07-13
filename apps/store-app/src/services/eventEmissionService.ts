@@ -133,6 +133,41 @@ export class EventEmissionService {
   }
 
   /**
+   * Emit inventory_loss_posted event (spec 019 — loss & shrinkage).
+   * Called by the sync uploader after an inventory_loss_events batch is
+   * confirmed uploaded (upload-then-emit contract). One event per loss row.
+   * entity_type is 'inventory_loss_event' so catch-up consumers fetch the
+   * loss row itself; any linked owned-lot transaction rides the existing
+   * transactions upload/emit path.
+   */
+  async emitInventoryLossPosted(
+    storeId: string,
+    branchId: string,
+    lossEventId: string,
+    userId?: string,
+    metadata?: {
+      reason?: string;
+      source?: string;
+      loss_value?: number;
+      currency?: string;
+      is_commission?: boolean;
+      operation?: 'insert' | 'update' | 'reverse';
+    }
+  ): Promise<void> {
+    const { operation, ...meta } = metadata ?? {};
+    await this.emitEvent({
+      store_id: storeId,
+      branch_id: branchId,
+      event_type: 'inventory_loss_posted',
+      entity_type: 'inventory_loss_event',
+      entity_id: lossEventId,
+      operation: operation ?? 'insert',
+      user_id: userId,
+      metadata: meta,
+    });
+  }
+
+  /**
    * Emit transaction_reversed event
    * Called when a transaction is reversed/cancelled
    */

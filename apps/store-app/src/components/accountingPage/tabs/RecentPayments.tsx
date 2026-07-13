@@ -8,14 +8,16 @@ import { transactionValidationService } from '../../../services/transactionValid
 import { auditService } from '../../../services/auditService';
 import { TRANSACTION_CATEGORIES } from '../../../constants/transactionCategories';
 import { isPaymentCategory } from '../../../constants/paymentCategories';
-import { 
-  Search, 
+import { getTranslatedString, type MultilingualString, type SupportedLanguage } from '../../../utils/multilingual';
+import {
+  Search,
   User,
   DollarSign,
   RefreshCw,
   X,
   Edit,
-  Trash2
+  Trash2,
+  ChevronRight
 } from 'lucide-react';
 import { Pagination } from '../../common/Pagination';
 import Toast from '../../common/Toast';
@@ -28,7 +30,18 @@ interface RecentPaymentsProps {
 }
 
 type PaymentType = 'Customer Payment' | 'Supplier Payment' | 'Employee Payment' | 'Refund';
-type PaymentStatus = 'completed' | 'reversed' | 'canceled';
+type PaymentStatus = 'completed' | 'reversed' | 'canceled' | 'superseded';
+
+// A payment row's role within its correction chain. Drives both grouping and the
+// row's visual treatment:
+//   active     — the live head of the chain (a normal payment or the latest
+//                correction); the only role that is edit/deletable.
+//   superseded — an original that was replaced by a correction; nested + dimmed.
+//   reversal   — the offsetting entry created when a payment is corrected or
+//                voided; nested + dimmed, amount in red.
+//   voided     — a payment that was deleted/canceled (a chain tail with no active
+//                correction); shown as a canceled head once corrections revealed.
+type PaymentRole = 'active' | 'superseded' | 'reversal' | 'voided';
 
 interface PaymentRow {
   id: string;
@@ -45,9 +58,17 @@ interface PaymentRow {
   createdById: string;
   isReversal?: boolean;
   reversalOfTransactionId?: string | null;
-  originalAmount?: number; // Original amount for corrected payments
-  originalCurrency?: CurrencyCode; // Original currency for corrected payments
-  isCorrected?: boolean; // Whether this is a corrected payment
+  role: PaymentRole;
+  chainRootId: string; // id of the chain's first original — the grouping key
+}
+
+// One correction chain, collapsed to a single head row plus the previous
+// ("original") payments that nest beneath it when corrections are revealed.
+// Reversals are excluded from display — they stay in the ledger only.
+interface PaymentGroup {
+  head: PaymentRow;        // active (or voided) tail of the chain
+  nested: PaymentRow[];    // previous originals (superseded), chronological
+  correctionCount: number; // number of correction cycles (= superseded originals)
 }
 
 interface DeletionDetails {
@@ -111,7 +132,7 @@ const categoryFromDirection = (
 export default function RecentPayments({
   formatCurrencyWithSymbol
 }: RecentPaymentsProps) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const raw = useOfflineData();
   const { userProfile } = useSupabaseAuth();
 
@@ -124,7 +145,9 @@ export default function RecentPayments({
     end: ''
   });
   const [currentPage, setCurrentPage] = useState(1);
-  const [showReversals, setShowReversals] = useState(false);
+  const [showCorrected, setShowCorrected] = useState(false);
+  // Expanded correction chains, keyed by head transaction id. Collapsed by default.
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [userNameCache, setUserNameCache] = useState<Record<string, string>>({});
   const [editingPayment, setEditingPayment] = useState<PaymentRow | null>(null);
   const [deletingPayment, setDeletingPayment] = useState<PaymentRow | null>(null);
@@ -188,6 +211,17 @@ export default function RecentPayments({
   // hardcoded USD/LBP pair, so a store that accepts other currencies sees them.
   const acceptedCurrencies = raw.acceptedCurrencies || [];
 
+  // Localized entity-type label. The table previously rendered the raw code
+  // (`customer`/`supplier`/`employee`) and merely CSS-capitalized it, so it
+  // stayed English ("Customer") even in an Arabic/French UI. Routes the code
+  // through t() — mirrors the labels UnifiedPaymentModal uses.
+  const entityTypeLabel = (entityType: 'customer' | 'supplier' | 'employee'): string =>
+    entityType === 'customer'
+      ? (t('customers.customer') || 'Customer')
+      : entityType === 'supplier'
+        ? (t('customers.supplier') || 'Supplier')
+        : (t('customers.employee') || 'Employee');
+
   // Load user names into cache
   useEffect(() => {
     async function loadUserNames() {
@@ -221,219 +255,198 @@ export default function RecentPayments({
     }
   }, [transactions]);
 
-  // Filter and process payment transactions
-  const paymentRows = useMemo(() => {
-    // Filter payment transactions that have entity_id for customer, supplier, or employee
-    // This unified approach uses entity_id instead of separate customer_id/supplier_id/employee_id fields
-    let allPaymentTransactions = transactions.filter(t => {
-      // Must be a payment category OR a refund. Refunds use TRANSACTION_CATEGORIES
-      // (Customer/Supplier Refund), which are not part of PAYMENT_CATEGORIES, so
-      // isPaymentCategory() alone would exclude them from the payments list.
+  // Build the correction-chain groups shown in the table. Each chain collapses to
+  // one head row (the live payment, or — once corrections are revealed — a voided
+  // tail) with its superseded originals and reversals nested beneath it.
+  const paymentGroups = useMemo<PaymentGroup[]>(() => {
+    type Tx = (typeof transactions)[number];
+    // Structural filter: payment/refund categories that carry an entity_id. Date,
+    // currency, search, type and status filters are applied per-CHAIN below (on
+    // the head row) so a filter can't split a chain by hiding one of its members.
+    const paymentTx = transactions.filter(t => {
+      // Reversals are accounting machinery — the offsetting entry emitted when a
+      // payment is corrected or deleted. They stay in the ledger (the
+      // correction/deletion flows still create them so double-entry balances) but
+      // are never shown here: the user sees only the original/canceled payment,
+      // not the reversal that nets it out.
+      if (t.is_reversal) return false;
+      // Refunds use TRANSACTION_CATEGORIES (Customer/Supplier Refund), which are
+      // not part of PAYMENT_CATEGORIES, so isPaymentCategory() alone would exclude
+      // them from the payments list.
       const isRefund = t.category === TRANSACTION_CATEGORIES.CUSTOMER_REFUND ||
                        t.category === TRANSACTION_CATEGORIES.SUPPLIER_REFUND;
-      if (!isPaymentCategory(t.category) && !isRefund) {
-        return false;
-      }
-
-      // Must have an entity_id (unified field)
-      if (!t.entity_id) {
-        return false;
-      }
-
-      // Apply date range filter
-      if (dateRange.start && t.created_at && new Date(t.created_at) < new Date(dateRange.start)) {
-        return false;
-      }
-      if (dateRange.end && t.created_at && new Date(t.created_at) > new Date(dateRange.end)) {
-        return false;
-      }
-
-      // Apply currency filter
-      if (currencyFilter !== 'all' && t.currency !== currencyFilter) {
-        return false;
-      }
-
+      if (!isPaymentCategory(t.category) && !isRefund) return false;
+      if (!t.entity_id) return false;
       return true;
     });
 
-    // Create a map of entity_id to entity for quick lookups
+    // Entity lookup (skip soft-deleted entities).
     const entityMap = new Map<string, typeof entities[0]>();
-    entities.forEach(e => {
-      if (!e._deleted) {
-        entityMap.set(e.id, e);
-      }
-    });
+    entities.forEach(e => { if (!e._deleted) entityMap.set(e.id, e); });
 
-    // Filter to only include transactions with valid entity types (customer, supplier, employee)
-    // We'll check entity types asynchronously in the mapping step below
-
-    // A row is "superseded" (was corrected and replaced) when its typed status
-    // says so. We OR in the legacy `metadata.corrected` flag purely as a
-    // backward-compat fallback for any row that predates the v70 migration or
-    // arrives from a not-yet-migrated server — the typed column is authoritative.
-    const isSuperseded = (t: typeof transactions[number]): boolean =>
+    // Role predicates. `superseded`/`voided` come from the typed status column
+    // (authoritative since the v70 migration); the legacy metadata flags and
+    // `_deleted` are OR'd in as a back-compat fallback for rows that predate the
+    // migration or arrive from a not-yet-migrated server.
+    const isSuperseded = (t: Tx): boolean =>
       t.status === 'superseded' || (t as any).metadata?.corrected === true;
+    const isVoided = (t: Tx): boolean =>
+      t.status === 'voided' || (t as any).metadata?.deleted === true || (t as any)._deleted === true;
 
-    // Build a map of correction id → the superseded row's amount/currency, so a
-    // correction can display the prior ("original") amount. Keyed off the typed
-    // superseded_by_transaction_id, falling back to the legacy metadata pointer.
-    const correctedTransactionMap = new Map<string, { amount: number; currency: CurrencyCode }>();
-    transactions.forEach(t => {
-      if (!isSuperseded(t)) return;
-      const correctionId = (t.superseded_by_transaction_id || (t as any).metadata?.correctedTransactionId) as string | undefined;
-      if (!correctionId) return;
-      correctedTransactionMap.set(correctionId, {
-        amount: t.amount,
-        currency: t.currency as CurrencyCode
-      });
-    });
+    // O(1) chain-root resolution. A correction carries chain_root_id forward, so
+    // it resolves directly; a reversal has no chain_root_id of its own and is
+    // resolved through the original it reverses; a first original (or a
+    // never-corrected payment) is its own root.
+    const allById = new Map(transactions.map(t => [t.id, t]));
+    const rootCache = new Map<string, string>();
+    const rootOf = (t: Tx, seen: Set<string> = new Set()): string => {
+      const cached = rootCache.get(t.id);
+      if (cached) return cached;
+      if (seen.has(t.id)) return t.id; // defensive cycle guard
+      seen.add(t.id);
+      let root: string;
+      if (t.is_reversal && t.reversal_of_transaction_id) {
+        const target = allById.get(t.reversal_of_transaction_id);
+        root = target ? rootOf(target, seen) : (t.chain_root_id || t.id);
+      } else if (t.chain_root_id) {
+        root = t.chain_root_id;
+      } else if (t.reversal_of_transaction_id) {
+        const target = allById.get(t.reversal_of_transaction_id);
+        root = target ? rootOf(target, seen) : t.id;
+      } else {
+        root = t.id;
+      }
+      rootCache.set(t.id, root);
+      return root;
+    };
 
-    // Hide superseded originals from the list — they were replaced by a correction.
-    allPaymentTransactions = allPaymentTransactions.filter(t => !isSuperseded(t));
+    // Map a transaction to a row, resolving its entity and chain role. Returns
+    // null for rows whose entity isn't a customer/supplier/employee (cash/internal
+    // entities never appear in the payments list).
+    const mapToRow = (transaction: Tx): PaymentRow | null => {
+      const entity = entityMap.get(transaction.entity_id || '');
+      if (!entity) return null;
+      const entityType = entity.entity_type;
+      if (entityType !== 'customer' && entityType !== 'supplier' && entityType !== 'employee') {
+        return null;
+      }
 
-    // Map to rows with entity and user names
-    // Note: We filter by entity type here since we need to check entities table
-    const rows = allPaymentTransactions
-      .map((transaction: any): PaymentRow | null => {
-        // Get entity from entity_id
-        const entityId = transaction.entity_id;
-        if (!entityId) {
-          return null; // Skip transactions without entity_id
-        }
+      let type: PaymentType = 'Customer Payment';
+      if (entityType === 'employee') {
+        type = 'Employee Payment';
+      } else if (entityType === 'supplier') {
+        type = (transaction.category === TRANSACTION_CATEGORIES.SUPPLIER_REFUND ||
+                transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_REFUND)
+          ? 'Refund' : 'Supplier Payment';
+      } else {
+        type = (transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_REFUND ||
+                transaction.category === TRANSACTION_CATEGORIES.SUPPLIER_REFUND)
+          ? 'Refund' : 'Customer Payment';
+      }
 
-        const entity = entityMap.get(entityId);
-        if (!entity) {
-          return null; // Skip if entity not found
-        }
-
-        // Only include customer, supplier, or employee entities (exclude cash/internal)
-        const entityType = entity.entity_type;
-        if (entityType !== 'customer' && entityType !== 'supplier' && entityType !== 'employee') {
-          return null; // Skip cash drawer and internal entities
-        }
-
-        // Determine payment type based on category and entity type
-        let type: PaymentType = 'Customer Payment';
-        
-        if (entityType === 'employee') {
-          type = 'Employee Payment';
-        } else if (entityType === 'supplier') {
-          if (transaction.category === TRANSACTION_CATEGORIES.SUPPLIER_REFUND ||
-              transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_REFUND) {
-            type = 'Refund';
-          } else {
-            type = 'Supplier Payment';
-          }
-        } else if (entityType === 'customer') {
-          if (transaction.category === TRANSACTION_CATEGORIES.CUSTOMER_REFUND ||
-              transaction.category === TRANSACTION_CATEGORIES.SUPPLIER_REFUND) {
-            type = 'Refund';
-          } else {
-            type = 'Customer Payment';
-          }
-        }
-
-        // Get entity name from entity object
-        const entityName = entity.name || 'Unknown';
-
-        // Determine status: canceled (status='voided' / legacy metadata.deleted) > reversed (_deleted) > completed
-        const transactionWithMetadata = transaction as any;
-        const status: PaymentStatus = (transaction.status === 'voided' || transactionWithMetadata.metadata?.deleted === true)
+      // Role precedence: a reversal is always a reversal; otherwise a superseded
+      // original; otherwise a voided/canceled tail; otherwise the live head.
+      const role: PaymentRole = transaction.is_reversal
+        ? 'reversal'
+        : isSuperseded(transaction)
+          ? 'superseded'
+          : isVoided(transaction)
+            ? 'voided'
+            : 'active';
+      const status: PaymentStatus = role === 'reversal'
+        ? 'reversed'
+        : role === 'voided'
           ? 'canceled'
-          : transaction._deleted
-            ? 'reversed'
+          : role === 'superseded'
+            ? 'superseded'
             : 'completed';
 
-        // Get created by name
-        const createdByName = transaction.created_by 
+      return {
+        id: transaction.id,
+        date: transaction.created_at || (transaction as any).updated_at || '',
+        type,
+        entityName: entity.name || 'Unknown',
+        entityType: entityType as 'customer' | 'supplier' | 'employee',
+        entityId: transaction.entity_id || undefined,
+        amount: transaction.amount,
+        currency: transaction.currency || 'USD',
+        status,
+        reference: transaction.reference,
+        createdByName: transaction.created_by
           ? (userNameCache[transaction.created_by] || 'Unknown')
-          : 'System';
+          : 'System',
+        createdById: transaction.created_by || '',
+        isReversal: transaction.is_reversal || false,
+        reversalOfTransactionId: transaction.reversal_of_transaction_id || null,
+        role,
+        chainRootId: rootOf(transaction),
+      };
+    };
 
-        // Check if this is a corrected transaction
-        const isCorrected = correctedTransactionMap.has(transaction.id);
-        const originalData = isCorrected ? correctedTransactionMap.get(transaction.id) : undefined;
-        const originalAmount = originalData?.amount;
-        const originalCurrency = originalData?.currency;
-
-        return {
-          id: transaction.id,
-          date: transaction.created_at || transaction.updated_at || '',
-          type,
-          entityName,
-          entityType: entityType as 'customer' | 'supplier' | 'employee',
-          entityId: entityId,
-          amount: transaction.amount,
-          currency: transaction.currency || 'USD',
-          status,
-          reference: transaction.reference,
-          createdByName,
-          createdById: transaction.created_by || '',
-          isReversal: transaction.is_reversal || false,
-          reversalOfTransactionId: transaction.reversal_of_transaction_id || null,
-          originalAmount,
-          originalCurrency,
-          isCorrected: isCorrected || false
-        };
-      })
-      .filter((row): row is PaymentRow => row !== null); // Filter out null entries
-
-    // Separate non-reversal and reversal transactions
-    const nonReversalRows = rows.filter(row => !row.isReversal);
-    const reversalRows = rows.filter(row => row.isReversal);
-
-    // Build the displayed list. When "show corrected & reversed" is on we render
-    // a FLAT list where every payment and every reversal is its own top-level
-    // row, so the date sort below produces a strictly chronological
-    // (monotonic-date) timeline. The previous design nested each reversal under
-    // its original, which pinned a recent reversal beneath a much older payment
-    // and broke chronological order. Reversal rows are styled distinctly in the
-    // table via row.isReversal.
-    //
-    // When the toggle is off we hide both reversal rows AND canceled (deleted)
-    // payments, so the default view shows only live/completed payments. A
-    // deleted payment isn't erased — flipping the toggle on reveals it again
-    // with its 'canceled' status. (Reversal rows live in reversalRows; the
-    // voided original is a non-reversal row carrying status === 'canceled'.)
-    const groupedRows: PaymentRow[] = showReversals
-      ? [...nonReversalRows, ...reversalRows]
-      : nonReversalRows.filter(row => row.status !== 'canceled');
-
-    // Apply filters
-    let filtered = groupedRows;
-
-    // Search filter
-    if (searchTerm) {
-      const searchLower = searchTerm.toLowerCase();
-      filtered = filtered.filter(row =>
-        row.entityName.toLowerCase().includes(searchLower) ||
-        row.reference?.toLowerCase().includes(searchLower) ||
-        row.createdByName.toLowerCase().includes(searchLower)
-      );
+    // Group every payment row by its chain root.
+    const groupsMap = new Map<string, PaymentRow[]>();
+    for (const transaction of paymentTx) {
+      const row = mapToRow(transaction);
+      if (!row) continue;
+      const existing = groupsMap.get(row.chainRootId);
+      if (existing) existing.push(row);
+      else groupsMap.set(row.chainRootId, [row]);
     }
 
-    // Type filter
-    if (typeFilter !== 'all') {
-      filtered = filtered.filter(row => row.type === typeFilter);
+    const byDateAsc = (a: PaymentRow, b: PaymentRow) =>
+      new Date(a.date).getTime() - new Date(b.date).getTime();
+
+    // Collapse each chain to a head + its previous originals. Reversals never
+    // reach this point (filtered above), so the only nested rows are the prior
+    // ("original") payments that corrections replaced.
+    const groups: PaymentGroup[] = [];
+    for (const rows of groupsMap.values()) {
+      const superseded = rows.filter(r => r.role === 'superseded');
+
+      // The head is the chain's tail: the one row that wasn't superseded — active
+      // when live, voided when the payment was deleted/canceled.
+      const head = rows.find(r => r.role === 'active')
+                || rows.find(r => r.role === 'voided')
+                || rows.find(r => r.role !== 'superseded');
+      if (!head) continue; // chain of only superseded rows — nothing live to show
+
+      // Previous originals, oldest first → multiple correction cycles read
+      // chronologically beneath the head.
+      const nested = [...superseded].sort(byDateAsc);
+      groups.push({ head, nested, correctionCount: superseded.length });
     }
 
-    // Status filter
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter(row => row.status === statusFilter);
-    }
+    // Per-chain (head-level) filters.
+    const searchLower = searchTerm.toLowerCase();
+    const filtered = groups.filter(({ head }) => {
+      // Default view shows only live (active) chains; corrected/voided/reversed
+      // chains appear only when "show corrected & reversed" is on.
+      if (!showCorrected && head.role !== 'active') return false;
 
-    // Sort by date (newest first)
-    filtered.sort((a, b) => {
-      const dateA = new Date(a.date).getTime();
-      const dateB = new Date(b.date).getTime();
-      return dateB - dateA;
+      if (dateRange.start && head.date && new Date(head.date) < new Date(dateRange.start)) return false;
+      if (dateRange.end && head.date && new Date(head.date) > new Date(dateRange.end)) return false;
+      if (currencyFilter !== 'all' && head.currency !== currencyFilter) return false;
+
+      if (searchTerm) {
+        const matches = head.entityName.toLowerCase().includes(searchLower) ||
+          head.reference?.toLowerCase().includes(searchLower) ||
+          head.createdByName.toLowerCase().includes(searchLower);
+        if (!matches) return false;
+      }
+      if (typeFilter !== 'all' && head.type !== typeFilter) return false;
+      if (statusFilter !== 'all' && head.status !== statusFilter) return false;
+      return true;
     });
 
-    return filtered;
-  }, [transactions, entities, userNameCache, searchTerm, typeFilter, statusFilter, currencyFilter, dateRange, showReversals]);
+    // Newest chain first (by head date).
+    filtered.sort((a, b) => new Date(b.head.date).getTime() - new Date(a.head.date).getTime());
 
-  // Pagination
-  const totalPages = Math.ceil(paymentRows.length / ITEMS_PER_PAGE);
-  const paginatedRows = paymentRows.slice(
+    return filtered;
+  }, [transactions, entities, userNameCache, searchTerm, typeFilter, statusFilter, currencyFilter, dateRange, showCorrected]);
+
+  // Pagination — one item per chain (the head row).
+  const totalPages = Math.ceil(paymentGroups.length / ITEMS_PER_PAGE);
+  const paginatedGroups = paymentGroups.slice(
     (currentPage - 1) * ITEMS_PER_PAGE,
     currentPage * ITEMS_PER_PAGE
   );
@@ -441,7 +454,7 @@ export default function RecentPayments({
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, typeFilter, statusFilter, currencyFilter, dateRange, showReversals]);
+  }, [searchTerm, typeFilter, statusFilter, currencyFilter, dateRange, showCorrected]);
 
   const clearFilters = () => {
     setSearchTerm('');
@@ -449,12 +462,22 @@ export default function RecentPayments({
     setStatusFilter('all');
     setCurrencyFilter('all');
     setDateRange({ start: '', end: '' });
-    setShowReversals(false);
+    setShowCorrected(false);
     setCurrentPage(1);
   };
 
-  const hasActiveFilters = searchTerm || typeFilter !== 'all' || statusFilter !== 'all' || 
-                          currencyFilter !== 'all' || dateRange.start || dateRange.end || showReversals;
+  const hasActiveFilters = searchTerm || typeFilter !== 'all' || statusFilter !== 'all' ||
+                          currencyFilter !== 'all' || dateRange.start || dateRange.end || showCorrected;
+
+  // Expand/collapse a correction chain (keyed by its head id).
+  const toggleGroup = (headId: string) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(headId)) next.delete(headId);
+      else next.add(headId);
+      return next;
+    });
+  };
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type, visible: true });
@@ -485,14 +508,16 @@ export default function RecentPayments({
     // Get the full transaction to populate form
     const transaction = transactions.find(t => t.id === payment.id);
     if (transaction) {
-      // Get description - handle multilingual strings
-      let description = '';
-      if (typeof transaction.description === 'string') {
-        description = transaction.description;
-      } else if (transaction.description && typeof transaction.description === 'object') {
-        const descObj = transaction.description as { en?: string; ar?: string; fr?: string };
-        description = descObj.en || descObj.ar || descObj.fr || JSON.stringify(transaction.description);
-      }
+      // Show the description in the ACTIVE UI language — an Arabic UI must show
+      // the Arabic text, not the English fallback (the read-only field would
+      // otherwise read "Payment received from X" under an Arabic label).
+      // getTranslatedString handles both plain-string (legacy) and
+      // multilingual-object descriptions, falling back across languages when a
+      // given translation is missing.
+      const description = getTranslatedString(
+        transaction.description as MultilingualString,
+        language as SupportedLanguage
+      );
 
       setEditForm({
         amount: transaction.amount.toString(),
@@ -567,7 +592,9 @@ export default function RecentPayments({
         : (originalTransaction.description && typeof originalTransaction.description === 'object'
           ? ((originalTransaction.description as { en?: string; ar?: string; fr?: string }).en || (originalTransaction.description as { en?: string; ar?: string; fr?: string }).ar || (originalTransaction.description as { en?: string; ar?: string; fr?: string }).fr || JSON.stringify(originalTransaction.description))
           : JSON.stringify(originalTransaction.description));
-      const descriptionChanged = originalDescription !== editForm.description;
+      // Description is read-only in the correction modal, so it can never change —
+      // it is carried forward verbatim (see correctedDescription below) and is not
+      // part of the change-detection or audit deltas.
       const entityChanged = (originalTransaction.entity_id || '') !== (editForm.entityId || '');
 
       // Direction edit: re-post the correction under the category that matches the
@@ -580,7 +607,7 @@ export default function RecentPayments({
         ? categoryFromDirection(editingPayment.entityType, editForm.direction)
         : originalTransaction.category;
 
-      if (!amountChanged && !currencyChanged && !descriptionChanged && !entityChanged && !directionChanged) {
+      if (!amountChanged && !currencyChanged && !entityChanged && !directionChanged) {
         showToast(t('payments.noChangesDetected') || 'No changes detected', 'error');
         setEditingPayment(null);
         return;
@@ -602,8 +629,11 @@ export default function RecentPayments({
         return;
       }
 
-      // Step 2: Create new corrected transaction
-      const correctedDescription = editForm.description || 
+      // Step 2: Create new corrected transaction. The description is read-only in
+      // the correction modal, so carry the original's (multilingual) description
+      // object forward unchanged rather than flattening it to a single-language
+      // string. createTransaction accepts string | MultilingualString.
+      const correctedDescription = originalTransaction.description ||
         `Corrected payment - Original: ${originalDescription}`;
 
       console.log('✅ Creating corrected transaction...');
@@ -661,7 +691,6 @@ export default function RecentPayments({
         const auditChanges: Array<{ field: string; old: unknown; new: unknown }> = [];
         if (amountChanged) auditChanges.push({ field: 'amount', old: originalTransaction.amount, new: amount });
         if (currencyChanged) auditChanges.push({ field: 'currency', old: originalTransaction.currency, new: editForm.currency });
-        if (descriptionChanged) auditChanges.push({ field: 'description', old: originalDescription, new: editForm.description });
         if (entityChanged) auditChanges.push({ field: 'entity_id', old: originalTransaction.entity_id || null, new: editForm.entityId || null });
         if (directionChanged) auditChanges.push({ field: 'direction', old: originalDirection, new: editForm.direction });
         await auditService.record({
@@ -877,6 +906,55 @@ export default function RecentPayments({
       showToast(error.message || t('payments.failedToDeletePayment') || 'Failed to delete payment', 'error');
     }
   };
+
+  // A previous ("original") payment that a correction replaced, rendered beneath
+  // its head when the chain is expanded. Dimmed + italic, indented with a ↳, with
+  // an amber left-border accent. Carries no action buttons — it's history.
+  const renderNested = (row: PaymentRow) => (
+    <tr
+      key={row.id}
+      className="opacity-60 italic border-l-4 border-amber-400 bg-amber-50"
+    >
+      <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-700">
+        <div className="flex items-center gap-2 pl-6">
+          <span className="text-gray-400">↳</span>
+          <span>
+            {new Date(row.date).toLocaleDateString()} {new Date(row.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        </div>
+      </td>
+      <td className="px-6 py-3 whitespace-nowrap">
+        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">
+          {t(getPaymentTypeTranslationKey(row.type)) || row.type} ({t('payments.original') || 'Original'})
+        </span>
+      </td>
+      <td className="px-6 py-3 whitespace-nowrap">
+        <div className="flex items-center">
+          <User className="w-4 h-4 text-gray-400 mr-2" />
+          <span className="text-sm text-gray-700">{row.entityName}</span>
+          <span className="ml-2 text-xs text-gray-500">({entityTypeLabel(row.entityType)})</span>
+        </div>
+      </td>
+      <td className="px-6 py-3 whitespace-nowrap">
+        <span className="text-sm font-semibold text-gray-600">
+          {formatCurrencyWithSymbol(row.amount, row.currency)}
+        </span>
+      </td>
+      <td className="px-6 py-3 whitespace-nowrap">
+        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800">
+          {t('payments.superseded') || 'Superseded'}
+        </span>
+      </td>
+      <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-500">
+        {row.reference || '-'}
+      </td>
+      <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-700">
+        {row.createdByName}
+      </td>
+      <td className="px-6 py-3 whitespace-nowrap" />
+    </tr>
+  );
+
   return (
     <div className="space-y-6">
       <Toast message={toast.message} type={toast.type} visible={toast.visible} onClose={() => setToast(t => ({ ...t, visible: false }))} />
@@ -887,7 +965,7 @@ export default function RecentPayments({
             {t('payments.recentPayments') || 'Recent Payments'}
           </h2>
           <p className="text-sm text-gray-500 mt-1">
-            {t('payments.paymentTransactions') || 'Payment Transactions'} ({paymentRows.length})
+            {t('payments.paymentTransactions') || 'Payment Transactions'} ({paymentGroups.length})
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -990,8 +1068,8 @@ export default function RecentPayments({
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
-                checked={showReversals}
-                onChange={(e) => setShowReversals(e.target.checked)}
+                checked={showCorrected}
+                onChange={(e) => setShowCorrected(e.target.checked)}
                 className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
               />
               <span className="text-sm font-medium text-gray-700">
@@ -1013,7 +1091,7 @@ export default function RecentPayments({
 
       {/* Table */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-        {paginatedRows.length === 0 ? (
+        {paginatedGroups.length === 0 ? (
           <div className="text-center py-12">
             <DollarSign className="w-12 h-12 text-gray-400 mx-auto mb-4" />
             <p className="text-lg font-medium text-gray-500">
@@ -1056,89 +1134,108 @@ export default function RecentPayments({
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {paginatedRows.map((row) => {
-                    const isHighlighted = highlightedPaymentId === row.id;
+                  {paginatedGroups.map((group) => {
+                    const head = group.head;
+                    const hasNested = group.nested.length > 0;
+                    const isExpanded = expandedGroups.has(head.id);
+                    // Chevron + nested rows only surface when corrections are
+                    // revealed; the default view stays one clean row per chain.
+                    const showChevron = showCorrected && hasNested;
+                    const isHighlighted = highlightedPaymentId === head.id;
+                    const isVoidedHead = head.role === 'voided';
                     return (
-                    <React.Fragment key={row.id}>
-                      {/* Main transaction row */}
+                    <React.Fragment key={head.id}>
+                      {/* Head row — the live payment, or a voided/canceled tail */}
                       <tr
-                        id={`payment-${row.id}`}
-                        className={`${row.isReversal ? 'bg-gray-50 border-l-4 border-orange-400' : ''} ${
+                        id={`payment-${head.id}`}
+                        className={`${isVoidedHead ? 'bg-gray-50' : ''} ${
                           isHighlighted ? 'border-2 border-blue-400' : ''
                         }`}
                       >
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {new Date(row.date).toLocaleDateString()} {new Date(row.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            row.isReversal
-                              ? 'bg-orange-100 text-orange-800'
-                              :
-                               'bg-green-100 text-green-800'
-                              
-                          }`}>
-                            {t(getPaymentTypeTranslationKey(row.type)) || row.type}
-                            {row.isReversal ? ` (${t('payments.reversal') || 'Reversal'})` : ''}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center">
-                            <User className="w-4 h-4 text-gray-400 mr-2" />
-                            <span className="text-sm text-gray-900">{row.entityName}</span>
-                            <span className="ml-2 text-xs text-gray-500 capitalize">({row.entityType})</span>
+                          <div className="flex items-center gap-2">
+                            {showChevron ? (
+                              <button
+                                onClick={() => toggleGroup(head.id)}
+                                className="p-0.5 rounded hover:bg-gray-100 text-gray-500"
+                                aria-expanded={isExpanded}
+                                title={isExpanded ? (t('dashboard.collapse') || 'Collapse') : (t('dashboard.expand') || 'Expand')}
+                              >
+                                <ChevronRight className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                              </button>
+                            ) : (
+                              <span className="inline-block w-5" />
+                            )}
+                            <span>
+                              {new Date(head.date).toLocaleDateString()} {new Date(head.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex flex-col gap-1">
-                            <span className={`text-sm font-semibold ${
-                              row.isReversal
-                                ? 'text-orange-600'
-                                : row.type === 'Customer Payment' ? 'text-green-600' : 'text-red-600'
+                          <div className="flex items-center gap-2">
+                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                              isVoidedHead ? 'bg-gray-100 text-gray-700' : 'bg-green-100 text-green-800'
                             }`}>
-                              {formatCurrencyWithSymbol(row.amount, row.currency)}
+                              {t(getPaymentTypeTranslationKey(head.type)) || head.type}
                             </span>
-                            {row.isCorrected && row.originalAmount !== undefined && showReversals && (
-                              <span className="text-xs text-gray-500 italic" title="Original amount (no effect on calculations)">
-                                {t('receivedBills.original')}: {formatCurrencyWithSymbol(row.originalAmount, row.originalCurrency || row.currency)}
+                            {group.correctionCount > 0 && (
+                              <span
+                                className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-800"
+                                title={t('payments.correctedBadgeTitle') || 'This payment was corrected'}
+                              >
+                                ✎ {t('payments.corrected') || 'corrected'}{group.correctionCount > 1 ? ` ×${group.correctionCount}` : ''}
                               </span>
                             )}
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <User className="w-4 h-4 text-gray-400 mr-2" />
+                            <span className="text-sm text-gray-900">{head.entityName}</span>
+                            <span className="ml-2 text-xs text-gray-500">({entityTypeLabel(head.entityType)})</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`text-sm font-semibold ${
+                            head.type === 'Customer Payment' ? 'text-green-600' : 'text-red-600'
+                          }`}>
+                            {formatCurrencyWithSymbol(head.amount, head.currency)}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
                           <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            row.status === 'completed'
+                            head.status === 'completed'
                               ? 'bg-green-100 text-green-800'
-                              : row.status === 'canceled'
+                              : head.status === 'canceled'
                               ? 'bg-gray-100 text-gray-800'
                               : 'bg-red-100 text-red-800'
                           }`}>
-                            {row.status === 'completed' 
+                            {head.status === 'completed'
                               ? (t('payments.completed') || 'Completed')
-                              : row.status === 'canceled'
+                              : head.status === 'canceled'
                               ? (t('payments.canceled') || 'Canceled')
                               : (t('payments.reversed') || 'Reversed')}
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {row.reference || '-'}
+                          {head.reference || '-'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {row.createdByName}
+                          {head.createdByName}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                           <div className="flex items-center gap-2">
-                            {row.status === 'completed' && !row.isReversal && (
+                            {head.role === 'active' && (
                               <>
                                 <button
-                                  onClick={() => handleEditPayment(row)}
+                                  onClick={() => handleEditPayment(head)}
                                   className="text-blue-600 hover:text-blue-900 p-1 rounded hover:bg-blue-50"
                                   title={t('payments.editPayment') || 'Edit Payment'}
                                 >
                                   <Edit className="w-4 h-4" />
                                 </button>
                                 <button
-                                  onClick={() => handleDeletePayment(row)}
+                                  onClick={() => handleDeletePayment(head)}
                                   className="text-red-600 hover:text-red-900 p-1 rounded hover:bg-red-50"
                                   title={t('payments.deletePayment') || 'Delete Payment'}
                                 >
@@ -1146,7 +1243,7 @@ export default function RecentPayments({
                                 </button>
                               </>
                             )}
-                            {row.status === 'canceled' && (
+                            {isVoidedHead && (
                               <span className="text-xs text-gray-500 italic">
                                 {t('payments.paymentCanceled') || 'Payment Canceled'}
                               </span>
@@ -1154,6 +1251,8 @@ export default function RecentPayments({
                           </div>
                         </td>
                       </tr>
+                      {/* Nested superseded originals + reversals (chronological) */}
+                      {showCorrected && isExpanded && group.nested.map(renderNested)}
                     </React.Fragment>
                     );
                   })}
@@ -1169,7 +1268,7 @@ export default function RecentPayments({
                   totalPages={totalPages}
                   onPageChange={setCurrentPage}
                   itemsPerPage={ITEMS_PER_PAGE}
-                  totalItems={paymentRows.length}
+                  totalItems={paymentGroups.length}
                 />
               </div>
             )}

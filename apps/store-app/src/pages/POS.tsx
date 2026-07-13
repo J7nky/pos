@@ -1162,6 +1162,13 @@ ${dashSeparator}`;
         if (!item.quantity || item.quantity <= 0) {
           throw new Error(`Invalid quantity in cart item: ${item.quantity}. Quantity must be a positive number.`);
         }
+        // Spec 019 FR-002: weight-tracked lots cannot be sold without a weight > 0
+        const lineLot = item.inventory_item_id
+          ? inventory.find(inv => inv.id === item.inventory_item_id)
+          : undefined;
+        if (lineLot?.weight_tracked === true && !(typeof item.weight === 'number' && item.weight > 0)) {
+          throw new Error(t('losses.weightRequired'));
+        }
       }
 
       // Prepare customer/supplier balance update if needed
@@ -1859,6 +1866,9 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrencyWithSym
           {(activeTab?.cart || []).map((item: any, index: number)  => {
             const inventoryItem = inventory.find((inv: any) => inv.id === item.inventoryItemId);
             const availableStock = inventoryItem ? inventoryItem.quantity : 0;
+            // Spec 019 FR-002: weight-tracked lots require a weight > 0 per sale line
+            const isWeightTracked = inventoryItem?.weight_tracked === true;
+            const weightMissing = isWeightTracked && !(typeof item.weight === 'number' && item.weight > 0);
             const product = products.find((p: any) => p.id === item.productId);
             const supplier = suppliers?.find((s: any) => s.id === item.supplierId);
             
@@ -1933,17 +1943,25 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrencyWithSym
 
                   {/* Weight */}
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">{t('common.labels.weight')}</label>
+                    <label className="text-xs font-medium text-gray-700 uppercase tracking-wide">
+                      {t('common.labels.weight')}
+                      {isWeightTracked && <span className="text-red-500 ml-0.5">*</span>}
+                    </label>
                     <div className="relative">
                       <input
                         type="number"
                         step="0.5"
                         min="0"
+                        required={isWeightTracked}
                         value={item.weight ?? ''}
                         onChange={(e) => updateCartItem(item.id, 'weight', e.target.value ? parseFloat(e.target.value) : undefined)}
-                        className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] ${
-                          productName.toLowerCase().includes('plastic') 
-                            ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                        className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 min-h-[44px] ${
+                          weightMissing
+                            ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
+                            : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'
+                        } ${
+                          productName.toLowerCase().includes('plastic')
+                            ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                             : 'bg-white'
                         }`}
                         placeholder="0.00"
@@ -1955,6 +1973,11 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrencyWithSym
                         {item.weight===''? t('common.labels.kg') : ''}
                       </div>
                     </div>
+                    {isWeightTracked && (
+                      <p className={`text-xs ${weightMissing ? 'text-red-500' : 'text-gray-500'}`}>
+                        {t('losses.remainingWeight')}: {Math.max(0, (inventoryItem?.weight_remaining ?? 0) - (typeof item.weight === 'number' ? item.weight : 0))} {t('common.labels.kg')}
+                      </p>
+                    )}
                   </div>
 
                   {/* Unit Price */}

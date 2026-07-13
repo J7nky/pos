@@ -53,6 +53,9 @@ export const SYNC_TABLES = [
   'journal_entries', // Must sync after entities, chart_of_accounts, and bills
   'balance_snapshots', // Must sync after entities
   'bill_line_items',
+  // Inventory loss ledger (v71, spec 019) — references inventory_items and
+  // (for owned lots) transactions, so it syncs after both.
+  'inventory_loss_events',
   'cash_drawer_sessions',
   'missed_products',
   'reminders',
@@ -99,6 +102,8 @@ export const SYNC_TIERS: Record<DataTierName, readonly SyncTable[]> = {
     // neither is present yet.
     'balance_snapshots',
     'bill_line_items',
+    // Inventory loss ledger (spec 019) — business data, Tier 2.
+    'inventory_loss_events',
     // Audit log is business data, not UI-critical — Tier 2.
     'audit_logs',
   ],
@@ -132,7 +137,10 @@ const SYNC_DEPENDENCIES: Record<SyncTable, SyncTable[]> = {
   'reminders': ['users'], // Reminders reference users (created_by, completed_by)
   'role_permissions': [], // RBAC: Role permissions are GLOBAL (no store_id, no dependencies)
   'user_permissions': ['stores', 'users'], // RBAC: User permissions reference stores and users
-  'audit_logs': ['stores'] // Audit rows belong to a store; entity_id is a soft reference (no hard FK)
+  'audit_logs': ['stores'], // Audit rows belong to a store; entity_id is a soft reference (no hard FK)
+  // Loss rows reference the lot (inventory_items) and, for owned lots, the
+  // write-off transaction — both must exist remotely before the loss row lands.
+  'inventory_loss_events': ['inventory_items', 'transactions']
 };
 
 /** Topologically order tables within a tier using `SYNC_DEPENDENCIES` (dependencies first). */

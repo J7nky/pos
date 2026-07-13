@@ -167,19 +167,19 @@
   "syncMetadata": [
     {
       "hydration_complete": false,
+      "id": "audit_logs",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
+      "table_name": "audit_logs"
+    },
+    {
+      "hydration_complete": false,
       "id": "balance_snapshots",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
       "last_synced_version": 0,
       "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "balance_snapshots"
-    },
-    {
-      "hydration_complete": false,
-      "id": "bill_audit_logs",
-      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
-      "last_synced_version": 0,
-      "store_id": "00000000-0000-4000-8000-000000000001",
-      "table_name": "bill_audit_logs"
     },
     {
       "hydration_complete": false,
@@ -239,6 +239,14 @@
     },
     {
       "hydration_complete": false,
+      "id": "fiscal_periods",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
+      "table_name": "fiscal_periods"
+    },
+    {
+      "hydration_complete": false,
       "id": "inventory_bills",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
       "last_synced_version": 0,
@@ -255,6 +263,14 @@
     },
     {
       "hydration_complete": false,
+      "id": "inventory_loss_events",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
+      "table_name": "inventory_loss_events"
+    },
+    {
+      "hydration_complete": false,
       "id": "journal_entries",
       "last_synced_at": "PARITY_FIXED_TIMESTAMP",
       "last_synced_version": 0,
@@ -268,6 +284,14 @@
       "last_synced_version": 0,
       "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "missed_products"
+    },
+    {
+      "hydration_complete": false,
+      "id": "product_categories",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
+      "table_name": "product_categories"
     },
     {
       "hydration_complete": false,
@@ -308,6 +332,14 @@
       "last_synced_version": 0,
       "store_id": "00000000-0000-4000-8000-000000000001",
       "table_name": "transactions"
+    },
+    {
+      "hydration_complete": false,
+      "id": "units_of_measure",
+      "last_synced_at": "PARITY_FIXED_TIMESTAMP",
+      "last_synced_version": 0,
+      "store_id": "00000000-0000-4000-8000-000000000001",
+      "table_name": "units_of_measure"
     },
     {
       "hydration_complete": false,

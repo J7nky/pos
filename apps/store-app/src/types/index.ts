@@ -63,6 +63,8 @@ export type OperationName =
   | 'delete_product'
   | 'receive_inventory'
   | 'adjust_inventory'
+  | 'record_inventory_loss'
+  | 'reverse_inventory_loss'
   | 'view_products'
   // Accounting operations
   | 'create_transaction'
@@ -205,6 +207,7 @@ export interface InventoryItem {
   unit_id?: string;
   /** @deprecated Legacy unit code; dual-written. */
   unit?: string;
+  /** Frozen originally-received weight (never decremented; see weight_remaining). */
   weight?: number | null;
   price?: number | null;
   currency?: CurrencyCode;
@@ -214,6 +217,63 @@ export interface InventoryItem {
   received_at?: string | null;
   batch_id?: string | null;
   sku?: string | null;
+  /**
+   * Per-lot tracking mode (spec 019, v71). Set at receiving, immutable.
+   * true ⇒ weight is MANDATORY on every POS sale of this lot and the lot keeps
+   * a live weight_remaining; false ⇒ quantity-only lot, no weight capture.
+   */
+  weight_tracked?: boolean;
+  /** Live on-hand weight (weight-tracked lots). Init = received weight; decremented per sale/loss. */
+  weight_remaining?: number | null;
+  /** Received weight ÷ received units, snapshot at receiving. Attributes a proportional weight to whole-unit losses. */
+  nominal_unit_weight?: number | null;
+  _synced?: boolean;
+  _lastSyncedAt?: string;
+  _deleted?: boolean;
+}
+
+/**
+ * Why a lot lost stock (spec 019). shrinkage = automatic residual weight at
+ * close. 'lost'/missing was removed as a distinct reason — every unaccounted
+ * unit (manual report or bill-close reconciliation) is recorded as spoiled.
+ */
+export type InventoryLossReason = 'shrinkage' | 'spoiled';
+/** How the loss was recorded: automatically at bill close vs. manual operator entry. */
+export type InventoryLossSource = 'auto_close' | 'manual';
+
+/**
+ * One recorded inventory loss against one specific lot (spec 019, v71).
+ * Owned-lot losses link the Dr 5950 / Cr 1300 transaction; commission-lot
+ * losses are memo-only (is_commission=true, transaction_id=null).
+ * Reversal mirrors the transaction correction lifecycle: a reversal row links
+ * back via reversal_of_id and the original flips to status='reversed'.
+ */
+export interface InventoryLossEvent {
+  id: string;
+  store_id: string;
+  branch_id: string;
+  inventory_item_id: string;
+  product_id: string;
+  batch_id?: string | null;
+  reason: InventoryLossReason;
+  source: InventoryLossSource;
+  /** Units lost (0 for pure residual-weight shrinkage). */
+  quantity: number;
+  /** Weight lost; null for quantity-only lots. */
+  weight?: number | null;
+  /** Cost-basis snapshot at time of loss (per-weight for weight lots, per-unit otherwise). */
+  unit_cost: number;
+  currency: CurrencyCode;
+  loss_value: number;
+  is_commission: boolean;
+  transaction_id?: string | null;
+  status: 'active' | 'reversed';
+  reversal_of_id?: string | null;
+  reversed_by_id?: string | null;
+  notes?: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at?: string;
   _synced?: boolean;
   _lastSyncedAt?: string;
   _deleted?: boolean;
@@ -245,10 +305,11 @@ export interface Customer {
   _deleted?: boolean;
 }
 
-export interface inventory_bills { 
+export interface inventory_bills {
   id: string;
   store_id: string;
   branch_id: string;
+  reference_number?: string | null; // Auto-generated human-readable bill reference
   supplier_id: string;
   porterage_fee?: number | null;
   transfer_fee?: number | null;

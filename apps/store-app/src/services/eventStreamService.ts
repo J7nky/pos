@@ -1349,6 +1349,7 @@ export class EventStreamService {
       journal_entry: 'journal_entries',
       inventory_item: 'inventory_items',
       inventory_bill: 'inventory_bills',
+      inventory_loss_event: 'inventory_loss_events',
       entity: 'entities',
       customer: 'entities', // Customer is an entity_type = 'customer'
       supplier: 'entities', // Supplier is an entity_type = 'supplier'

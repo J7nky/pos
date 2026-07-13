@@ -17,6 +17,7 @@ import { auditService } from '../../../services/auditService';
 import { roundHalfEven } from '../../../utils/currencyRounding';
 import { LegacyCurrencyMissingError, CurrencyLockError } from '../../../errors/currencyErrors';
 import type { RefreshScope } from '../offlineDataContextContract';
+import { deductFromLot, restoreToLot } from './inventoryItemOperations';
 
 /** Line-item unit price in `billCurrency` (identity or convert + banker's round). */
 // transactionService.createTransaction uses finalized cart line `unit_price` values from the bill payload — no second conversion in the service layer.
@@ -90,6 +91,8 @@ export async function updateSale(
 
   const quantityChanged = updates.quantity !== undefined && updates.quantity !== originalSale.quantity;
   const quantityDifference = quantityChanged ? (updates.quantity || 0) - (originalSale.quantity || 0) : 0;
+  const weightChanged = updates.weight !== undefined && updates.weight !== originalSale.weight;
+  const weightDifference = weightChanged ? (updates.weight || 0) - (originalSale.weight || 0) : 0;
   const priceChanged = updates.unit_price !== undefined || updates.received_value !== undefined || updates.weight !== undefined;
 
   await getDB().updateBillLineItem(id, dbUpdates, userProfileId);
@@ -112,11 +115,35 @@ export async function updateSale(
     });
   }
 
-  if (quantityChanged && originalSale.product_id) {
-    if (quantityDifference > 0) {
-      await deductInventoryQuantity(originalSale.product_id, quantityDifference);
-    } else if (quantityDifference < 0) {
-      await restoreInventoryQuantity(originalSale.product_id, Math.abs(quantityDifference));
+  if (quantityChanged || weightChanged) {
+    // Per-lot adjustment (spec 019 FR-004, NO FIFO): target the exact lot this
+    // sale drew from via bill_line_items.inventory_item_id.
+    const lot = originalSale.inventory_item_id
+      ? await getDB().inventory_items.get(originalSale.inventory_item_id)
+      : undefined;
+
+    if (lot) {
+      const lotDeps = { storeId, refreshData, updateUnsyncedCount, debouncedSync };
+      if (quantityDifference > 0) {
+        await deductFromLot(lotDeps, lot.id, { quantity: quantityDifference });
+      } else if (quantityDifference < 0) {
+        await restoreToLot(lotDeps, lot.id, { quantity: Math.abs(quantityDifference) });
+      }
+      // Weight-tracked lots: apply the weight delta to weight_remaining
+      if (lot.weight_tracked === true && weightDifference !== 0) {
+        if (weightDifference > 0) {
+          await deductFromLot(lotDeps, lot.id, { quantity: 0, weight: weightDifference });
+        } else {
+          await restoreToLot(lotDeps, lot.id, { quantity: 0, weight: Math.abs(weightDifference) });
+        }
+      }
+    } else if (quantityChanged && originalSale.product_id) {
+      // Product-level fallback ONLY when the sale row has no lot reference
+      if (quantityDifference > 0) {
+        await deductInventoryQuantity(originalSale.product_id, quantityDifference);
+      } else if (quantityDifference < 0) {
+        await restoreInventoryQuantity(originalSale.product_id, Math.abs(quantityDifference));
+      }
     }
   }
 
@@ -284,6 +311,23 @@ export async function deleteSale(deps: SaleDeps, id: string): Promise<void> {
     await getDB().bill_line_items.delete(id);
 
     if (saleItem.quantity && saleItem.quantity > 0) {
+      // Restore to the exact lot the sale drew from (spec 019 FR-004, NO FIFO)
+      const lot = saleItem.inventory_item_id
+        ? await getDB().inventory_items.get(saleItem.inventory_item_id)
+        : undefined;
+
+      if (lot) {
+        await getDB().inventory_items.update(lot.id, {
+          quantity: (lot.quantity || 0) + saleItem.quantity,
+          _synced: false,
+          ...(lot.weight_tracked === true && typeof saleItem.weight === 'number' && saleItem.weight > 0
+            ? { weight_remaining: (lot.weight_remaining ?? 0) + saleItem.weight }
+            : {})
+        });
+        return;
+      }
+
+      // Product-level fallback ONLY when the sale row has no lot reference
       const existingInventory = await getDB().inventory_items
         .where('product_id')
         .equals(saleItem.product_id)

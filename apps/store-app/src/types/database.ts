@@ -553,6 +553,12 @@ export interface Database {
           updated_at: string;
           is_archived: boolean | null;
           currency: CurrencyCode | null;
+          /** Per-lot tracking mode (spec 019). Immutable after receiving. */
+          weight_tracked: boolean;
+          /** Live on-hand weight for weight-tracked lots. */
+          weight_remaining: number | null;
+          /** Received weight ÷ received units, snapshot at receiving. */
+          nominal_unit_weight: number | null;
         };
         Insert:{
           id: string;
@@ -571,6 +577,9 @@ export interface Database {
           updated_at?: string;
           is_archived?: boolean | null;
           currency: CurrencyCode;
+          weight_tracked?: boolean;
+          weight_remaining?: number | null;
+          nominal_unit_weight?: number | null;
         };
         Update: {
           id: string;
@@ -589,6 +598,89 @@ export interface Database {
           updated_at?: string;
           is_archived?: boolean | null;
           currency?: CurrencyCode;
+          weight_tracked?: boolean;
+          weight_remaining?: number | null;
+          nominal_unit_weight?: number | null;
+        };
+      };
+      inventory_loss_events: {
+        Row: {
+          id: string;
+          store_id: string;
+          branch_id: string;
+          inventory_item_id: string;
+          product_id: string;
+          batch_id: string | null;
+          reason: 'shrinkage' | 'spoiled';
+          source: 'auto_close' | 'manual';
+          quantity: number;
+          weight: number | null;
+          unit_cost: number;
+          currency: string;
+          loss_value: number;
+          is_commission: boolean;
+          transaction_id: string | null;
+          status: 'active' | 'reversed';
+          reversal_of_id: string | null;
+          reversed_by_id: string | null;
+          notes: string | null;
+          created_by: string;
+          created_at: string;
+          updated_at: string;
+          _synced?: boolean;
+          _deleted?: boolean;
+        };
+        Insert: {
+          id?: string;
+          store_id: string;
+          branch_id: string;
+          inventory_item_id: string;
+          product_id: string;
+          batch_id?: string | null;
+          reason: 'shrinkage' | 'spoiled';
+          source: 'auto_close' | 'manual';
+          quantity?: number;
+          weight?: number | null;
+          unit_cost?: number;
+          currency: string;
+          loss_value?: number;
+          is_commission?: boolean;
+          transaction_id?: string | null;
+          status?: 'active' | 'reversed';
+          reversal_of_id?: string | null;
+          reversed_by_id?: string | null;
+          notes?: string | null;
+          created_by: string;
+          created_at?: string;
+          updated_at?: string;
+          _synced?: boolean;
+          _deleted?: boolean;
+        };
+        Update: {
+          id?: string;
+          store_id?: string;
+          branch_id?: string;
+          inventory_item_id?: string;
+          product_id?: string;
+          batch_id?: string | null;
+          reason?: 'shrinkage' | 'spoiled';
+          source?: 'auto_close' | 'manual';
+          quantity?: number;
+          weight?: number | null;
+          unit_cost?: number;
+          currency?: string;
+          loss_value?: number;
+          is_commission?: boolean;
+          transaction_id?: string | null;
+          status?: 'active' | 'reversed';
+          reversal_of_id?: string | null;
+          reversed_by_id?: string | null;
+          notes?: string | null;
+          created_by?: string;
+          created_at?: string;
+          updated_at?: string;
+          _synced?: boolean;
+          _deleted?: boolean;
         };
       };
       bills: {
@@ -765,6 +857,7 @@ export interface Database {
       inventory_bills: {
         Row: {
           id: string;
+          reference_number?: string | null;
           plastic_fee?:string;
           supplier_id: string;
           porterage_fee?: number | null;
@@ -780,6 +873,7 @@ export interface Database {
         };
         Insert: {
           id: string;
+          reference_number?: string | null;
           plastic_fee?:string;
           supplier_id: string;
           porterage_fee?: number | null;
@@ -795,6 +889,7 @@ export interface Database {
         };
         Update: {
           id: string;
+          reference_number?: string | null;
           plastic_fee?:string;
           supplier_id: string;
           porterage_fee?: number | null;

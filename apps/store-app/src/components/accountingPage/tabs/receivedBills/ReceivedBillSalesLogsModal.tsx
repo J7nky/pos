@@ -1,7 +1,10 @@
 import { useState, useMemo } from 'react';
-import { X, Edit, Trash2, FileText } from 'lucide-react';
+import { X, Edit, Trash2, FileText, Scale, AlertTriangle } from 'lucide-react';
 import { Modal } from '../../../common/Modal';
 import { useOfflineData } from '../../../../contexts/OfflineDataContext';
+import { useI18n } from '../../../../i18n';
+import { getTranslatedString } from '../../../../utils/multilingual';
+import type { LotCloseReconciliation } from '../../../../contexts/offlineData/offlineDataContextContract';
 import { ReceivedBill, SaleLineItem, CloseBillFees } from './types';
 import { formatDateTime } from '../../../../utils/numberFormat';
 
@@ -36,10 +39,17 @@ export function ReceivedBillSalesLogsModal({
   showToast,
   onMarkBillClosed
 }: ReceivedBillSalesLogsModalProps) {
-  const { getInventoryBatch } = useOfflineData();
+  const { getInventoryBatch, getLotCloseReconciliation, reconcileAndCloseLosses } = useOfflineData();
+  const { t, language } = useI18n();
   const [showCloseBillModal, setShowCloseBillModal] = useState(false);
   const [closeBillFees, setCloseBillFees] = useState<CloseBillFees | null>(null);
   const [actualBillType, setActualBillType] = useState<'commission' | 'cash' | 'credit' | null>(null);
+  // Loss reconciliation (spec 019): per-lot rows computed before the close is
+  // confirmed. Unaccounted units are recorded as spoiled automatically at
+  // close (there is no other reason to choose from); weight-tracked lots
+  // additionally show the shrinkage that will auto-book.
+  const [reconRows, setReconRows] = useState<LotCloseReconciliation[]>([]);
+  const [closingBusy, setClosingBusy] = useState(false);
 
   const processedSalesData = useMemo(() => {
     if (!bill) return [];
@@ -137,7 +147,6 @@ export function ReceivedBillSalesLogsModal({
         showToast('Bill is already closed.', 'error');
         return;
       }
-      console.log(bill,12321312)
       // Calculate total revenue from sales when the bill summary is missing it
       const totalRevenue = typeof bill.totalRevenue === 'number' && bill.totalRevenue > 0
         ? bill.totalRevenue
@@ -226,6 +235,18 @@ export function ReceivedBillSalesLogsModal({
         currency: currency
       };
 
+      // Loss reconciliation preview (spec 019, FR-007): compute per-lot
+      // unaccounted units + projected shrinkage BEFORE the operator confirms.
+      let recon: LotCloseReconciliation[] = [];
+      if (batchId && getLotCloseReconciliation) {
+        try {
+          recon = await getLotCloseReconciliation(batchId);
+        } catch (e) {
+          console.error('Loss reconciliation preview failed:', e);
+        }
+      }
+      setReconRows(recon);
+
       // Set fees and show confirmation modal
       setCloseBillFees(fees);
       setShowCloseBillModal(true);
@@ -237,11 +258,12 @@ export function ReceivedBillSalesLogsModal({
 
   const hasInvalidSalesLines = useMemo(() => {
     if (!bill) return false;
-    return processedSalesData.some((item: any) => {
-      const invalidQuantity = bill.originalQuantity > bill.totalSoldQuantity;
-      const invalidPrice = !item.unitPrice || item.unitPrice <= 0;
-      return invalidQuantity || invalidPrice;
-    });
+    // remainingQuantity already nets out both sales and recorded spoilage/loss,
+    // so it's the correct signal for "is anything still unaccounted for" —
+    // originalQuantity vs totalSoldQuantity alone ignores spoilage.
+    const hasUnaccountedQuantity = bill.remainingQuantity > 0;
+    const hasInvalidPrice = processedSalesData.some((item: any) => !item.unitPrice || item.unitPrice <= 0);
+    return hasUnaccountedQuantity || hasInvalidPrice;
   }, [processedSalesData, bill]);
 
   const exportSelectedBill = () => {
@@ -355,6 +377,11 @@ export function ReceivedBillSalesLogsModal({
         {/* Subtitle */}
         <p className="text-md text-gray-600 -mt-4 mb-4">
           {bill.productName} - {bill.supplierName}
+          {bill.referenceNumber && (
+            <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 align-middle">
+              {bill.referenceNumber}
+            </span>
+          )}
         </p>
 
         {/* Stats Cards */}
@@ -584,13 +611,69 @@ export function ReceivedBillSalesLogsModal({
                       <span className="text-green-600">{formatCurrency(closeBillFees.supplierAmount)}</span>
                     </div>
                     <div className="text-xs text-gray-500 mt-1">
-                      {actualBillType === 'commission' 
+                      {actualBillType === 'commission'
                         ? 'Amount to pay supplier after deducting fees'
                         : 'Purchase cost owed to supplier'}
                     </div>
                   </div>
                 </div>
               </div>
+
+              {/* Loss reconciliation (spec 019): unaccounted units are recorded as
+                  spoiled automatically at close — no manual classification. */}
+              {reconRows.some(r => r.unaccountedUnits > 0) && (
+                <div className="bg-red-50 p-4 rounded-lg">
+                  <h3 className="text-sm font-medium text-red-700 mb-1 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4" />
+                    {t('losses.unaccountedUnits')}
+                  </h3>
+                  <p className="text-xs text-red-600 mb-3">{t('losses.autoClassifyNotice')}</p>
+                  <div className="space-y-2">
+                    {reconRows.filter(r => r.unaccountedUnits > 0).map(r => (
+                      <div key={r.inventoryItemId} className="p-3 rounded border border-red-200 bg-white">
+                        <div className="flex justify-between text-sm">
+                          <span className="font-medium">{getTranslatedString(r.productName as any, language) || t('losses.lot')}</span>
+                          <span className="text-gray-600">
+                            {t('losses.received')}: {r.receivedQuantity} · {t('losses.sold')}: {r.soldQuantity} · {t('losses.reasons.spoiled')}: <span className="font-semibold text-red-600">{r.unaccountedUnits}</span>
+                            {!r.isCommission && (
+                              <span className="text-xs text-gray-500 ms-2">
+                                ({t('losses.estimatedLoss')}: {formatCurrency(
+                                  r.unaccountedUnits * (r.weightTracked ? (r.nominalUnitWeight ?? 0) * r.unitCost : r.unitCost)
+                                )})
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {reconRows.some(r => r.weightTracked && (r.residualShrinkageWeight ?? 0) > 0) && (
+                <div className="bg-indigo-50 p-4 rounded-lg">
+                  <h3 className="text-sm font-medium text-indigo-700 mb-2 flex items-center gap-2">
+                    <Scale className="w-4 h-4" />
+                    {t('losses.shrinkagePreview')}
+                  </h3>
+                  <div className="space-y-1 text-sm">
+                    {reconRows.filter(r => r.weightTracked && (r.residualShrinkageWeight ?? 0) > 0).map(r => (
+                      <div key={r.inventoryItemId} className="flex justify-between">
+                        <span>{getTranslatedString(r.productName as any, language) || t('losses.lot')}</span>
+                        <span className="font-medium">
+                          {r.residualShrinkageWeight} kg
+                          {!r.isCommission && r.estimatedShrinkageValue !== null && (
+                            <span className="text-red-600 ms-2">−{formatCurrency(r.estimatedShrinkageValue)}</span>
+                          )}
+                          {r.isCommission && (
+                            <span className="text-gray-500 text-xs ms-2">({t('losses.commissionNotice').split('—')[0].trim()})</span>
+                          )}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
             <div className="px-6 py-4 border-t flex justify-end gap-3">
               <button
@@ -601,12 +684,38 @@ export function ReceivedBillSalesLogsModal({
               </button>
               <button
                 onClick={async () => {
+                  if (closingBusy) return;
+                  setClosingBusy(true);
                   try {
                     if (onCloseBill) {
+                      // Spec 019: settle losses BEFORE the bill flips to CLOSED.
+                      // Every unaccounted unit is recorded as spoiled
+                      // automatically, and weight-tracked lots auto-book their
+                      // residual shrinkage; a failure here aborts the close
+                      // entirely (FR-005/FR-012).
+                      if (bill.batchId && reconcileAndCloseLosses) {
+                        const lossResult = await reconcileAndCloseLosses(
+                          String(bill.batchId),
+                          reconRows
+                            .filter(r => r.unaccountedUnits > 0)
+                            .map(r => ({
+                              inventoryItemId: r.inventoryItemId,
+                              spoiledUnits: r.unaccountedUnits,
+                            }))
+                        );
+                        if (!lossResult.success) {
+                          showToast(lossResult.error || t('losses.lossRecordFailed'), 'error');
+                          return;
+                        }
+                        if (lossResult.anomalies?.length) {
+                          showToast(t('losses.shrinkageAnomaly'), 'error');
+                        }
+                      }
                       await onCloseBill(bill, closeBillFees);
                       setShowCloseBillModal(false);
                       setCloseBillFees(null);
                       setActualBillType(null);
+                      setReconRows([]);
                       onClose();
                       showToast('Bill closed successfully! Commission, porterage, and transfer fees deducted. Supplier balance updated.', 'success');
                       onMarkBillClosed(String(bill.id));
@@ -614,9 +723,12 @@ export function ReceivedBillSalesLogsModal({
                   } catch (e) {
                     console.error('Error closing bill:', e);
                     showToast('Failed to close bill. Please try again.', 'error');
+                  } finally {
+                    setClosingBusy(false);
                   }
                 }}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                disabled={closingBusy}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Confirm Close Bill
               </button>

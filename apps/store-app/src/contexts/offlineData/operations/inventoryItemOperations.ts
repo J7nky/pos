@@ -448,3 +448,76 @@ export async function restoreInventoryQuantity(
     throw error;
   }
 }
+
+/**
+ * Per-lot deduction (spec 019 FR-002/FR-004) — targets ONE specific
+ * inventory_items row (NO product-level FIFO). Decrements quantity (clamped
+ * at 0) and, for weight-tracked lots, decrements weight_remaining by
+ * portion.weight (clamped at 0).
+ */
+export async function deductFromLot(
+  deps: Pick<InventoryItemDeps, 'storeId' | 'refreshData' | 'updateUnsyncedCount' | 'debouncedSync'>,
+  inventoryItemId: string,
+  portion: { quantity: number; weight?: number | null }
+): Promise<void> {
+  console.log('deductFromLot', inventoryItemId, portion);
+  if (!deps.storeId) return;
+
+  try {
+    const lot = await getDB().inventory_items.get(inventoryItemId);
+    if (!lot) throw new Error(`Inventory lot not found: ${inventoryItemId}`);
+
+    const updates = {
+      quantity: Math.max(0, (lot.quantity || 0) - portion.quantity),
+      updated_at: new Date().toISOString(),
+      _synced: false,
+      ...(lot.weight_tracked === true && typeof portion.weight === 'number'
+        ? { weight_remaining: Math.max(0, (lot.weight_remaining ?? 0) - portion.weight) }
+        : {})
+    };
+    await getDB().inventory_items.update(inventoryItemId, updates);
+
+    await deps.refreshData(['inventory']);
+    await deps.updateUnsyncedCount();
+    deps.debouncedSync();
+  } catch (error) {
+    console.error('Error deducting from inventory lot:', error);
+    throw error;
+  }
+}
+
+/**
+ * Per-lot restore (spec 019 FR-004) — inverse of deductFromLot. Adds the
+ * portion back to ONE specific inventory_items row (NO product-level FIFO);
+ * weight_remaining is only touched on weight-tracked lots.
+ */
+export async function restoreToLot(
+  deps: Pick<InventoryItemDeps, 'storeId' | 'refreshData' | 'updateUnsyncedCount' | 'debouncedSync'>,
+  inventoryItemId: string,
+  portion: { quantity: number; weight?: number | null }
+): Promise<void> {
+  console.log('restoreToLot', inventoryItemId, portion);
+  if (!deps.storeId) return;
+
+  try {
+    const lot = await getDB().inventory_items.get(inventoryItemId);
+    if (!lot) throw new Error(`Inventory lot not found: ${inventoryItemId}`);
+
+    const updates = {
+      quantity: (lot.quantity || 0) + portion.quantity,
+      updated_at: new Date().toISOString(),
+      _synced: false,
+      ...(lot.weight_tracked === true && typeof portion.weight === 'number'
+        ? { weight_remaining: (lot.weight_remaining ?? 0) + portion.weight }
+        : {})
+    };
+    await getDB().inventory_items.update(inventoryItemId, updates);
+
+    await deps.refreshData(['inventory']);
+    await deps.updateUnsyncedCount();
+    deps.debouncedSync();
+  } catch (error) {
+    console.error('Error restoring to inventory lot:', error);
+    throw error;
+  }
+}

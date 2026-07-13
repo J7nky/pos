@@ -38,6 +38,7 @@ export interface InventoryItem {
   unit_id?: string;
   /** @deprecated Legacy unit code. Dual-written during the transition. */
   unit?: string;
+  /** Frozen originally-received weight (never decremented; see weight_remaining). */
   weight?: number;
   price?: number;
   currency: CurrencyCode;
@@ -48,6 +49,16 @@ export interface InventoryItem {
   batch_id?: string | null;
   sku?: string | null;
   is_archived?: boolean;
+  /**
+   * Per-lot tracking mode (spec 019, v71). Set at receiving, immutable.
+   * true ⇒ weight is MANDATORY on every POS sale and the lot keeps a live
+   * weight_remaining; false ⇒ quantity-only lot, no weight capture.
+   */
+  weight_tracked?: boolean;
+  /** Live on-hand weight (weight-tracked lots). Init = received weight. */
+  weight_remaining?: number | null;
+  /** Received weight ÷ received units, snapshot at receiving (proportional weight for unit losses). */
+  nominal_unit_weight?: number | null;
   _synced?: boolean;
   _deleted?: boolean;
 }

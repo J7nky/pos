@@ -50,6 +50,12 @@ export function ReceivedBillDetailsModal({
         <div>
           <h3 className="text-lg font-medium text-gray-900 mb-4">Basic Information</h3>
           <div className="space-y-3">
+            {bill.referenceNumber && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700">{t('inventory.referenceNumber')}</label>
+                <p className="text-sm font-mono text-gray-900">{bill.referenceNumber}</p>
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-700">Product</label>
               <p className="text-sm text-gray-900">{bill.productName}</p>
