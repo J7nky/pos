@@ -98,53 +98,34 @@ describe('useTransactionDataLayer.addTransaction — currency validation (T031, 
     api = null;
   });
 
-  it('throws InvalidCurrencyError{reason:"missing"} when currency is undefined (non-mapped category)', async () => {
+  // An unmapped category has no double-entry mapping, so it must be REJECTED —
+  // never written directly to the transactions table (the old "direct path"
+  // wrote a journal-less, unbalanced transaction). See useTransactionDataLayer
+  // A1 fix. Currency validity is irrelevant: the category is rejected first.
+  it('rejects an unmapped category (enforces double-entry — no journal-less direct write)', async () => {
     await render(makeAdapter());
     await expect(
       api!.addTransaction({
-        amount: 10,
+        amount: 5,
         category: 'unmapped-category',
+        currency: 'LBP',
         description: 'test',
       })
-    ).rejects.toBeInstanceOf(InvalidCurrencyError);
-    try {
-      await api!.addTransaction({
-        amount: 10,
-        category: 'unmapped-category',
-        description: 'test',
-      });
-    } catch (e) {
-      expect((e as InvalidCurrencyError).payload.reason).toBe('missing');
-    }
+    ).rejects.toThrow(/unknown category/i);
+    // Must not write a transaction directly, and must not fabricate a valid one.
+    expect(transactionsAdd).not.toHaveBeenCalled();
+    expect(transactionService.createTransaction).not.toHaveBeenCalled();
   });
 
-  it('throws InvalidCurrencyError{reason:"not-accepted"} for EUR in a Lebanese store', async () => {
+  it('rejects an unmapped category regardless of currency (missing or unaccepted)', async () => {
     await render(makeAdapter());
-    try {
-      await api!.addTransaction({
-        amount: 10,
-        category: 'unmapped-category',
-        currency: 'EUR',
-        description: 'test',
-      });
-      throw new Error('expected throw');
-    } catch (e) {
-      expect(e).toBeInstanceOf(InvalidCurrencyError);
-      expect((e as InvalidCurrencyError).payload.reason).toBe('not-accepted');
-      expect((e as InvalidCurrencyError).payload.attemptedCurrency).toBe('EUR');
-    }
-  });
-
-  it('writes transaction with supplied currency exactly (no USD coercion) — direct path', async () => {
-    await render(makeAdapter());
-    await api!.addTransaction({
-      amount: 5,
-      category: 'unmapped-category',
-      currency: 'LBP',
-      description: 'test',
-    });
-    expect(transactionsAdd).toHaveBeenCalledTimes(1);
-    expect(transactionsAdd.mock.calls[0][0].currency).toBe('LBP');
+    await expect(
+      api!.addTransaction({ amount: 10, category: 'unmapped-category', description: 'test' })
+    ).rejects.toThrow(/unknown category/i);
+    await expect(
+      api!.addTransaction({ amount: 10, category: 'unmapped-category', currency: 'EUR', description: 'test' })
+    ).rejects.toThrow(/unknown category/i);
+    expect(transactionsAdd).not.toHaveBeenCalled();
   });
 
   it('forwards supplied currency to transactionService for mapped categories', async () => {

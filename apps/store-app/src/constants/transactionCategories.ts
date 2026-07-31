@@ -41,6 +41,9 @@ export const TRANSACTION_CATEGORIES = {
   // Accounting Categories
   ACCOUNTS_RECEIVABLE: 'Accounts Receivable',
   ACCOUNTS_PAYABLE: 'Accounts Payable',
+
+  // Opening Balances (entity initial setup / migration)
+  OPENING_BALANCE: 'Opening Balance',
 } as const;
 
 export type TransactionCategory = typeof TRANSACTION_CATEGORIES[keyof typeof TRANSACTION_CATEGORIES];
@@ -84,6 +87,10 @@ export const CATEGORY_TO_TYPE_MAP: Record<TransactionCategory, TransactionType> 
   [TRANSACTION_CATEGORIES.SALARY_ACCRUAL]: TRANSACTION_TYPES.EXPENSE,
   [TRANSACTION_CATEGORIES.ACCOUNTS_RECEIVABLE]: TRANSACTION_TYPES.INCOME,
   [TRANSACTION_CATEGORIES.ACCOUNTS_PAYABLE]: TRANSACTION_TYPES.EXPENSE,
+  // Opening balance is a balance-sheet-only movement (AR/AP ↔ Equity); the
+  // income/expense type is not meaningful here — the journal entries are
+  // authoritative. INCOME is a formal value only, to satisfy the exhaustive map.
+  [TRANSACTION_CATEGORIES.OPENING_BALANCE]: TRANSACTION_TYPES.INCOME,
 };
 
 /**

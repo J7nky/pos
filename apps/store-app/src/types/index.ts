@@ -564,6 +564,10 @@ export interface Transaction {
   created_by: string;
   created_at: string;
   updated_at?: string;
+  /** Client-computed LOCAL business date (YYYY-MM-DD), identical to this
+   *  transaction's journal_entries.posted_date. Gates the closed-fiscal-year
+   *  trigger on transactions (migration 20260714150000). */
+  posted_date?: string;
   entity_id?: string | null;
   metadata?: Record<string, any>;
   _synced: boolean;
@@ -941,7 +945,15 @@ export interface PendingSync {
   last_error?: string;
   /** UUID v4 generated once when the outbox row is created; sent on every upload attempt. */
   idempotency_key: string;
-  status: 'pending' | 'permanently_failed';
+  /**
+   * 'pending'            — awaiting upload (the outbox retries these).
+   * 'permanently_failed' — outbox exhausted retries; terminal, surfaced to user.
+   * 'blocked_period'     — the row was rejected by the closed-fiscal-year
+   *                        server trigger. NOT retried (would loop forever) and
+   *                        NOT deleted (would lose ledger data). Cleared when the
+   *                        period is reopened, or by an explicit user retry.
+   */
+  status: 'pending' | 'permanently_failed' | 'blocked_period';
 }
 
 // Notification types

@@ -69,7 +69,6 @@ export interface TransactionDataLayerAdapter {
 export interface TransactionDataLayerResult {
   transactions: Tables['transactions']['Row'][];
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
-  updateTransaction: (id: string, updates: any) => Promise<void>;
   hydrate: (transactionsData: Tables['transactions']['Row'][]) => void;
   /**
    * Surgically merge one or more transaction rows into in-memory state by id

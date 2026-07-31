@@ -16,6 +16,32 @@ import { buildDualCurrencyAmounts, amountsFromLegacyEntry, getDebit, getCredit }
 import type { CurrencyCode } from '@pos-platform/shared';
 
 /**
+ * Balance precondition: assert per-currency Σdebits == Σcredits across a set
+ * of journal entries and THROW if not. Pure + in-memory, so it is safe to call
+ * inside a Dexie transaction (no query → no PrematureCommitError) — an
+ * imbalance rolls the whole transaction back instead of silently committing an
+ * unbalanced ledger. 0.01 tolerance matches verifyTransactionBalance.
+ */
+export function assertEntriesBalanced(entries: JournalEntry[], transactionId: string): void {
+  const perCurrency: Record<string, { debit: number; credit: number }> = {};
+  for (const e of entries) {
+    const amounts = (e.amounts ?? {}) as Record<string, { debit?: number; credit?: number }>;
+    for (const [code, v] of Object.entries(amounts)) {
+      (perCurrency[code] ??= { debit: 0, credit: 0 });
+      perCurrency[code].debit += Number(v?.debit ?? 0);
+      perCurrency[code].credit += Number(v?.credit ?? 0);
+    }
+  }
+  for (const [code, { debit, credit }] of Object.entries(perCurrency)) {
+    if (Math.abs(debit - credit) > 0.01) {
+      throw new Error(
+        `Unbalanced journal entries for transaction ${transactionId}: ${code} debit ${debit} != credit ${credit}. Refusing to post.`
+      );
+    }
+  }
+}
+
+/**
  * Service for creating and managing journal entries
  * Implements explicit double-entry bookkeeping
  */
@@ -167,6 +193,12 @@ export class JournalService {
       }
     });
     
+    // Balance PRECONDITION (throws → rolls back). Runs in-memory before the
+    // write, so it holds even in the atomic path where the post-commit
+    // verifyTransactionBalance query is skipped. Never persist an unbalanced
+    // pair.
+    assertEntriesBalanced([debitEntry, creditEntry], transactionId);
+
     // Insert both entries atomically
     // NOTE: This must be called within an IndexedDB transaction that includes journal_entries
     await getDB().journal_entries.bulkAdd([debitEntry, creditEntry]);

@@ -15,7 +15,7 @@ import type { CurrencyCode } from '@pos-platform/shared';
 import { getDB } from '../lib/db';
 import type { ChartOfAccounts, JournalEntry } from '../types/accounting';
 import { amountsFromLegacyEntry, getCredit, getDebit } from './accountingCurrencyHelpers';
-import { getLocalDateString } from '../utils/dateUtils';
+import { getFiscalYearForDate } from './fiscalYearService';
 
 export type CurrencyTotals = Partial<Record<CurrencyCode, number>>;
 
@@ -106,6 +106,11 @@ export interface BalanceSheetColumn {
   };
   isBalanced: boolean;
   variance?: CurrencyTotals;
+  /** Derived accumulated net income from fiscal years BEFORE the current one. */
+  retainedEarnings: {
+    nativeBalance: CurrencyTotals;
+    presentationBalance?: number;
+  };
   currentYearEarnings: {
     nativeBalance: CurrencyTotals;
     presentationBalance?: number;
@@ -335,9 +340,8 @@ export async function getBalanceSheet(filters: BalanceSheetFilters): Promise<Bal
   const postedOnly = filters.postedOnly ?? true;
   const hideZeroBalanceAccounts = filters.hideZeroBalanceAccounts ?? true;
   const asOfEnd = endOfDayIso(filters.asOfDate);
-  const fiscalYearStart = `${getLocalDateString(filters.asOfDate).slice(0, 4)}-01-01`;
 
-  const [entries, accountsRaw, ytdEntries] = await Promise.all([
+  const [entries, accountsRaw, storeRow] = await Promise.all([
     fetchEntries({
       storeId: filters.storeId,
       branchId: filters.branchId,
@@ -346,14 +350,19 @@ export async function getBalanceSheet(filters: BalanceSheetFilters): Promise<Bal
       postedOnly,
     }),
     getDB().chart_of_accounts.where('store_id').equals(filters.storeId).toArray(),
-    fetchEntries({
-      storeId: filters.storeId,
-      branchId: filters.branchId,
-      startDate: fiscalYearStart,
-      endDate: asOfEnd,
-      postedOnly,
-    }),
+    getDB().stores.get(filters.storeId),
   ]);
+
+  // Current fiscal year start, respecting the store's configured FY boundary
+  // (not a hardcoded Jan 1). Earnings before this date roll into Retained
+  // Earnings; earnings within it are Current Year Earnings. Both are DERIVED
+  // from journal entries — the close posts no closing entries, so equity would
+  // otherwise not roll forward and the sheet would unbalance after year 1.
+  const currentFy = getFiscalYearForDate(filters.asOfDate.slice(0, 10), {
+    fiscal_year_start_month: storeRow?.fiscal_year_start_month,
+    fiscal_year_start_day: storeRow?.fiscal_year_start_day,
+  });
+  const fiscalYearStartIso = startOfDayIso(currentFy.start_date);
 
   const warnings: BalanceSheetWarning[] = [];
   const trackedCurrencies = new Set<CurrencyCode>();
@@ -438,18 +447,45 @@ export async function getBalanceSheet(filters: BalanceSheetFilters): Promise<Bal
     };
   });
 
+  // Derive equity earnings from ALL revenue/expense activity, split at the
+  // current fiscal-year start: everything before → Retained Earnings (prior
+  // years), everything within → Current Year Earnings. Together they equal
+  // all-time (revenue − expense), which is exactly the amount needed to make
+  // Assets = Liabilities + Equity balance (every journal entry is balanced),
+  // so the sheet reconciles in every fiscal year without posting closing
+  // entries. Revenue/expense accounts are excluded from the line rows above.
+  const retainedEarnings: CurrencyTotals = {};
   const currentYearEarnings: CurrencyTotals = {};
-  for (const entry of ytdEntries) {
+  for (const entry of entries) {
     const account = accountByCode.get(entry.account_code);
     if (!account || (account.account_type !== 'revenue' && account.account_type !== 'expense')) continue;
+    const bucket = (entry.posted_date && entry.posted_date >= fiscalYearStartIso)
+      ? currentYearEarnings
+      : retainedEarnings;
     const amounts = amountsFromLegacyEntry(entry);
     for (const currency of Object.keys(amounts) as CurrencyCode[]) {
       const debit = getDebit(amounts, currency);
       const credit = getCredit(amounts, currency);
       const signed = account.account_type === 'revenue' ? credit - debit : -(debit - credit);
-      addAmount(currentYearEarnings, currency, signed);
+      addAmount(bucket, currency, signed);
       trackedCurrencies.add(currency);
     }
+  }
+
+  // Retained Earnings (prior years) is a DERIVED synthetic line, separate from
+  // any posted balance on the 3200 account (which is shown as its own equity
+  // line via the loop above) — so manual 3200 entries are never double-counted.
+  if (!isZeroTotals(retainedEarnings)) {
+    lineRows.push({
+      account_code: 'RE',
+      account_name: 'Retained Earnings (Prior Years)',
+      account_type: 'equity',
+      sub_classification: 'equity',
+      section: 'equity',
+      balanceByColumn: [
+        { columnId: 'primary', asOfDate: filters.asOfDate, nativeBalance: retainedEarnings },
+      ],
+    });
   }
 
   if (!isZeroTotals(currentYearEarnings)) {
@@ -480,6 +516,9 @@ export async function getBalanceSheet(filters: BalanceSheetFilters): Promise<Bal
   for (const currency of Object.keys(currentYearEarnings) as CurrencyCode[]) {
     addAmount(liabilitiesAndEquity, currency, currentYearEarnings[currency] ?? 0);
   }
+  for (const currency of Object.keys(retainedEarnings) as CurrencyCode[]) {
+    addAmount(liabilitiesAndEquity, currency, retainedEarnings[currency] ?? 0);
+  }
 
   const variance: CurrencyTotals = {};
   const allCurrencies = new Set<CurrencyCode>([
@@ -509,6 +548,7 @@ export async function getBalanceSheet(filters: BalanceSheetFilters): Promise<Bal
         unrealizedFxTranslation: { nativeBalance: {} },
         isBalanced,
         variance: isBalanced ? undefined : variance,
+        retainedEarnings: { nativeBalance: retainedEarnings },
         currentYearEarnings: { nativeBalance: currentYearEarnings },
       },
     ],
@@ -518,7 +558,42 @@ export async function getBalanceSheet(filters: BalanceSheetFilters): Promise<Bal
   };
 }
 
+/**
+ * Journal entries for a single account over a date range — the read behind the
+ * trial-balance / balance-sheet drill-down. Kept here so UI never queries
+ * `journal_entries` directly (ARCHITECTURE_RULES: UI goes through services).
+ * Sorted by posted_date ascending.
+ */
+export async function getAccountJournalEntries(params: {
+  storeId: string;
+  accountCode: string;
+  branchId?: string;
+  startDate: string;
+  endDate: string;
+  postedOnly?: boolean;
+}): Promise<JournalEntry[]> {
+  const postedOnly = params.postedOnly ?? true;
+  const start = startOfDayIso(params.startDate);
+  const end = endOfDayIso(params.endDate);
+
+  const all = await getDB()
+    .journal_entries.where('[store_id+account_code]')
+    .equals([params.storeId, params.accountCode])
+    .toArray();
+
+  return all
+    .filter((e) => {
+      if (e._deleted) return false;
+      if (params.branchId && e.branch_id && e.branch_id !== params.branchId) return false;
+      if (postedOnly && !e.is_posted) return false;
+      if (!e.posted_date) return false;
+      return e.posted_date >= start && e.posted_date <= end;
+    })
+    .sort((a, b) => (a.posted_date < b.posted_date ? -1 : a.posted_date > b.posted_date ? 1 : 0));
+}
+
 export const financialStatementService = {
   getTrialBalance,
   getBalanceSheet,
+  getAccountJournalEntries,
 };

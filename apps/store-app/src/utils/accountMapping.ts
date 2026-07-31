@@ -212,6 +212,19 @@ export const TRANSACTION_ACCOUNT_MAPPING: Record<TransactionCategory, AccountMap
     creditAccount: '2100', // Accounts Payable (increases)
     description: 'Accounts payable recorded',
     requiresEntity: true
+  },
+
+  // Opening balances. This is a PLACEHOLDER canonical direction (customer with a
+  // positive balance). The REAL per-currency direction depends on entityType +
+  // the sign of the balance and is computed in
+  // transactionService.createOpeningBalance — do NOT post opening balances via
+  // getAccountMapping(OPENING_BALANCE). This entry exists only to satisfy the
+  // exhaustive Record<TransactionCategory, AccountMapping>.
+  [TRANSACTION_CATEGORIES.OPENING_BALANCE]: {
+    debitAccount: '1200', // Accounts Receivable
+    creditAccount: '3100', // Owner's Equity
+    description: 'Entity opening balance',
+    requiresEntity: true
   }
 };
 

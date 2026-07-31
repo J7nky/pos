@@ -4,7 +4,9 @@ import { networkMonitorService } from '../services/networkMonitorService';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const supabaseServiceRoleKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+// SECURITY: the service role key must NEVER be read here. Any VITE_* var is
+// inlined into the served bundle, and the service role bypasses all RLS.
+// Operations that need it live in the admin-users Edge Function.
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.warn('Missing Supabase environment variables. App will run in offline mode.');
@@ -26,7 +28,6 @@ if (supabaseUrl) {
 // Use placeholder values if environment variables are missing
 const safeSupabaseUrl = supabaseUrl || 'https://placeholder.supabase.co';
 const safeSupabaseAnonKey = supabaseAnonKey || 'placeholder-key';
-const safeSupabaseServiceRoleKey = supabaseServiceRoleKey || 'placeholder-service-role-key';
 
 export const supabase = createClient<Database>(safeSupabaseUrl, safeSupabaseAnonKey, {
   auth: {
@@ -88,15 +89,6 @@ export const supabase = createClient<Database>(safeSupabaseUrl, safeSupabaseAnon
   },
   db: {
     schema: 'public'
-  }
-});
-
-// Admin client with service role key for admin operations (like creating users)
-export const supabaseAdmin = createClient<Database>(safeSupabaseUrl, safeSupabaseServiceRoleKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false,
-    storageKey: 'sb-admin-auth-token'
   }
 });
 

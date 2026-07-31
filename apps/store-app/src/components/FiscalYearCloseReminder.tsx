@@ -7,7 +7,7 @@ import {
   getFiscalYearByStartYear,
   findFiscalYearPeriod,
 } from '../services/fiscalYearService';
-import { getDB } from '../lib/db';
+import { getLocalFiscalPeriods } from '../services/fiscalYearCloseService';
 import type { FiscalYearPeriod } from '../types';
 
 const DISMISS_PREFIX = 'fyCloseReminderDismissed:';
@@ -35,12 +35,7 @@ export function FiscalYearCloseReminder() {
       setPeriods([]);
       return;
     }
-    void getDB().fiscal_periods
-      .where('store_id')
-      .equals(storeId)
-      .toArray()
-      .then((rows) => setPeriods(rows as FiscalYearPeriod[]))
-      .catch(() => setPeriods([]));
+    void getLocalFiscalPeriods(storeId).then(setPeriods);
   }, [storeId]);
 
   // Compute the previous FY and look up its local row.

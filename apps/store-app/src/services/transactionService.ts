@@ -34,6 +34,9 @@ import { getLocalDateString } from '../utils/dateUtils';
 import { createId } from '../lib/db';
 import { getFiscalPeriodForDate } from '../utils/fiscalPeriod';
 import type { JournalEntry } from '../types/accounting';
+// The Dexie row shape (carries status / lineage / metadata), distinct from
+// this service's local `Transaction` interface.
+import type { Transaction as TransactionRow } from '../types';
 import { validateTransactionCreation } from './businessValidationService';
 import { reverseAmounts, amountsFromLegacyEntry } from './accountingCurrencyHelpers';
 import { calculateBothCurrencies } from '../utils/balanceCalculation';
@@ -133,6 +136,10 @@ export interface Transaction {
   created_at: string;
   updated_at?: string;
   created_by: string;
+  /** Client-computed LOCAL business date (YYYY-MM-DD), identical to this
+   *  transaction's journal_entries.posted_date. Gates the closed-fiscal-year
+   *  trigger on transactions (migration 20260714150000). */
+  posted_date?: string;
   _synced: boolean;
   _deleted?: boolean;
   _lastSyncedAt?: string;
@@ -251,7 +258,14 @@ export class TransactionService {
       // a parallel balance being created in the payment currency.
       const normalized = await this.normalizePaymentCurrency(params);
       if (normalized.currency !== params.currency || normalized.amount !== params.amount) {
-        params = { ...params, amount: normalized.amount, currency: normalized.currency };
+        params = {
+          ...params,
+          amount: normalized.amount,
+          currency: normalized.currency,
+          // Preserve the original tender + rate on the transaction so the
+          // conversion is auditable and reversible at the original rate.
+          metadata: { ...params.metadata, normalized_from: normalized.normalization },
+        };
       }
 
       // 2. PREPARE TRANSACTION DATA (outside transaction)
@@ -345,12 +359,12 @@ export class TransactionService {
             // Session is closed - auto-open it
             console.log(`[CREATE_TRANSACTION] Cash drawer session is closed, auto-opening with transaction amount`);
             
-            // Determine opening amount based on transaction type
-            // For transactions that DEBIT cash (sales, customer payments): use transaction amount
-            // For transactions that CREDIT cash (expenses, supplier payments): use 0
-            const accountMapping = getAccountMapping(params.category);
-            const isDebitCash = accountMapping.debitAccount === '1100';
-            const openingAmount = isDebitCash ? params.amount : 0;
+            // Auto-opened sessions always start at 0: the drawer was closed
+            // (empty float), and the triggering transaction's cash is already
+            // counted via its 1100 journal entry inside the session window —
+            // seeding opening_amount with params.amount would double-count it,
+            // and in the transaction currency rather than the account currency.
+            const openingAmount = 0;
 
             const openResult = await cashDrawerUpdateService.openCashDrawerSession(
               params.context.storeId,
@@ -396,7 +410,12 @@ export class TransactionService {
           // Caller may override (e.g., monthly salary accruals backdate to month-end).
           const timestamp = params.postedDate ?? new Date().toISOString();
           transaction.created_at = timestamp;
-          
+          // Stamp the LOCAL business date, byte-identical to the value the
+          // journal entries get (getLocalDateString(created_at)), so the
+          // closed-fiscal-year triggers on transactions and journal_entries
+          // gate on the same date and can never split at a period boundary.
+          transaction.posted_date = getLocalDateString(timestamp);
+
           console.log(`[CREATE_TRANSACTION] Adding transaction record:`, {
             transactionId,
             category: transaction.category,
@@ -484,7 +503,34 @@ export class TransactionService {
       } else if (persistedEntries.length !== 2) {
         console.warn(`[CREATE_TRANSACTION] ⚠️ Expected 2 journal entries but found ${persistedEntries.length}`);
       }
-      
+
+      // B3: mirror the server snapshot-invalidation trigger locally. A
+      // BACKDATED posting (e.g. a month-end salary accrual) can land at or
+      // before an existing local balance_snapshot, making it wrong — mark those
+      // stale so reads recompute instead of returning a frozen value. Gated on
+      // backdated (postedDate < today): a current-dated posting can only affect
+      // a same-day snapshot, which getHistoricalBalance already refuses to use
+      // for the live balance, so the scan is skipped in the common path. Runs
+      // outside the atomic block (balance_snapshots isn't in it) and is
+      // non-critical — a failure never fails the transaction.
+      try {
+        const postedDate = getLocalDateString(transaction.created_at);
+        const todayLocal = getLocalDateString(new Date().toISOString());
+        if (postedDate < todayLocal && persistedEntries.length > 0) {
+          const { snapshotService } = await import('./snapshotService');
+          const invalidated = await snapshotService.invalidateLocalSnapshots(
+            params.context.storeId,
+            postedDate,
+            persistedEntries.map(e => ({ account_code: e.account_code, entity_id: e.entity_id ?? null }))
+          );
+          if (invalidated > 0) {
+            console.log(`[CREATE_TRANSACTION] Invalidated ${invalidated} local snapshot(s) for backdated posting ${postedDate}`);
+          }
+        }
+      } catch (snapErr) {
+        console.warn('[CREATE_TRANSACTION] Snapshot invalidation failed (non-critical):', snapErr);
+      }
+
       console.log(`[CREATE_TRANSACTION] ✅ Transaction created successfully:`, {
         transactionId,
         cashDrawerImpact,
@@ -550,6 +596,302 @@ export class TransactionService {
         balanceBefore: 0,
         balanceAfter: 0,
         affectedRecords: []
+      };
+    }
+  }
+
+  /**
+   * Correct a transaction using the three-document pattern:
+   * original (superseded) ← reversal + replacement.
+   *
+   * This is the single sanctioned entry point for corrections. It fixes the
+   * two failure modes of the old UI-orchestrated flow:
+   *  - the supersede is an atomic compare-and-set CLAIM that runs FIRST, so a
+   *    concurrent/stale retry can never double-reverse an already-corrected
+   *    row, and the original can never remain 'active' beside its replacement;
+   *  - every failure path lands in a consistent ledger state:
+   *      · reversal fails  → claim rolled back, original is 'active' again;
+   *      · replacement fails → original + reversal net to zero, original is
+   *        marked 'reversed' (a legitimate terminal state — resurrecting
+   *        'active' would double-post the reversal on retry). The caller must
+   *        tell the user to re-enter the payment.
+   *
+   * (A single Dexie rw block around all three documents is not possible:
+   * createTransaction awaits dynamic imports and non-Dexie work, which would
+   * commit an enclosing IndexedDB transaction early.)
+   */
+  public async correctTransaction(params: {
+    originalTransactionId: string;
+    category: TransactionCategory;
+    amount: number;
+    currency: CurrencyCode;
+    description: MultilingualString;
+    context: TransactionContext;
+    reference?: string;
+    entityId?: string | null;
+    /** Human-readable reason recorded on the reversal document. */
+    reversalReason: string;
+  }): Promise<{
+    success: boolean;
+    error?: string;
+    /** Set when the failure left the original fully reversed (must be re-entered). */
+    originalReversed?: boolean;
+    reversalTransactionId?: string;
+    correctedTransactionId?: string;
+    /** Non-fatal problem (ledger is correct) the caller may surface. */
+    warning?: string;
+  }> {
+    const db = getDB();
+    const { originalTransactionId } = params;
+
+    // ---- STEP 1: CLAIM (atomic compare-and-set) --------------------------
+    // Only an ACTIVE row may be corrected. Re-read inside the rw transaction
+    // (never trust caller-supplied React state) and flip to 'superseded' in
+    // the same commit, so no other local flow can claim it concurrently.
+    let original: TransactionRow;
+    try {
+      original = await db.transaction('rw', db.transactions, async () => {
+        const row = await db.transactions.get(originalTransactionId);
+        if (!row) throw new Error('Original transaction not found');
+        const alreadyFinalized =
+          row._deleted === true ||
+          row.is_reversal === true ||
+          (row.status != null && row.status !== 'active') ||
+          row.metadata?.corrected === true;
+        if (alreadyFinalized) {
+          throw new Error('TRANSACTION_NOT_ACTIVE');
+        }
+        await db.transactions.update(originalTransactionId, {
+          status: 'superseded' as const,
+          _synced: false,
+        });
+        return row;
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to claim transaction';
+      return {
+        success: false,
+        error: message === 'TRANSACTION_NOT_ACTIVE'
+          ? 'This payment was already corrected or reversed and can no longer be edited.'
+          : message,
+      };
+    }
+
+    // ---- STEP 2: REVERSAL DOCUMENT ---------------------------------------
+    // Dynamic import to avoid a static transactionService ⇄ accountBalanceService cycle.
+    let reversalTransaction: { id: string };
+    try {
+      const { accountBalanceService } = await import('./accountBalanceService');
+      reversalTransaction = await accountBalanceService.createReversalTransaction(
+        originalTransactionId,
+        params.reversalReason,
+        params.context.userId
+      );
+      if (!reversalTransaction) throw new Error('Reversal transaction was not created');
+    } catch (error) {
+      // Compensate: release the claim so the row is correctable again.
+      try {
+        await db.transactions.update(originalTransactionId, {
+          status: 'active' as const,
+          _synced: false,
+        });
+      } catch (restoreError) {
+        // Ledger is still correct (nothing was reversed); the row is merely
+        // hidden from 'active' lists until manually restored.
+        console.error('[CORRECT_TRANSACTION] ❌ Failed to release claim after reversal failure:', restoreError);
+      }
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to create reversal transaction',
+      };
+    }
+
+    // ---- STEP 3: REPLACEMENT DOCUMENT ------------------------------------
+    const replacementResult = await this.createTransaction({
+      category: params.category,
+      amount: params.amount,
+      currency: params.currency,
+      description: params.description,
+      context: params.context,
+      reference: params.reference,
+      entityId: params.entityId ?? original.entity_id ?? undefined,
+      // Correction lineage: point back to the row being replaced and carry
+      // the chain root forward (inherited if the original was itself a
+      // correction) so the whole chain is reconstructable in O(1).
+      corrected_from_transaction_id: originalTransactionId,
+      chain_root_id: original.chain_root_id || originalTransactionId,
+    });
+
+    if (!replacementResult.success) {
+      // Original + reversal already net to zero — a consistent terminal
+      // state. Mark the original 'reversed' (NOT back to 'active': the
+      // reversal has posted, and an 'active' original would invite a retry
+      // that reverses it a second time).
+      try {
+        await db.transactions.update(originalTransactionId, {
+          status: 'reversed' as const,
+          _synced: false,
+          metadata: {
+            ...(original.metadata || {}),
+            correctionFailed: true,
+            correctionFailedAt: new Date().toISOString(),
+            reversalTransactionId: reversalTransaction.id,
+          },
+        });
+      } catch (markError) {
+        console.error('[CORRECT_TRANSACTION] ❌ Failed to mark original reversed after replacement failure:', markError);
+      }
+      return {
+        success: false,
+        originalReversed: true,
+        reversalTransactionId: reversalTransaction.id,
+        error: `Correction failed after the original was reversed: ${replacementResult.error || 'unknown error'}. The original payment is now fully reversed — please re-enter it.`,
+      };
+    }
+
+    // ---- STEP 4: FINALIZE LINEAGE ----------------------------------------
+    // The load-bearing state (status='superseded') was already committed by
+    // the claim; this adds the forward pointer + human-readable audit trail.
+    let warning: string | undefined;
+    try {
+      await db.transactions.update(originalTransactionId, {
+        superseded_by_transaction_id: replacementResult.transactionId || null,
+        _synced: false,
+        metadata: {
+          ...(original.metadata || {}),
+          corrected: true,
+          correctedAt: new Date().toISOString(),
+          correctedBy: params.context.userId,
+          reversalTransactionId: reversalTransaction.id,
+          correctedTransactionId: replacementResult.transactionId,
+          correctionReason: params.reversalReason,
+        },
+      });
+    } catch (finalizeError) {
+      // Ledger and status are correct; only the forward pointer/metadata are
+      // missing (the chain is still traceable via the replacement's
+      // corrected_from_transaction_id). Surface but do not fail.
+      console.error('[CORRECT_TRANSACTION] ⚠️ Failed to write lineage pointer/metadata:', finalizeError);
+      warning = 'Correction succeeded, but the lineage pointer on the original could not be written.';
+    }
+
+    return {
+      success: true,
+      reversalTransactionId: reversalTransaction.id,
+      correctedTransactionId: replacementResult.transactionId,
+      warning,
+    };
+  }
+
+  /**
+   * Post an entity's opening balance(s) as a first-class OPENING_BALANCE
+   * transaction: ONE parent `transactions` row (so the journal_entries →
+   * transactions FK holds on sync) plus one directional double-entry per
+   * currency, all under that row's id, ATOMICALLY. Replaces the old
+   * journalService.createJournalEntry loop that produced orphan entries with
+   * no parent transaction.
+   *
+   * `balances` is a SIGNED per-currency map. Direction per (entityType, sign):
+   *   customer, +  → Dr 1200 (AR)  / Cr 3100 (Equity)   they owe us
+   *   customer, −  → Dr 3100       / Cr 1200 (AR)        we owe them (credit)
+   *   supplier, +  → Dr 3100       / Cr 2100 (AP)        we owe them
+   *   supplier, −  → Dr 2100 (AP)  / Cr 3100             they owe us
+   *
+   * The single-currency `transactions` row carries a representative
+   * currency/amount (first non-zero leg); the per-currency journal entries are
+   * the authoritative record. Zero balances are skipped. Returns the parent
+   * transaction id (for undo grouping) or null when there is nothing to post.
+   */
+  public async createOpeningBalance(params: {
+    entityId: string;
+    entityType: 'customer' | 'supplier';
+    balances: Partial<Record<CurrencyCode, number>>;
+    context: TransactionContext;
+    postedDate?: string;
+    transactionId?: string;
+  }): Promise<{ success: boolean; transactionId: string | null; error?: string }> {
+    const { entityId, entityType, balances, context } = params;
+    const codes = (Object.keys(balances) as CurrencyCode[]).filter((c) => (balances[c] ?? 0) !== 0);
+    if (codes.length === 0) {
+      return { success: true, transactionId: null };
+    }
+
+    const transactionId = params.transactionId ?? this.generateTransactionId();
+    const timestamp = params.postedDate ?? new Date().toISOString();
+    const postedDate = getLocalDateString(timestamp);
+    const arOrAp = entityType === 'customer' ? '1200' : '2100';
+    const primaryCurrency = codes[0];
+    const primaryAmount = Math.abs(balances[primaryCurrency] ?? 0);
+
+    try {
+      await getDB().transaction(
+        'rw',
+        [getDB().transactions, getDB().journal_entries, getDB().entities, getDB().chart_of_accounts],
+        async () => {
+          const transaction: TransactionRow = {
+            id: transactionId,
+            store_id: context.storeId,
+            branch_id: context.branchId,
+            // Not semantically meaningful for opening balances; JEs are authoritative.
+            type: 'income',
+            category: TRANSACTION_CATEGORIES.OPENING_BALANCE,
+            amount: primaryAmount,
+            currency: primaryCurrency,
+            description: `${entityType} opening balance`,
+            reference: `OB-${entityId.slice(0, 8).toUpperCase()}`,
+            entity_id: entityId,
+            created_at: timestamp,
+            posted_date: postedDate,
+            created_by: context.userId,
+            _synced: false,
+            _deleted: false,
+            is_reversal: false,
+            reversal_of_transaction_id: null,
+            status: 'active',
+            superseded_by_transaction_id: null,
+            corrected_from_transaction_id: null,
+            chain_root_id: null,
+            metadata: {
+              source: context.source || 'offline',
+              module: context.module,
+              opening_balance: true,
+            },
+          };
+          await getDB().transactions.add(transaction);
+
+          for (const code of codes) {
+            const signed = balances[code] ?? 0;
+            const isPositive = signed >= 0;
+            const debitAccount = entityType === 'customer'
+              ? (isPositive ? arOrAp : '3100')
+              : (isPositive ? '3100' : arOrAp);
+            const creditAccount = entityType === 'customer'
+              ? (isPositive ? '3100' : arOrAp)
+              : (isPositive ? arOrAp : '3100');
+
+            await journalService.createJournalEntry({
+              transactionId,
+              debitAccount,
+              creditAccount,
+              amount: Math.abs(signed),
+              currency: code,
+              entityId,
+              description: `${entityType}.initialBalance`,
+              postedDate,
+              createdBy: context.userId,
+              branchId: context.branchId,
+              skipVerification: true, // running inside a Dexie rw transaction
+            });
+          }
+        }
+      );
+      return { success: true, transactionId };
+    } catch (error) {
+      console.error('[CREATE_OPENING_BALANCE] Failed:', error);
+      return {
+        success: false,
+        transactionId: null,
+        error: error instanceof Error ? error.message : 'Failed to post opening balance',
       };
     }
   }
@@ -798,140 +1140,13 @@ export class TransactionService {
   // TRANSACTION MODIFICATION
   // ==========================================================================
 
-  /**
-   * Update an existing transaction atomically
-   * Handles balance adjustments and maintains data integrity
-   */
-  public async updateTransaction(
-    transactionId: string,
-    updates: Partial<CreateTransactionParams>,
-    context: TransactionContext
-  ): Promise<TransactionResult> {
-    try {
-      // Get original transaction (outside transaction - read-only)
-      const original = await getDB().transactions.get(transactionId);
-      if (!original) {
-        return {
-          success: false,
-          error: 'Transaction not found',
-          balanceBefore: 0,
-          balanceAfter: 0,
-          affectedRecords: []
-        };
-      }
-
-      if (original._deleted) {
-        return {
-          success: false,
-          error: 'Cannot update deleted transaction',
-          balanceBefore: 0,
-          balanceAfter: 0,
-          affectedRecords: []
-        };
-      }
-
-      const timestamp = new Date().toISOString();
-      let balanceBefore = 0;
-      let balanceAfter = 0;
-      const affectedRecords: string[] = [transactionId];
-
-      // ⭐⭐⭐ ATOMIC TRANSACTION BLOCK ⭐⭐⭐
-      await getDB().transaction('rw', 
-        [getDB().transactions, getDB().entities, getDB().cash_drawer_sessions], 
-        async () => {
-          // Get current balance before update
-          balanceBefore = await this.getEntityBalance(
-            original.entity_id || null,
-            original.currency
-          );
-
-          // If amount or type changed, we need to reverse old balance impact
-          // and apply new balance impact
-          if (updates.amount !== undefined || updates.category !== undefined) {
-            // Reverse original transaction impact
-            const reversalTransaction: Transaction = {
-              ...original,
-              type: original.type === 'income' ? 'expense' : 'income', // Reverse type
-              amount: original.amount, // Keep original amount
-              category: original.category as TransactionCategory,
-              description: typeof original.description === 'string' ? original.description : JSON.stringify(original.description)
-            };
-            
-            // Balances are calculated from journal entries - no need to update
-            
-            // Apply new transaction impact
-            const newType = updates.category ? getTransactionType(updates.category) : original.type;
-            const newAmount = updates.amount ?? original.amount;
-            
-            const newTransaction: Transaction = {
-              ...original,
-              type: newType as TransactionType,
-              amount: newAmount,
-              category: (updates.category ?? original.category) as TransactionCategory,
-              description: typeof original.description === 'string' ? original.description : JSON.stringify(original.description)
-            };
-            
-            // Balances are calculated from journal entries - no need to update
-            // Use entityBalanceService.getEntityBalance() to get current balance
-          } else {
-            balanceAfter = balanceBefore;
-          }
-
-          // Update the transaction record
-          const updateData: any = {
-            ...updates,
-            updated_at: timestamp,
-            _synced: false
-          };
-
-          // Remove context from updates as it's not a transaction field
-          delete updateData.context;
-
-          await getDB().transactions.update(transactionId, updateData);
-        }
-      );
-      // ⭐⭐⭐ END ATOMIC TRANSACTION ⭐⭐⭐
-
-      // Create audit log (outside transaction - non-critical)
-      try {
-        await auditLogService.log({
-          action: 'transaction_updated',
-          entityType: 'transaction',
-          entityId: transactionId,
-          description: `Transaction updated: ${original.description} | Balance: ${balanceBefore} → ${balanceAfter}`,
-          userId: context.userId,
-          userEmail: context.userEmail,
-          severity: 'medium',
-          tags: ['transaction', 'update'],
-          metadata: {
-            source: (context.source === 'offline' ? 'system' : context.source) || 'web',
-            module: context.module,
-            sessionId: context.sessionId
-          }
-        });
-      } catch (auditError) {
-        console.warn('⚠️ Audit log creation failed:', auditError);
-      }
-
-      return {
-        success: true,
-        transactionId,
-        balanceBefore,
-        balanceAfter,
-        affectedRecords
-      };
-
-    } catch (error) {
-      console.error('❌ Transaction update failed (all operations rolled back):', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Update failed',
-        balanceBefore: 0,
-        balanceAfter: 0,
-        affectedRecords: []
-      };
-    }
-  }
+  // REMOVED: updateTransaction(). It edited a transaction's amount/category in
+  // place with NO journal entries and no status/fiscal guard — the built
+  // "reversal"/"new" objects were never persisted, so journal-derived balances
+  // would silently diverge from transactions.amount. It had no callers.
+  // Corrections go through correctTransaction() (reversal + replacement);
+  // deletions through deleteTransaction() (voids + reverses). Transactions are
+  // never mutated in place.
 
   /**
    * Create reversal journal entries for a set of original journal entries
@@ -1439,7 +1654,20 @@ export class TransactionService {
    */
   private async normalizePaymentCurrency(
     params: CreateTransactionParams
-  ): Promise<{ amount: number; currency: CurrencyCode }> {
+  ): Promise<{
+    amount: number;
+    currency: CurrencyCode;
+    /** Present only when a cross-currency conversion actually happened. */
+    normalization?: {
+      original_amount: number;
+      original_currency: CurrencyCode;
+      converted_amount: number;
+      converted_currency: CurrencyCode;
+      /** Converted units per 1 original unit, at posting time. */
+      exchange_rate: number;
+      normalized_at: string;
+    };
+  }> {
     const { category, amount, currency, entityId } = params;
 
     const NORMALIZABLE: TransactionCategory[] = [
@@ -1505,7 +1733,21 @@ export class TransactionService {
         `(no ${currency} balance; existing ${other} balance: ${(balances as Record<string, number>)[other]})`
       );
 
-      return { amount: convertedAmount, currency: other };
+      return {
+        amount: convertedAmount,
+        currency: other,
+        // Stamp the tendered amount/currency and the rate used so the payment
+        // is auditable and a later correction/reversal can reference the
+        // ORIGINAL tender instead of silently re-converting at a different rate.
+        normalization: {
+          original_amount: amount,
+          original_currency: currency as CurrencyCode,
+          converted_amount: convertedAmount,
+          converted_currency: other,
+          exchange_rate: amount !== 0 ? rawConverted / amount : 0,
+          normalized_at: getLocalDateString(new Date().toISOString()),
+        },
+      };
     }
 
     return { amount, currency };

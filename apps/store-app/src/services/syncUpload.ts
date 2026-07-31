@@ -79,10 +79,32 @@ export function getCurrencyErrorListForTesting(): UploadCurrencyError[] {
 }
 
 /**
+ * True when the error is the closed-fiscal-year server trigger rejecting a
+ * post (reject_post_to_closed_fy, ERRCODE restrict_violation = 23001). Such a
+ * row is neither retryable (it would loop until the period is reopened) nor
+ * deletable (it holds ledger data) — the uploader parks it instead. Match on
+ * both the SQLSTATE and the message signature so a wording change on either
+ * side can't silently reclassify it.
+ */
+export function isClosedFiscalPeriodError(error: any): boolean {
+  if (error?.code === '23001') return true;
+  const msg = (error?.message || '').toLowerCase();
+  const hint = (error?.hint || '').toLowerCase();
+  return msg.includes('closed fiscal year') || hint.includes('reopen_fiscal_year');
+}
+
+/**
  * Classifies errors to determine if they are unrecoverable.
  * Returns true if the error should result in record deletion.
  */
 export function isUnrecoverableError(error: any, _tableName: string, _record: any): boolean {
+  // A closed-period rejection is NEVER unrecoverable — deleting the row would
+  // destroy ledger data. It is handled by parking (see handleFailedBatch).
+  // This guard defends against the message ever containing a keyword below
+  // (e.g. "constraint") that would otherwise flip it to a hard delete.
+  if (isClosedFiscalPeriodError(error)) {
+    return false;
+  }
   // PostgreSQL error codes for constraint violations and data validation errors
   const unrecoverableCodes = [
     '23503', // Foreign key constraint violation
@@ -287,6 +309,13 @@ async function handleFailedBatch(tableName: string, cleanedBatch: any[], origina
         .upsert([record], upsertOptionsFor(tableName));
 
       if (individualError) {
+        // Closed fiscal period: park the row (no retry, no delete) so the
+        // outbox drains and the user can reopen the period or re-date.
+        if (isClosedFiscalPeriodError(individualError)) {
+          await getDB().blockSyncForClosedPeriod(tableName, original.id, individualError.message || 'closed fiscal period');
+          console.warn(`⏸️ Parked ${tableName} ${original.id}: dated in a closed fiscal period. Reopen the period (or re-date) to post.`);
+          continue;
+        }
         // Check if error is unrecoverable
         if (isUnrecoverableError(individualError, tableName, record)) {
           // Try to fix the record once by nullifying optional foreign keys
@@ -325,6 +354,12 @@ async function handleFailedBatch(tableName: string, cleanedBatch: any[], origina
       }
     } catch (e) {
       console.error(`❌ Critical error with record:`, record, e);
+      // Closed-period rejection can also surface as a thrown error.
+      if (isClosedFiscalPeriodError(e)) {
+        await getDB().blockSyncForClosedPeriod(tableName, original.id, (e as any)?.message || 'closed fiscal period');
+        console.warn(`⏸️ Parked ${tableName} ${original.id}: dated in a closed fiscal period.`);
+        continue;
+      }
       // For unexpected errors, check if they're unrecoverable
       if (isUnrecoverableError(e, tableName, record)) {
         await deleteProblematicRecord(tableName, original.id, e);
@@ -448,6 +483,21 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
   // bill_line_items and bill_audit_logs with the same IDs).
   const parentExistenceCache = new Map<string, Set<string>>();
 
+  // Rows parked because they were rejected by the closed-fiscal-year trigger.
+  // Excluded from the upload scan so they don't re-attempt (and re-fail) every
+  // cycle. Cleared when the period is reopened (fiscalYearCloseService) or by
+  // an explicit user retry. Loaded once per pass.
+  const blockedKeys = await getDB().getClosedPeriodBlockedKeySet();
+
+  // Events whose consumer cascades to CHILD rows that upload later in this same
+  // pass (SYNC_TABLES order: bills → … → bill_line_items, inventory_bills →
+  // inventory_items). Emitting them inline raced the child upload: the other
+  // device received `sale_posted`, fetched bill_line_items that were not on the
+  // server yet, and stored a bill with zero lines — permanently, because the
+  // event is never re-emitted. Collected here and flushed after the whole loop,
+  // once every table (children included) has uploaded.
+  const deferredChildSafeEvents: Array<{ label: string; emit: () => Promise<void> }> = [];
+
   for (const tableName of SYNC_TABLES) {
     const tableStart = performance.now();
     try {
@@ -469,11 +519,14 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
         // generated snapshots are canonical; uploading a local fallback would
         // overwrite the canonical row with a partial view.
         if (tableName === 'balance_snapshots' && record.source === 'client') return false;
+        // Skip rows parked by the closed-fiscal-year trigger.
+        if (blockedKeys.has(`${tableName}:${record.id}`)) return false;
         return true;
       }).toArray();
       const deletedRecords = await table.filter((record: any) => {
         if (!record._deleted || record._synced) return false;
         if (tableName === 'balance_snapshots' && record.source === 'client') return false;
+        if (blockedKeys.has(`${tableName}:${record.id}`)) return false;
         return true;
       }).toArray();
 
@@ -856,9 +909,12 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
           // 🎯 EMIT EVENTS: After successful upload to Supabase
           // This ensures the record exists when other devices receive the event
           if (tableName === 'bills') {
-            await Promise.allSettled((batch as any[]).map(async (record) => {
-              try {
-                await eventEmissionService.emitSalePosted(
+            // Deferred: `sale_posted` makes the receiver pull this bill's
+            // bill_line_items, which upload later in this pass.
+            for (const record of batch as any[]) {
+              deferredChildSafeEvents.push({
+                label: `sale_posted/${record.id}`,
+                emit: () => eventEmissionService.emitSalePosted(
                   record.store_id,
                   record.branch_id,
                   record.id,
@@ -867,12 +923,9 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
                     total: record.total_amount || 0,
                     line_items_count: 0
                   }
-                );
-                console.log(`🎯 [Event] Emitted sale_posted event for bill ${record.id}`);
-              } catch (eventError) {
-                console.error('[Event] Failed to emit sale_posted event:', eventError);
-              }
-            }));
+                ),
+              });
+            }
           } else if (tableName === 'transactions') {
             // Emit events for transactions (affects cash drawer balance).
             // Each record may emit up to two RPCs (payment + cash drawer); per-record
@@ -999,9 +1052,12 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
               }
             }));
           } else if (tableName === 'inventory_bills') {
-            await Promise.allSettled((batch as any[]).map(async (record) => {
-              try {
-                await eventEmissionService.emitInventoryReceived(
+            // Deferred: `inventory_received` makes the receiver pull this
+            // batch's inventory_items, which upload later in this pass.
+            for (const record of batch as any[]) {
+              deferredChildSafeEvents.push({
+                label: `inventory_received/${record.id}`,
+                emit: () => eventEmissionService.emitInventoryReceived(
                   record.store_id,
                   record.branch_id,
                   record.id,
@@ -1010,12 +1066,9 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
                     items_count: 0,
                     total_value: 0
                   }
-                );
-                console.log(`🎯 [Event] Emitted inventory_received event for bill ${record.id}`);
-              } catch (eventError) {
-                console.error('[Event] Failed to emit inventory_received event:', eventError);
-              }
-            }));
+                ),
+              });
+            }
           } else if (tableName === 'inventory_loss_events') {
             // Spec 019: one inventory_loss_posted event per loss row, emitted
             // only after the batch upsert is confirmed (upload-then-emit).
@@ -1434,6 +1487,22 @@ export async function uploadLocalChanges(storeId: string, branchId?: string) {
       console.error(`  ⏱️  ${tableName} upload failed after ${tableTime.toFixed(2)}ms:`, error);
       result.errors.push(`Table ${tableName} upload error: ${error}`);
     }
+  }
+
+  // Flush parent events whose consumers cascade to child tables. Every table in
+  // SYNC_TABLES has now uploaded, so a receiver acting on these events will find
+  // the child rows (bill_line_items / inventory_items) already on the server.
+  if (deferredChildSafeEvents.length > 0) {
+    await Promise.allSettled(
+      deferredChildSafeEvents.map(async ({ label, emit }) => {
+        try {
+          await emit();
+          console.log(`🎯 [Event] Emitted ${label} (deferred until children uploaded)`);
+        } catch (eventError) {
+          console.error(`[Event] Failed to emit ${label}:`, eventError);
+        }
+      })
+    );
   }
 
   return result;

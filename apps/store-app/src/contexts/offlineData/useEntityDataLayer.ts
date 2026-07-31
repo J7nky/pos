@@ -7,10 +7,9 @@
 import { useState, useCallback } from 'react';
 import { createId } from '../../lib/db';
 import { getDB } from '../../lib/db';
-import { journalService } from '../../services/journalService';
+import { transactionService } from '../../services/transactionService';
 import { emitEntityEvent, buildEventOptions } from '../../services/eventEmissionHelper';
 import { auditService } from '../../services/auditService';
-import { getLocalDateString } from '../../utils/dateUtils';
 import { sameRowList } from '../../utils/rowListEquality';
 import type { EntityDataLayerAdapter, EntityDataLayerResult, Tables } from './types';
 import type { CurrencyCode } from '@pos-platform/shared';
@@ -69,53 +68,39 @@ function coerceAdvanceBalanceMap(
 }
 
 /**
- * Post one journal entry per non-zero currency in the balance map. The
- * direction (Debit AR vs Credit AR for customers; Debit AP vs Credit AP
- * for suppliers) is determined per-currency by the sign of the amount.
- * Returns the synthetic transaction_id used to tag all entries — undo
- * uses it to wipe the whole group in one shot.
+ * Post an entity's opening balance(s) via transactionService.createOpeningBalance,
+ * which creates a parent OPENING_BALANCE `transactions` row plus one directional
+ * double-entry per currency, atomically. (Previously this posted journal entries
+ * with no parent transaction — orphans that failed the journal_entries →
+ * transactions FK on sync.) Returns the parent transaction_id used to tag all
+ * entries — undo wipes the whole group (transactions row + entries) by that id.
  */
 async function postInitialBalanceEntries(
   entityId: string,
   entityType: 'customer' | 'supplier',
   initialBalances: Partial<Record<CurrencyCode, number>>,
+  storeId: string,
   branchId: string,
   userProfileId: string | undefined,
   now: string
 ): Promise<string | null> {
-  const codes = (Object.keys(initialBalances) as CurrencyCode[])
-    .filter(code => (initialBalances[code] ?? 0) !== 0);
-  if (codes.length === 0) return null;
-
-  const transactionId = createId();
-  const postedDate = getLocalDateString(now);
-  const arOrAp = entityType === 'customer' ? '1200' : '2100';
-
-  for (const code of codes) {
-    const amount = initialBalances[code] ?? 0;
-    const isPositive = amount >= 0;
-    const debitAccount = entityType === 'customer'
-      ? (isPositive ? arOrAp : '3100')
-      : (isPositive ? '3100' : arOrAp);
-    const creditAccount = entityType === 'customer'
-      ? (isPositive ? '3100' : arOrAp)
-      : (isPositive ? arOrAp : '3100');
-
-    await journalService.createJournalEntry({
-      transactionId,
-      debitAccount,
-      creditAccount,
-      amount: Math.abs(amount),
-      currency: code,
-      entityId,
-      description: `customers.initialBalance`,
-      postedDate,
-      createdBy: userProfileId || null,
+  const result = await transactionService.createOpeningBalance({
+    entityId,
+    entityType,
+    balances: initialBalances,
+    context: {
+      userId: userProfileId || 'system',
+      storeId,
       branchId,
-    });
+      module: 'entity_management',
+      source: 'offline',
+    },
+    postedDate: now,
+  });
+  if (!result.success) {
+    throw new Error(result.error || 'Failed to post opening balance');
   }
-
-  return transactionId;
+  return result.transactionId;
 }
 
 /** Entity fields tracked in the audit trail (dotted paths into the row). */
@@ -198,6 +183,7 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
             supplierId,
             'supplier',
             initialBalances,
+            storeId!,
             currentBranchId,
             userProfileId,
             now,
@@ -211,6 +197,8 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
         { op: 'delete', table: 'entities', id: supplierId },
       ];
       if (initialBalanceTxnId) {
+        // Delete the parent OPENING_BALANCE transaction and its journal entries.
+        undoSteps.push({ op: 'delete', table: 'transactions', id: initialBalanceTxnId });
         undoSteps.push({
           op: 'delete',
           table: 'journal_entries',
@@ -288,6 +276,7 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
             customerId,
             'customer',
             initialBalances,
+            storeId!,
             currentBranchId,
             userProfileId,
             now,
@@ -301,6 +290,8 @@ export function useEntityDataLayer(adapter: EntityDataLayerAdapter): EntityDataL
         { op: 'delete', table: 'entities', id: customerId },
       ];
       if (initialBalanceTxnId) {
+        // Delete the parent OPENING_BALANCE transaction and its journal entries.
+        undoSteps.push({ op: 'delete', table: 'transactions', id: initialBalanceTxnId });
         undoSteps.push({
           op: 'delete',
           table: 'journal_entries',

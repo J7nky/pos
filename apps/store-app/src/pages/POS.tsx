@@ -34,7 +34,7 @@ import { useProductMultilingual } from '../hooks/useMultilingual';
 import { parseMultilingualString } from '../utils/multilingual';
 import { normalizeNameForComparison } from '../utils/nameNormalization';
 import { computeLineUnitPrice } from '../contexts/offlineData/operations/saleOperations';
-import { MissingExchangeRateError, currencyService } from '../services/currencyService';
+import { MissingExchangeRateError } from '../services/currencyService';
 import { LegacyCurrencyMissingError } from '../errors/currencyErrors';
 import type { CurrencyCode } from '@pos-platform/shared';
 
@@ -1075,17 +1075,10 @@ ${dashSeparator}`;
     setIsProcessing(true);
     
     try {
-      // Convert the entered amount to LBP for storage when LBP is in use.
-      // For non-LBP stores (USD-only, AED, …), convert through safeConvert
-      // and fall back to the entered amount when no rate is available.
-      let amountInLBP = openingAmount;
-      const preferred = (raw.currency || raw.preferredCurrency) as CurrencyCode;
-      if (preferred !== 'LBP' && currencyService.canConvert(preferred, 'LBP')) {
-        amountInLBP = currencyService.convert(openingAmount, preferred, 'LBP');
-      }
-
-      // Open cash drawer with the converted amount
-      await raw.openCashDrawer(amountInLBP, userProfile.id);
+      // Opening amounts are stored in the store's preferred currency —
+      // no LBP pre-conversion (the read side attributes opening_amount to
+      // the cash account's currency; converting here double-counts).
+      await raw.openCashDrawer(openingAmount, userProfile.id);
       
       // Close modal
       setShowCashDrawerModal(false);

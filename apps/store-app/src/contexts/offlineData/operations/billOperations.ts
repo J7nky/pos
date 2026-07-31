@@ -283,7 +283,9 @@ export async function deleteBill(
               type: 'expense',
               category: TRANSACTION_CATEGORIES.CASH_DRAWER_EXPENSE,
               amount: bill.amount_paid,
-              currency: 'LBP',
+              // Mirror the transaction being reversed — never hardcode a
+              // currency on a reversal (a $150 USD refund is not 150 LBP).
+              currency: cashTransaction.currency ?? bill.currency ?? 'LBP',
               description: `payments.billCancellationRefund`,
               reference: bill.bill_number,
               entity_id: cashTransaction.entity_id || null,
@@ -303,7 +305,12 @@ export async function deleteBill(
             }
           }
         } catch (error) {
-          console.error('❌ Error reversing cash drawer transaction:', error);
+          // This runs INSIDE the atomic rw block. Swallowing here would commit
+          // the cancellation + non-cash reversals while leaving the cash leg
+          // un-reversed — the drawer/ledger would silently diverge. Rethrow so
+          // the whole deletion rolls back and the caller surfaces the failure.
+          console.error('❌ Error reversing cash drawer transaction — rolling back bill deletion:', error);
+          throw error;
         }
       }
 
@@ -973,7 +980,9 @@ export async function reactivateBill(
             type: 'income',
             category: TRANSACTION_CATEGORIES.CASH_DRAWER_SALE,
             amount: bill.amount_paid,
-            currency: 'LBP',
+            // Mirror the reversal being re-reversed — same currency identity
+            // as the original cash transaction.
+            currency: cashReversalTransaction.currency ?? bill.currency ?? 'LBP',
             description: 'payments.billReactivation',
             reference: bill.bill_number,
             entity_id: cashReversalTransaction.entity_id || null,
@@ -995,7 +1004,10 @@ export async function reactivateBill(
           }
         }
       } catch (error) {
-        console.error('Error restoring cash drawer transaction:', error);
+        // Inside the atomic rw block — rethrow so reactivation rolls back
+        // rather than committing with the cash leg un-restored (silent divergence).
+        console.error('Error restoring cash drawer transaction — rolling back reactivation:', error);
+        throw error;
       }
     }
 

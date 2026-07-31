@@ -26,8 +26,12 @@ import {
   Calculator,
   UserCog,
   CloudOff,
-  ScrollText
+  ScrollText,
+  PanelLeftClose,
+  PanelLeftOpen
 } from 'lucide-react';
+
+const SIDEBAR_COLLAPSED_KEY = 'sidebar_collapsed';
 
 // Layout-independent navigation shortcuts. `key` drives the native HTML
 // accessKey attribute (always ASCII so Arabic locale doesn't break it), and
@@ -51,6 +55,17 @@ export default function Layout() {
   const { t } = useI18n();
   const location = useLocation();
   const navigate = useNavigate();
+
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(
+    () => localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true'
+  );
+  const toggleSidebar = () => {
+    setSidebarCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next));
+      return next;
+    });
+  };
 
   if (!userProfile) {
     return (
@@ -470,64 +485,113 @@ export default function Layout() {
   return (
     <div className="flex h-screen bg-gray-50">
       {/* Sidebar */}
-      <div className="w-64 bg-white shadow-lg">
-        <div className="p-6 border-b">
-          <h1 className="text-xl font-bold text-gray-800">{t('layout.title')}</h1>
-          <div className="flex items-center justify-between mt-2">
-            <div className="flex items-center text-sm text-gray-600">
-              {isOnline ? (
-                <><Wifi className="w-4 h-4 mr-2 text-green-500" /> {t('layout.connection.online')}</>
-              ) : (
-                <><WifiOff className="w-4 h-4 mr-2 text-red-500" /> {t('layout.connection.offline')}</>
-              )}
+      <div
+        className={`${sidebarCollapsed ? 'w-16' : 'w-64'} bg-white shadow-lg flex flex-col transition-[width] duration-200 ease-out shrink-0`}
+      >
+        <div className={`${sidebarCollapsed ? 'p-3' : 'p-6'} border-b`}>
+          <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between'}`}>
+            {!sidebarCollapsed && (
+              <h1 className="text-xl font-bold text-gray-800 truncate">{t('layout.title')}</h1>
+            )}
+            <button
+              onClick={toggleSidebar}
+              className="p-2 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+              aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              {sidebarCollapsed ? <PanelLeftOpen className="w-5 h-5" /> : <PanelLeftClose className="w-5 h-5" />}
+            </button>
+          </div>
+
+          {!sidebarCollapsed && (
+            <>
+              <div className="flex items-center justify-between mt-2">
+                <div className="flex items-center text-sm text-gray-600">
+                  {isOnline ? (
+                    <><Wifi className="w-4 h-4 mr-2 text-green-500" /> {t('layout.connection.online')}</>
+                  ) : (
+                    <><WifiOff className="w-4 h-4 mr-2 text-red-500" /> {t('layout.connection.offline')}</>
+                  )}
+                  {unsyncedCount > 0 && (
+                    <span className="ml-2 px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full">
+                      {t('common.status.unsyncedCount', { count: unsyncedCount })}
+                    </span>
+                  )}
+                </div>
+                <NotificationCenter />
+              </div>
+              <div className="mt-2">
+                <KeyboardShortcutsHelp shortcuts={getShortcutsForPage()} />
+              </div>
+            </>
+          )}
+
+          {sidebarCollapsed && (
+            <div
+              className="mt-3 flex justify-center"
+              title={isOnline ? t('layout.connection.online') : t('layout.connection.offline')}
+            >
+              {isOnline
+                ? <Wifi className="w-4 h-4 text-green-500" />
+                : <WifiOff className="w-4 h-4 text-red-500" />}
               {unsyncedCount > 0 && (
-                <span className="ml-2 px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full">
-                  {t('common.status.unsyncedCount', { count: unsyncedCount })}
-                </span>
+                <span className="ml-1 w-2 h-2 rounded-full bg-yellow-400" aria-label={t('common.status.unsyncedCount', { count: unsyncedCount })} />
               )}
             </div>
-            <NotificationCenter />
-          </div>
-          <div className="mt-2">
-            <KeyboardShortcutsHelp shortcuts={getShortcutsForPage()} />
-          </div>
+          )}
         </div>
 
-        <nav className="mt-6">
-          {menuItems.map((item, index) => (
-            <Link
-              key={item.id}
-              to={item.path}
-              className={`w-full flex items-center px-6 py-3 text-left hover:bg-blue-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset min-h-[48px] ${
-                location.pathname === item.path ? 'bg-blue-50 border-r-2 border-blue-500 text-blue-600' : 'text-gray-600'
-              }`}
-              tabIndex={index + 1}
-              accessKey={NAV_SHORTCUTS[item.id]?.key}
-              aria-label={NAV_SHORTCUTS[item.id]
-                ? `${item.label} (Alt+${NAV_SHORTCUTS[item.id].key.toUpperCase()})`
-                : item.label}
-            >
-              <item.icon className="w-5 h-5 mr-3 flex-shrink-0" />
-              <span className="flex-1">{item.label}</span>
-              {item.id === 'accounting' && showNonPricedBadge && (
-                <span className="ml-2 bg-red-500 text-white text-xs font-bold rounded-full min-w-[20px] h-5 flex items-center justify-center px-1">
-                  {nonPricedCount > 99 ? '99+' : nonPricedCount}
-                </span>
-              )}
-            </Link>
-          ))}
+        <nav className="mt-4 flex-1 overflow-y-auto">
+          {menuItems.map((item, index) => {
+            const isActive = location.pathname === item.path;
+            const shortcut = NAV_SHORTCUTS[item.id];
+            const ariaLabel = shortcut
+              ? `${item.label} (Alt+${shortcut.key.toUpperCase()})`
+              : item.label;
+            return (
+              <Link
+                key={item.id}
+                to={item.path}
+                className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center px-2' : 'px-6'} py-3 text-left hover:bg-blue-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset min-h-[48px] relative ${
+                  isActive ? 'bg-blue-50 border-r-2 border-blue-500 text-blue-600' : 'text-gray-600'
+                }`}
+                tabIndex={index + 1}
+                accessKey={shortcut?.key}
+                aria-label={ariaLabel}
+                title={sidebarCollapsed ? ariaLabel : undefined}
+              >
+                <item.icon className={`w-5 h-5 flex-shrink-0 ${sidebarCollapsed ? '' : 'mr-3'}`} />
+                {!sidebarCollapsed && <span className="flex-1 truncate">{item.label}</span>}
+                {item.id === 'accounting' && showNonPricedBadge && (
+                  sidebarCollapsed ? (
+                    <span
+                      className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500"
+                      aria-label={`${nonPricedCount} non-priced`}
+                    />
+                  ) : (
+                    <span className="ml-2 bg-red-500 text-white text-xs font-bold rounded-full min-w-[20px] h-5 flex items-center justify-center px-1">
+                      {nonPricedCount > 99 ? '99+' : nonPricedCount}
+                    </span>
+                  )
+                )}
+              </Link>
+            );
+          })}
         </nav>
 
-        <div className="absolute bottom-0 w-64 p-6 border-t">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-700">{userProfile?.name}</p>
-              <p className="text-xs text-gray-500 capitalize">{userProfile?.role}</p>
-            </div>
+        <div className={`${sidebarCollapsed ? 'p-2' : 'p-6'} border-t`}>
+          <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between'}`}>
+            {!sidebarCollapsed && (
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-gray-700 truncate">{userProfile?.name}</p>
+                <p className="text-xs text-gray-500 capitalize truncate">{userProfile?.role}</p>
+              </div>
+            )}
             <button
               onClick={signOut}
               className="p-2 text-gray-400 hover:text-red-600 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 rounded min-h-[44px] min-w-[44px]"
               aria-label="Sign out"
+              title={sidebarCollapsed ? `${userProfile?.name} — Sign out` : 'Sign out'}
               tabIndex={20}
             >
               <LogOut className="w-5 h-5" />

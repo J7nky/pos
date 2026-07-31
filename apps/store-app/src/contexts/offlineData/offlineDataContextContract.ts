@@ -479,12 +479,6 @@ export interface OfflineDataContextType {
   deleteSale: (id: string) => Promise<void>;
   updateBillsForSaleItem: (saleItemId: string) => Promise<void>;
   addTransaction: (transaction: Omit<Tables['transactions']['Insert'], 'store_id'>) => Promise<void>;
-  /**
-   * Patch fields on an existing transaction (e.g. correction supersede:
-   * status / superseded_by_transaction_id / metadata). Marks the row unsynced,
-   * refreshes, and triggers sync. Implemented by the transaction data layer.
-   */
-  updateTransaction: (id: string, updates: Record<string, unknown>) => Promise<void>;
   addExpenseCategory: (category: Omit<ExpenseCategory, 'id' | 'created_at'>) => Promise<void>;
   updateInventoryBatch: (id: string, updates: Partial<Tables['inventory_bills']['Update']>) => Promise<void>;
   deleteInventoryBatch: (id: string) => Promise<void>;

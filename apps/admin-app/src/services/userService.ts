@@ -1,7 +1,7 @@
 // User Service - Admin App
 // Handles store user management via Supabase
 
-import { supabase, supabaseAdmin } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import {
   StoreUser,
   CreateUserInput,
@@ -10,6 +10,26 @@ import {
   getSubscriptionLimits,
   SubscriptionPlan,
 } from '../types';
+
+/**
+ * Invoke the admin-users Edge Function (server-side holder of the service
+ * role key) and normalize its error shape. Non-2xx responses surface their
+ * JSON `error` message.
+ */
+async function invokeAdminUsers<T>(body: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase.functions.invoke('admin-users', { body });
+  if (error) {
+    let message = error.message;
+    try {
+      const ctx = await (error as { context?: Response }).context?.json();
+      if (ctx?.error) message = ctx.error;
+    } catch {
+      // keep the generic message
+    }
+    throw new Error(message);
+  }
+  return data as T;
+}
 
 // ============================================================================
 // USER CRUD OPERATIONS
@@ -149,99 +169,26 @@ export async function createUser(input: CreateUserInput): Promise<StoreUser> {
     throw new Error(message || 'Cannot create user');
   }
 
-  // Check if email already exists
-  // Use supabaseAdmin to bypass RLS for admin operations
-  const { data: existingUser, error: checkError } = await supabaseAdmin
-    .from('users')
-    .select('id')
-    .eq('email', input.email)
-    .maybeSingle();
-
-  if (checkError) {
-    console.error('Error checking existing user:', checkError);
-    throw new Error(`Failed to check if user exists: ${checkError.message}`);
-  }
-
-  if (existingUser) {
-    throw new Error('A user with this email already exists');
-  }
-
-  // Create user in Supabase Auth
-  const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+  // The admin-users Edge Function performs the global email-uniqueness
+  // check, creates the auth user + users row (rolling back the auth user on
+  // failure), and creates the matching employee entity — all server-side,
+  // so the service role key never ships in the client bundle.
+  const result = await invokeAdminUsers<{ user: StoreUser; entity_created: boolean }>({
+    action: 'create_user',
     email: input.email,
     password: input.password,
-    email_confirm: true,
-  });
-
-  if (authError) {
-    console.error('Error creating auth user:', authError);
-    throw new Error(`Failed to create user account: ${authError.message}`);
-  }
-
-  // Create user in users table
-  // Use supabaseAdmin to bypass RLS for admin operations
-  const userData = {
-    id: authData.user.id,
-    store_id: input.store_id,
-    branch_id: input.branch_id || null,
-    email: input.email,
     name: input.name,
     role: input.role,
+    store_id: input.store_id,
+    branch_id: input.branch_id || null,
     phone: input.phone || null,
-    is_active: true,
-  };
+  });
 
-  const { data, error } = await supabaseAdmin
-    .from('users')
-    .insert(userData)
-    .select()
-    .single();
-
-  if (error) {
-    // Rollback: delete auth user if users table insert fails
-    await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
-    console.error('Error creating user:', error);
-    throw new Error(`Failed to create user: ${error.message}`);
+  if (!result.entity_created) {
+    console.warn('⚠️ User created but entity record creation failed. Entity can be created later.');
   }
 
-  // Create corresponding entity record for the employee
-  try {
-    const now = new Date().toISOString();
-    const entityData = {
-      id: authData.user.id, // Use same ID as user for consistency
-      store_id: input.store_id,
-      branch_id: input.branch_id || null,
-      entity_type: 'employee' as const,
-      entity_code: `EMP-${authData.user.id.slice(0, 8).toUpperCase()}`,
-      name: input.name,
-      phone: input.phone || null,
-      is_system_entity: false,
-      is_active: true,
-      customer_data: null,
-      supplier_data: null,
-      created_at: now,
-      updated_at: now,
-    };
-
-    // Use supabaseAdmin to bypass RLS (similar to auth operations)
-    const { error: entityError } = await supabaseAdmin
-      .from('entities')
-      .insert(entityData);
-
-    if (entityError) {
-      console.error('Failed to create employee entity:', entityError);
-      // Don't fail the whole operation - entity can be created later if needed
-      // But log it for debugging
-      console.warn('⚠️ User created but entity record creation failed. Entity can be created later.');
-    } else {
-      console.log(`✅ Created entity record for user: ${input.name}`);
-    }
-  } catch (error) {
-    console.error('Error creating employee entity:', error);
-    // Don't fail the whole operation - entity can be created later if needed
-  }
-
-  return data;
+  return result.user;
 }
 
 /**
@@ -317,10 +264,13 @@ export async function deleteUser(userId: string): Promise<void> {
     throw new Error(`Failed to delete user: ${dbError.message}`);
   }
 
-  // Delete from Supabase Auth
-  const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(userId);
-
-  if (authError) {
+  // Delete from Supabase Auth (server-side via Edge Function)
+  try {
+    await invokeAdminUsers<{ deleted: boolean }>({
+      action: 'delete_auth_user',
+      user_id: userId,
+    });
+  } catch (authError) {
     console.error('Error deleting auth user:', authError);
     // Don't throw - user is already deleted from database
   }
@@ -330,13 +280,17 @@ export async function deleteUser(userId: string): Promise<void> {
  * Reset user password
  */
 export async function resetUserPassword(userId: string, newPassword: string): Promise<void> {
-  const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
-    password: newPassword,
-  });
-
-  if (error) {
+  try {
+    await invokeAdminUsers<{ reset: boolean }>({
+      action: 'reset_password',
+      user_id: userId,
+      new_password: newPassword,
+    });
+  } catch (error) {
     console.error('Error resetting password:', error);
-    throw new Error(`Failed to reset password: ${error.message}`);
+    throw new Error(
+      `Failed to reset password: ${error instanceof Error ? error.message : 'unknown error'}`
+    );
   }
 }
 

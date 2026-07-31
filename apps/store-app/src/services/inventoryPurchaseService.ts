@@ -6,6 +6,7 @@ import { currencyService } from './currencyService';
 import { journalService } from './journalService';
 import { accountingInitService } from './accountingInitService';
 import { TRANSACTION_CATEGORIES } from '../constants/transactionCategories';
+import type { CurrencyCode } from '@pos-platform/shared';
 const transactionService = TransactionService.getInstance();
 export interface InventoryPurchaseItem {
   product_id: string;
@@ -20,7 +21,7 @@ export interface InventoryPurchaseItem {
 export interface InventoryPurchaseData {
   supplier_id: string;
   type: 'cash' | 'credit' | 'commission';
-  currency: 'USD' | 'LBP';
+  currency: CurrencyCode;
   items: InventoryPurchaseItem[];
   porterage_fee?: number;
   transfer_fee?: number;
@@ -136,7 +137,7 @@ export class InventoryPurchaseService {
    */
   private async createFeeJournalEntries(
     fees: { porterage: number; transfer: number; plastic: number; total: number },
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     billType: 'cash' | 'credit' | 'commission',
     supplierId: string | null,
     storeId: string,
@@ -953,7 +954,7 @@ export class InventoryPurchaseService {
     newPrice: number | null,
     batchId: string,
     originalTransactionId: string,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     storeId: string,
     branchId: string,
     userId: string
@@ -1124,8 +1125,8 @@ export class InventoryPurchaseService {
             transactionId: adjustmentTransactionId,
             debitAccount: '1300', // Inventory
             creditAccount: '1100', // Cash
-            amountUSD: currency === 'USD' ? adjustmentAmount : 0,
-            amountLBP: currency === 'LBP' ? adjustmentAmount : 0,
+            amount: adjustmentAmount,
+            currency,
             entityId: internalEntity.id,
             description: description,
             postedDate: getTodayLocalDate(),
@@ -1178,8 +1179,8 @@ export class InventoryPurchaseService {
             transactionId: adjustmentTransactionId,
             debitAccount: '1100', // Cash
             creditAccount: '1300', // Inventory
-            amountUSD: currency === 'USD' ? adjustmentAmount : 0,
-            amountLBP: currency === 'LBP' ? adjustmentAmount : 0,
+            amount: adjustmentAmount,
+            currency,
             entityId: internalEntity.id,
             description: `${description} - Reverse adjustment`,
             postedDate: getTodayLocalDate(),
@@ -1234,8 +1235,8 @@ export class InventoryPurchaseService {
             transactionId: adjustmentTransactionId,
             debitAccount: '1300', // Inventory
             creditAccount: '2100', // Accounts Payable
-            amountUSD: currency === 'USD' ? adjustmentAmount : 0,
-            amountLBP: currency === 'LBP' ? adjustmentAmount : 0,
+            amount: adjustmentAmount,
+            currency,
             entityId: supplierEntity.id,
             description: description,
             postedDate: getTodayLocalDate(),
@@ -1286,8 +1287,8 @@ export class InventoryPurchaseService {
             transactionId: adjustmentTransactionId,
             debitAccount: '2100', // Accounts Payable
             creditAccount: '1300', // Inventory
-            amountUSD: currency === 'USD' ? adjustmentAmount : 0,
-            amountLBP: currency === 'LBP' ? adjustmentAmount : 0,
+            amount: adjustmentAmount,
+            currency,
             entityId: supplierEntity.id,
             description: `${description} - Reverse adjustment`,
             postedDate: getTodayLocalDate(),

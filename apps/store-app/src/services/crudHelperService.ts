@@ -481,6 +481,15 @@ export class CRUDHelperService {
   /**
    * Get unsynced count across all tables
    */
+  /**
+   * Unsynced (`_synced === false`) rows for a single table. Thin wrapper over
+   * the Dexie helper so UI (UnsyncedItems page) can read them without importing
+   * `db` directly (ARCHITECTURE_RULES: UI goes through services/context).
+   */
+  async getUnsyncedRecords(tableName: string): Promise<unknown[]> {
+    return getDB().getUnsyncedRecords(tableName);
+  }
+
   async getUnsyncedCount(): Promise<{ total: number; byTable: Record<string, number> }> {
     // Customers and suppliers are stored in the `entities` table (entity_type
     // discriminator), not in separate Dexie tables — counting 'customers' /

@@ -406,14 +406,10 @@ export default function Home() {
       throw new Error('User not authenticated');
     }
 
-    // Convert the entered amount to LBP for storage when LBP is in use.
-    // For USD-only stores (no LBP rate), pass the amount through.
-    let amountInLBP = openingAmount;
-    if (storePreferredCurrency !== 'LBP' && currencyService.canConvert(storePreferredCurrency, 'LBP')) {
-      amountInLBP = currencyService.convert(openingAmount, storePreferredCurrency, 'LBP');
-    }
-
-    await openCashDrawer(amountInLBP, userProfile.id);
+    // Opening amounts are stored in the store's preferred currency —
+    // no LBP pre-conversion (the read side attributes opening_amount to
+    // the cash account's currency; converting here double-counts).
+    await openCashDrawer(openingAmount, userProfile.id);
 
     // Wait a moment for the database to be updated
     await new Promise(resolve => setTimeout(resolve, 100));

@@ -372,7 +372,20 @@ const en = {
     quantityLabel: 'Quantity',
     weightOptional: 'Weight (Optional)',
     showAsTagInPOSPage: 'Show as tag in POS page',
-    noProducts: 'No products found'
+    noProducts: 'No products found',
+    supplierAddSuccess: 'Supplier added successfully!',
+    supplierAddFailure: 'Failed to add supplier.',
+    itemUpdateSuccess: 'Inventory item updated successfully!',
+    itemUpdateFailure: 'Failed to update inventory item.',
+    deleteSuccess: 'Inventory item deleted successfully!',
+    deleteFailure: 'Failed to delete inventory item.',
+    receiveSuccess: 'Inventory received successfully!',
+    missingProductId: 'Missing product id',
+    productUpdateSuccess: 'Product updated successfully!',
+    productUpdateFailure: 'Failed to update product.',
+    productDeleteSuccess: 'Product deleted successfully!',
+    productDeleteFailure: 'Failed to delete product.',
+    productAddSuccess: 'Product added successfully!'
   },
   pos: {
     pleaseWaitWhileYourReceiptIsBeingPrinted: 'Please wait while your receipt is being printed',

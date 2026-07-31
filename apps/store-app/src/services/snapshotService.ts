@@ -297,6 +297,52 @@ export class SnapshotService {
   }
   
   /**
+   * Client-side mirror of the server `invalidate_snapshots_for_journal_entry`
+   * trigger (migration 20260526140000). When a journal entry is posted with a
+   * posted_date at or before an existing LOCAL snapshot, that snapshot is now
+   * wrong — mark it `stale` so getHistoricalBalance skips it and recomputes
+   * from journals until the server recompute pass refreshes it. Closing
+   * anchors (is_closing) are never invalidated, matching the server.
+   *
+   * Scoped per (account_code, entity_id) like the server. Returns the count
+   * marked stale. Callers should gate on BACKDATED postings (posted_date <
+   * today): a current-dated posting can only affect a same-day snapshot, which
+   * getHistoricalBalance already refuses to use for the live balance — so the
+   * scan is skipped in the common case.
+   */
+  async invalidateLocalSnapshots(
+    storeId: string,
+    postedDate: string,
+    entries: Array<{ account_code: string; entity_id: string | null }>
+  ): Promise<number> {
+    if (!storeId || !postedDate || entries.length === 0) return 0;
+
+    // Dedupe (account, entity) pairs so we scan each at most once.
+    const seen = new Set<string>();
+    const pairs = entries.filter((e) => {
+      const k = `${e.account_code}::${e.entity_id ?? ''}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+
+    let total = 0;
+    for (const { account_code, entity_id } of pairs) {
+      const stale = await getDB().balance_snapshots
+        .where('[store_id+account_code+entity_id]')
+        .equals([storeId, account_code, entity_id])
+        .filter((s) => !s.stale && !s.is_closing && !s._deleted && s.snapshot_date >= postedDate)
+        .toArray();
+      if (stale.length === 0) continue;
+      // stale is a local read hint; don't flip _synced (server snapshots are
+      // recomputed + re-downloaded, client snapshots are local-only).
+      await getDB().balance_snapshots.bulkPut(stale.map((s) => ({ ...s, stale: true })));
+      total += stale.length;
+    }
+    return total;
+  }
+
+  /**
    * Get historical balance using snapshots (O(1) lookup)
    * Falls back to journal calculation if no snapshot exists
    */

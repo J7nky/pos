@@ -2,91 +2,24 @@ import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, Loader2, Lock, Unlock, WifiOff, Archive } from 'lucide-react';
 import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
-import { getDB } from '../lib/db';
-import { supabase } from '../lib/supabase';
+import {
+  listFiscalPeriods,
+  closeFiscalYear,
+  reopenFiscalYear,
+  exportFiscalYearArchive,
+} from '../services/fiscalYearCloseService';
 import type { FiscalYearPeriod } from '../types';
 
 /**
- * Single source of truth for invoking the export Edge Function. Pulled
- * out so both the auto-trigger inside handleClose and the manual
- * "Export archive" button use the same fetch + auth pattern. Throws on
- * non-2xx so the caller can put its own message into `feedback`.
- */
-async function runArchiveExport(
-  storeId: string,
-  fyLabel: string,
-): Promise<{ tables: Record<string, { row_count?: number }> }> {
-  const { data: sessionData } = await supabase.auth.getSession();
-  const token = sessionData?.session?.access_token;
-  if (!token) throw new Error('Not authenticated');
-
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-  const resp = await fetch(
-    `${supabaseUrl}/functions/v1/export_fiscal_year_archive`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      // Bearer-token auth — no cookies needed. Omit credentials so the
-      // server's `Access-Control-Allow-Origin: *` is acceptable to the
-      // browser. With `include`, browsers require an echoed-origin + the
-      // `Access-Control-Allow-Credentials` header on every response.
-      credentials: 'omit',
-      body: JSON.stringify({ store_id: storeId, fy_label: fyLabel }),
-    },
-  );
-  const body = await resp.json().catch(() => null);
-  if (!resp.ok) throw new Error(body?.error ?? `HTTP ${resp.status}`);
-  return body as { tables: Record<string, { row_count?: number }> };
-}
-
-/**
  * Admin surface that lists every fiscal_periods row for the active store
- * and lets the admin close (or reopen) a period via the server RPC. Mirrors
- * the dispatch logic the reminder banner expects: this is where the admin
- * lands when they click "Go to Settings".
- *
- * Operations:
- *   - Close: `close_fiscal_year(store_id, fy_label)` RPC.
- *   - Reopen: `reopen_fiscal_year(store_id, fy_label)` RPC.
- *   - Export archive (offered after a successful close): POST to
- *     `/functions/v1/export_fiscal_year_archive` with the user's bearer
- *     token so the C3 Edge Function can stream the NDJSON.gz files.
+ * and lets the admin close (or reopen) a period. All data/network access
+ * (RPCs, Supabase reads, Dexie mirroring, the archive Edge Function) lives
+ * in fiscalYearCloseService — this component is presentation only.
  *
  * Online-only. Offline devices see a disabled-button state with a clear
  * explanation — the close action lives in Postgres + an Edge Function and
  * cannot run locally.
  */
-/**
- * Push the server's freshest fiscal_periods rows into local Dexie so
- * components that read coverage from Dexie (OfflineHistoryPanel) see the
- * new `is_closed` / `archive_url` right after a close or reopen, without
- * waiting for the next sync tick. Preserves local-only fields
- * (`archive_hydrated_at`, `archive_hydrated_tables`) by merging.
- */
-async function syncFiscalPeriodsToDexie(storeId: string) {
-  const { data, error } = await supabase
-    .from('fiscal_periods')
-    .select('*')
-    .eq('store_id', storeId);
-  if (error || !data) return;
-  const db = getDB();
-  const locals = await db.fiscal_periods.where('store_id').equals(storeId).toArray();
-  const localById = new Map(locals.map((r) => [r.id, r]));
-  const merged = data.map((server) => {
-    const local = localById.get(server.id);
-    return {
-      ...server,
-      archive_hydrated_at: local?.archive_hydrated_at ?? null,
-      archive_hydrated_tables: local?.archive_hydrated_tables ?? {},
-      _synced: true,
-    } as FiscalYearPeriod;
-  });
-  await db.fiscal_periods.bulkPut(merged);
-}
-
 export function FiscalYearCloseSection() {
   const { storeId, triggerArchiveBackfill } = useOfflineData();
   const { isOnline } = useNetworkStatus();
@@ -103,29 +36,9 @@ export function FiscalYearCloseSection() {
       setPeriods([]);
       return;
     }
-    // Read from Supabase, not Dexie. Close/Reopen are server-only RPCs
-    // (this section is disabled offline), so the freshest state lives on
-    // the server. Reading Dexie here would show stale `is_closed` until
-    // the sync layer pulls the row down.
-    const { data, error } = await supabase
-      .from('fiscal_periods')
-      .select('*')
-      .eq('store_id', storeId)
-      .order('start_date', { ascending: false });
-    if (error) {
-      console.error('Failed to load fiscal_periods from server:', error);
-      // Fallback to Dexie so the panel still renders something.
-      const rows = await getDB().fiscal_periods
-        .where('store_id')
-        .equals(storeId)
-        .toArray();
-      rows.sort((a: FiscalYearPeriod, b: FiscalYearPeriod) =>
-        b.start_date.localeCompare(a.start_date),
-      );
-      setPeriods(rows as FiscalYearPeriod[]);
-      return;
-    }
-    setPeriods((data ?? []) as FiscalYearPeriod[]);
+    // Server is the authoritative source for close state (this section is
+    // disabled offline); the service reads Supabase and falls back to Dexie.
+    setPeriods(await listFiscalPeriods(storeId));
   }, [storeId]);
 
   useEffect(() => { void refresh(); }, [refresh]);
@@ -136,13 +49,8 @@ export function FiscalYearCloseSection() {
       setBusyFor(fyLabel);
       setFeedback(null);
       try {
-        // 1. Close via RPC.
-        const { data, error } = await supabase.rpc('close_fiscal_year', {
-          p_store_id: storeId,
-          p_fy_label: fyLabel,
-        });
-        if (error) throw error;
-        const anchors = (data as { closing_anchors_written?: number } | null)?.closing_anchors_written ?? 0;
+        // 1. Close via the service (RPC + Dexie mirror).
+        const { closingAnchorsWritten: anchors } = await closeFiscalYear(storeId, fyLabel);
 
         // 2. Chain straight into the archive export Edge Function — the
         // admin wanted one-click close + archive. If the archive step
@@ -155,7 +63,7 @@ export function FiscalYearCloseSection() {
           message: `Closed. Wrote ${anchors} closing-anchor snapshot(s). Exporting archive…`,
         });
         try {
-          const archiveResult = await runArchiveExport(storeId, fyLabel);
+          const archiveResult = await exportFiscalYearArchive(storeId, fyLabel);
           const tables = archiveResult?.tables ?? {};
           const tableCount = Object.keys(tables).length;
           const rowSum = Object.values(tables).reduce<number>(
@@ -174,7 +82,7 @@ export function FiscalYearCloseSection() {
             message: `Closed successfully, but archive export failed: ${(archiveErr as Error)?.message ?? 'unknown'}. Click "Export archive" to retry.`,
           });
         }
-        await syncFiscalPeriodsToDexie(storeId);
+        // closeFiscalYear already mirrored the new state to Dexie.
         await refresh();
         // Recompute archive coverage so OfflineHistoryPanel updates without
         // a browser refresh.
@@ -201,13 +109,16 @@ export function FiscalYearCloseSection() {
       setBusyFor(fyLabel);
       setFeedback(null);
       try {
-        const { error } = await supabase.rpc('reopen_fiscal_year', {
-          p_store_id: storeId,
-          p_fy_label: fyLabel,
+        // Reopen also releases any rows parked by the closed-period trigger
+        // so they can re-sync now that the period is postable again.
+        const { blocksCleared } = await reopenFiscalYear(storeId, fyLabel);
+        setFeedback({
+          fyLabel,
+          kind: 'success',
+          message: blocksCleared > 0
+            ? `Reopened. Released ${blocksCleared} blocked record(s) to re-sync.`
+            : 'Reopened.',
         });
-        if (error) throw error;
-        setFeedback({ fyLabel, kind: 'success', message: 'Reopened.' });
-        await syncFiscalPeriodsToDexie(storeId);
         await refresh();
         void triggerArchiveBackfill();
       } catch (err) {

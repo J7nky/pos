@@ -181,8 +181,9 @@ From repo root. This installs dependencies for all workspaces. Native dependenci
 |----------|----------|--------|
 | `VITE_SUPABASE_URL` | Yes (for online auth/sync) | Supabase project URL |
 | `VITE_SUPABASE_ANON_KEY` | Yes (for online auth/sync) | Supabase anon key |
-| `VITE_SUPABASE_SERVICE_ROLE_KEY` | No | Used for admin client (e.g. user creation); must not be exposed to end users |
 | `VITE_PUBLIC_URL` | No | Base URL for public links (e.g. QR customer statement); defaults in vite.config for prod/dev |
+
+> **Never set `VITE_SUPABASE_SERVICE_ROLE_KEY`.** `VITE_*` vars are inlined into the client bundle, and the service role bypasses all RLS. Privileged operations (user creation/deletion, password reset) go through the `admin-users` Edge Function.
 
 If `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are missing or placeholder, the store app can run in offline mode (placeholder Supabase client; login can be bypassed in App.tsx).
 
@@ -192,7 +193,6 @@ If `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are missing or placeholder, 
 |----------|----------|--------|
 | `VITE_SUPABASE_URL` | Yes | Supabase project URL |
 | `VITE_SUPABASE_ANON_KEY` | Yes | Supabase anon key |
-| `VITE_SUPABASE_SERVICE_ROLE_KEY` | Optional | For operations that need elevated privileges |
 | `VITE_API_URL` | Optional | Declared in vite-env.d.ts; usage in app may vary |
 | `VITE_APP_TITLE` | Optional | Declared in vite-env.d.ts |
 

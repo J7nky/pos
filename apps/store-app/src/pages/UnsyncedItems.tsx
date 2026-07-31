@@ -3,7 +3,6 @@ import { useOfflineData } from '../contexts/OfflineDataContext';
 import { useI18n } from '../i18n';
 import { useErrorHandler } from '../hooks/useErrorHandler';
 import { crudHelperService } from '../services/crudHelperService';
-import { getDB } from '../lib/db';
 import { formatDateTime } from '../utils/numberFormat';
 import { getTranslatedString } from '../utils/multilingual';
 import { 
@@ -91,7 +90,7 @@ export default function UnsyncedItems() {
       
       for (const [tableName, count] of Object.entries(byTable)) {
         if (count > 0) {
-          const records = await getDB().getUnsyncedRecords(tableName);
+          const records = await crudHelperService.getUnsyncedRecords(tableName);
           tablesWithData.push({
             tableName,
             count,

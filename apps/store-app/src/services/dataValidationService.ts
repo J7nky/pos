@@ -678,9 +678,13 @@ export class DataValidationService {
       cleanRecord.inventory_item_id = cleanRecord.inventory_item_id || null;
     }
 
-    if (tableName === 'transactions') {
-      delete cleanRecord.status; // Remove status field that doesn't exist in Supabase schema
-    }
+    // NOTE: `status` (active/superseded/reversed/voided) is intentionally NOT
+    // stripped — it exists in the Supabase transactions schema (migration
+    // 20260606130000) and is the load-bearing correction-lifecycle state.
+    // Stripping it silently broke cross-device correction sync: an original
+    // marked 'superseded' locally kept syncing as 'active', so other devices
+    // showed it as still-correctable. (The old `delete cleanRecord.status`
+    // here predated that migration.)
 
     if (tableName === 'inventory_bills') {
       // Ensure required fields have default values

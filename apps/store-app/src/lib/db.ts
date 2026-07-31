@@ -1160,6 +1160,61 @@ class POSDatabase extends Dexie {
     await this.pending_syncs.delete(id);
   }
 
+  // ------------------------------------------------------------------------
+  // Closed-fiscal-period parking.
+  //
+  // When an offline row (journal_entries / transactions) is dated inside a
+  // period that was closed server-side while the device was offline, the
+  // closed-FY trigger rejects it on upload. Retrying forever would never
+  // drain the outbox, and hard-deleting would lose ledger data. Instead the
+  // uploader "parks" the row: a pending_syncs marker with status
+  // 'blocked_period' that the `_synced===false` scan excludes. Cleared when
+  // the period is reopened (fiscalYearCloseService) or by an explicit retry.
+  // ------------------------------------------------------------------------
+  async blockSyncForClosedPeriod(tableName: string, recordId: string, reason: string) {
+    const existing = await this.pending_syncs
+      .where('record_id')
+      .equals(recordId)
+      .filter((s) => s.table_name === tableName)
+      .first();
+    if (existing) {
+      await this.pending_syncs.update(existing.id, {
+        status: 'blocked_period',
+        last_error: reason,
+      });
+    } else {
+      await this.pending_syncs.add({
+        id: uuidv4(),
+        table_name: tableName,
+        record_id: recordId,
+        operation: 'update',
+        payload: null,
+        created_at: new Date().toISOString(),
+        retry_count: 0,
+        idempotency_key: uuidv4(),
+        status: 'blocked_period',
+        last_error: reason,
+      });
+    }
+  }
+
+  /** Set of `${table_name}:${record_id}` for every closed-period-blocked row. */
+  async getClosedPeriodBlockedKeySet(): Promise<Set<string>> {
+    const rows = await this.pending_syncs.where('status').equals('blocked_period').toArray();
+    return new Set(rows.map((r) => `${r.table_name}:${r.record_id}`));
+  }
+
+  async getClosedPeriodBlockedSyncs(): Promise<PendingSync[]> {
+    return await this.pending_syncs.where('status').equals('blocked_period').toArray();
+  }
+
+  /** Remove all closed-period blocks so the next sync re-attempts them. Returns the count cleared. */
+  async clearClosedPeriodBlocks(): Promise<number> {
+    const rows = await this.pending_syncs.where('status').equals('blocked_period').toArray();
+    await this.pending_syncs.bulkDelete(rows.map((r) => r.id));
+    return rows.length;
+  }
+
   async updateSyncMetadata(
     tableName: string,
     lastSyncedAt: string,

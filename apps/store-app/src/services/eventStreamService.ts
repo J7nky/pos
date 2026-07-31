@@ -132,6 +132,16 @@ export class EventStreamService {
   private channels: Map<string, RealtimeChannel> = new Map();
   private isProcessing: Map<string, boolean> = new Map();
   private eventQueue: Map<string, BranchEvent[]> = new Map();
+  /**
+   * Set when a wake-up arrives (Realtime signal, or a full 100-event page) while
+   * a catch-up is already running for that branch. Realtime signals carry no
+   * payload we act on, so a dropped one is a permanently missed event batch:
+   * the in-flight pass already read its cursor, and its `refreshData()` callback
+   * holds the branch busy for as long as a full rehydration takes — exactly the
+   * window in which a multi-table upload (a sale) emits the rest of its events.
+   * The flag makes the running pass loop again instead of losing them.
+   */
+  private catchUpRequested: Map<string, boolean> = new Map();
   private catchUpInterval: Map<string, NodeJS.Timeout> = new Map();
   private reconnectTimeouts: Map<string, NodeJS.Timeout> = new Map();
   /** Counts consecutive reconnects while never reaching SUBSCRIBED; reset on SUBSCRIBED or stop. */
@@ -258,6 +268,7 @@ export class EventStreamService {
     // Clear processing flag
     this.isProcessing.delete(branchId);
     this.eventQueue.delete(branchId);
+    this.catchUpRequested.delete(branchId);
 
     evLog(`[EventStream] Stopped event stream for branch ${branchId}`);
   }
@@ -395,9 +406,15 @@ export class EventStreamService {
     this.reconnectTimeouts.set(branchId, timeout);
   }
 
+  /** Safety bound on re-entrant catch-up passes within a single call. */
+  private static readonly MAX_CATCH_UP_PASSES = 20;
+
   /**
    * Catch-up sync: pull events since last_seen_event_version
    * This is the core sync algorithm - pull-based, sequential, idempotent
+   *
+   * Wake-ups that arrive while a pass is running are recorded (not dropped) and
+   * drained by a follow-up pass before this call returns.
    */
   async catchUp(branchId: string, storeId: string): Promise<EventProcessingResult> {
     // Skip while offline — pullEvents would otherwise throw inside the
@@ -414,14 +431,53 @@ export class EventStreamService {
       return { processed: 0, errors: [], last_version: 0 };
     }
 
-    // Prevent concurrent catch-up for same branch
+    // A pass is already running: record the wake-up so that pass loops again
+    // instead of this signal being lost.
     if (this.isProcessing.get(branchId)) {
-      evLog(`[EventStream] Catch-up already in progress for branch ${branchId}`);
+      evLog(`[EventStream] Catch-up already in progress for branch ${branchId} — queuing follow-up pass`);
+      this.catchUpRequested.set(branchId, true);
       return { processed: 0, errors: [], last_version: 0, skipped: true };
     }
 
     this.isProcessing.set(branchId, true);
 
+    try {
+      let aggregate: EventProcessingResult | null = null;
+
+      for (let pass = 0; pass < EventStreamService.MAX_CATCH_UP_PASSES; pass++) {
+        // Clear before the pass: anything signalled while it runs re-arms the flag.
+        this.catchUpRequested.delete(branchId);
+
+        const result = await this.runCatchUpPass(branchId, storeId);
+
+        aggregate = aggregate
+          ? {
+              ...result,
+              processed: aggregate.processed + result.processed,
+              errors: [...aggregate.errors, ...result.errors],
+              skipped_missing: (aggregate.skipped_missing ?? 0) + (result.skipped_missing ?? 0),
+              last_version: Math.max(aggregate.last_version, result.last_version),
+            }
+          : result;
+
+        if (!this.catchUpRequested.get(branchId)) break;
+        if (this.syncSuspendedBranches.has(branchId)) break;
+        if (typeof navigator !== 'undefined' && !navigator.onLine) break;
+        evLog(`[EventStream] Draining queued wake-up for branch ${branchId} (pass ${pass + 2})`);
+      }
+
+      this.catchUpRequested.delete(branchId);
+      return aggregate ?? { processed: 0, errors: [], last_version: 0 };
+    } finally {
+      this.isProcessing.set(branchId, false);
+    }
+  }
+
+  /**
+   * One catch-up pass: read cursor → pull → process → advance cursor → notify.
+   * Concurrency is owned by `catchUp`; never call this directly.
+   */
+  private async runCatchUpPass(branchId: string, storeId: string): Promise<EventProcessingResult> {
     try {
       // 1. Get last seen version from IndexedDB
       const syncState = await this.getSyncState(branchId);
@@ -461,6 +517,13 @@ export class EventStreamService {
       }
 
       evLog(`[EventStream] Found ${events.length} new events for branch ${branchId} (versions ${events[0]?.version} to ${events[events.length - 1]?.version})`);
+
+      // A full page means the backlog is larger than one pull. Ask for another
+      // pass so a burst (a sale emits events across five tables) drains fully
+      // instead of stalling until the 5-minute safety-net timer.
+      if (events.length >= this.BATCH_SIZE) {
+        this.catchUpRequested.set(branchId, true);
+      }
 
       // 4. Process events sequentially
       evLog(`[EventStream] About to call processEvents with ${events.length} events`);
@@ -506,13 +569,14 @@ export class EventStreamService {
       return result;
     } catch (error) {
       console.error(`[EventStream] Catch-up error for branch ${branchId}:`, error);
+      // A failed pass must not re-arm the drain loop, or a persistent error
+      // (offline mid-pass, RLS) would spin until MAX_CATCH_UP_PASSES.
+      this.catchUpRequested.delete(branchId);
       return {
         processed: 0,
         errors: [error instanceof Error ? error.message : 'Unknown error'],
         last_version: 0,
       };
-    } finally {
-      this.isProcessing.set(branchId, false);
     }
   }
 
@@ -1484,6 +1548,32 @@ export class EventStreamService {
       console.error(`[EventStream] Failed to initialize sync state for branch ${branchId}:`, error);
       // Don't throw - let the service start anyway, it will just replay events
     }
+  }
+
+  /**
+   * Seed the event cursor ONLY when this branch has none yet.
+   *
+   * `initializeSyncState` fast-forwards the cursor to the server's current max
+   * version. That is correct exactly once — after a cold start / full resync,
+   * where bulk hydration already pulled every row and replaying history would
+   * be pure waste. Calling it on an established client is destructive: it skips
+   * every event another device emitted that this client has not processed yet,
+   * and since the routine post-write sync is upload-only there is no download
+   * to compensate. Those rows (a sale's bill, its transactions, journal entries,
+   * cash-drawer movement) then never arrive — the "other device is missing the
+   * sale" symptom.
+   *
+   * Use this from post-sync paths; use `initializeSyncState` only from cold start.
+   */
+  async ensureSyncStateInitialized(branchId: string): Promise<void> {
+    const existing = await this.getSyncState(branchId);
+    if (existing && typeof existing.last_seen_event_version === 'number') {
+      evLog(
+        `[EventStream] Sync state already at version ${existing.last_seen_event_version} for branch ${branchId} — not fast-forwarding`
+      );
+      return;
+    }
+    await this.initializeSyncState(branchId);
   }
 
   /**

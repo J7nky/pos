@@ -495,8 +495,20 @@ const ar = {
     weightOptional: 'الوزن (اختياري)',
     priceOfPlastics: 'سعر البلاستيكات',
     noProducts: 'لا توجد منتجات',
-    showAsTagInPOSPage: 'عرض كعلامة في صفحة نقطة البيع'
-
+    showAsTagInPOSPage: 'عرض كعلامة في صفحة نقطة البيع',
+    supplierAddSuccess: 'تمت إضافة المورد بنجاح!',
+    supplierAddFailure: 'فشل في إضافة المورد.',
+    itemUpdateSuccess: 'تم تحديث عنصر المخزون بنجاح!',
+    itemUpdateFailure: 'فشل في تحديث عنصر المخزون.',
+    deleteSuccess: 'تم حذف عنصر المخزون بنجاح!',
+    deleteFailure: 'فشل في حذف عنصر المخزون.',
+    receiveSuccess: 'تم استلام المخزون بنجاح!',
+    missingProductId: 'معرف المنتج مفقود',
+    productUpdateSuccess: 'تم تحديث المنتج بنجاح!',
+    productUpdateFailure: 'فشل في تحديث المنتج.',
+    productDeleteSuccess: 'تم حذف المنتج بنجاح!',
+    productDeleteFailure: 'فشل في حذف المنتج.',
+    productAddSuccess: 'تمت إضافة المنتج بنجاح!'
   },
   pos: {
     pleaseWaitWhileYourReceiptIsBeingPrinted: 'يرجى الإنتظار أثناء طباعة الإيصال',

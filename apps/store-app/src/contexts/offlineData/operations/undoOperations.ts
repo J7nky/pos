@@ -60,6 +60,42 @@ export async function undoLastAction(deps: UndoDeps): Promise<boolean> {
       const isNewFormat = Array.isArray(action.affected) &&
         (action.affected.length === 0 || typeof action.affected[0] === 'string');
 
+      // Pre-validation (new format): abort if any delete step targets a row
+      // that has already synced. Hard-deleting a synced row here also purges
+      // its pending_syncs, so the server is never told — local and remote
+      // ledgers diverge until the next download resurrects the "undone" rows.
+      // (revert-to-before steps are safe when synced: they queue an update
+      // sync. Once synced, an undo of a financial create must instead be a
+      // reversal via transactionService.)
+      if (isNewFormat) {
+        const db = getDB() as any;
+        for (const step of action.steps || []) {
+          if (step.op !== 'delete') continue;
+          if (!step.table || !db[step.table] || step.table === CASH_DRAWER_EXEMPT_TABLE) continue;
+
+          let hasSyncedTarget = false;
+          if (step.table === 'journal_entries' && step.transaction_id) {
+            hasSyncedTarget =
+              (await getDB().journal_entries
+                .where('transaction_id')
+                .equals(step.transaction_id)
+                .filter((e: any) => e._synced === true)
+                .count()) > 0;
+          } else {
+            const recordId = step.id ?? step.primKey;
+            if (recordId == null) continue;
+            const record = await db[step.table].get(recordId);
+            hasSyncedTarget = !!record && record._synced === true;
+          }
+
+          if (hasSyncedTarget) {
+            sessionStorage.removeItem(UNDO_STORAGE_KEY);
+            setCanUndo(false);
+            return false;
+          }
+        }
+      }
+
       // Pre-validation: only run for legacy format (new format has no per-record IDs in affected)
       if (!isNewFormat) {
         const restoreTargetKeys = new Set<string>();

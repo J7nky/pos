@@ -144,9 +144,9 @@ const Inventory: React.FC = () => {
       });
       resetSupplierForm();
       setShowAddSupplierForm(false);
-      showToast('success', 'Supplier added successfully!');
+      showToast('success', t('inventory.supplierAddSuccess'));
     } catch (err) {
-      showToast('error', 'Failed to add supplier.');
+      showToast('error', t('inventory.supplierAddFailure'));
     }
     setLoading((l: any) => ({ ...l, supplier: false }));
   };
@@ -160,20 +160,20 @@ const Inventory: React.FC = () => {
         price: item.price ? Number(item.price) : null,
         currency: item.currency,
       });
-      showToast('success', 'Inventory item updated successfully!');
+      showToast('success', t('inventory.itemUpdateSuccess'));
     } catch (error) {
       handleError(error);
-      showToast('error', 'Failed to update inventory item.');
+      showToast('error', t('inventory.itemUpdateFailure'));
     }
   };
 
   const handleDeleteInventoryItem = async (item: any) => {
     try {
       await deleteInventoryItem(item.id);
-      showToast('success', t('inventory.deleteSuccess') || 'Inventory item deleted successfully!');
+      showToast('success', t('inventory.deleteSuccess'));
     } catch (error) {
       handleError(error);
-      showToast('error', t('inventory.deleteFailure') || 'Failed to delete inventory item.');
+      showToast('error', t('inventory.deleteFailure'));
     }
   };
 
@@ -213,32 +213,32 @@ const Inventory: React.FC = () => {
     });
 
     // addInventoryBatch() already refreshed context data internally.
-    showToast('success', 'Inventory received successfully!');
+    showToast('success', t('inventory.receiveSuccess'));
   };
 
   const handleProductUpdate = async (data: any) => {
     try {
-      if (!data?.id) throw new Error('Missing product id');
+      if (!data?.id) throw new Error(t('inventory.missingProductId'));
       await updateProduct(data.id, {
         name: data.name,
         category_id: data.category_id,
         category: data.category,
         image: data.image,
       });
-      showToast('success', 'Product updated successfully!');
+      showToast('success', t('inventory.productUpdateSuccess'));
     } catch (error) {
       handleError(error);
-      showToast('error', 'Failed to update product.');
+      showToast('error', t('inventory.productUpdateFailure'));
     }
   };
 
   const handleProductDelete = async (product: any) => {
     try {
       await deleteProduct(product.id);
-      showToast('success', 'Product deleted successfully!');
+      showToast('success', t('inventory.productDeleteSuccess'));
     } catch (error) {
       handleError(error);
-      showToast('error', 'Failed to delete product.');
+      showToast('error', t('inventory.productDeleteFailure'));
     }
   };
   const { t, language } = useI18n();
@@ -442,7 +442,7 @@ return (
         onSuccess={async (data: any) => {
           await addProduct(data);
           await raw.refreshData();
-          showToast('success', 'Product added successfully!');
+          showToast('success', t('inventory.productAddSuccess'));
         }}
       />
 

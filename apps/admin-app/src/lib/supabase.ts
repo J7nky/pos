@@ -2,7 +2,9 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const supabaseServiceRoleKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+// SECURITY: the service role key must NEVER be read here. Any VITE_* var is
+// inlined into the served bundle, and the service role bypasses all RLS.
+// Operations that need it live in the admin-users Edge Function.
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.warn('Supabase credentials not found. Admin app will run in offline mode.');
@@ -14,16 +16,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
 // This prevents the "supabaseKey is required" error
 const safeSupabaseUrl = supabaseUrl || 'https://placeholder.supabase.co';
 const safeSupabaseAnonKey = supabaseAnonKey || 'placeholder-key';
-const safeSupabaseServiceRoleKey = supabaseServiceRoleKey || 'placeholder-service-role-key';
 
 // Regular client for user operations
 export const supabase = createClient(safeSupabaseUrl, safeSupabaseAnonKey);
-
-// Admin client with service role key for admin operations
-export const supabaseAdmin = createClient(safeSupabaseUrl, safeSupabaseServiceRoleKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false
-  }
-});
 

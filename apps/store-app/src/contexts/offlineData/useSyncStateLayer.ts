@@ -122,10 +122,15 @@ export function useSyncStateLayer(adapter: SyncStateLayerAdapter): SyncStateLaye
           if (currentBranchId) {
             try {
               const { eventStreamService } = await import('../../services/eventStreamService');
-              await eventStreamService.initializeSyncState(currentBranchId);
-              console.log('✅ [SYNC] Sync state initialized after performSync');
+              // Seed the cursor only if this branch has none. Never fast-forward:
+              // performSync is upload-only, so jumping the cursor to the server's
+              // max version silently discards every unprocessed event from other
+              // devices (their sale, its transactions, journal entries, cash
+              // drawer) with no download to make up for it.
+              await eventStreamService.ensureSyncStateInitialized(currentBranchId);
+              console.log('✅ [SYNC] Sync state ensured after performSync');
             } catch (syncStateError) {
-              console.warn('⚠️ [SYNC] Failed to initialize sync state after performSync:', syncStateError);
+              console.warn('⚠️ [SYNC] Failed to ensure sync state after performSync:', syncStateError);
             }
           }
 

@@ -613,78 +613,33 @@ export default function RecentPayments({
         return;
       }
 
-      // Step 1: Create reversal transaction for the original
-      // This preserves history: "Mistakes are corrected, not erased. History is preserved, not rewritten"
+      // The three-document correction (reversal + replacement + supersede) is
+      // orchestrated by transactionService.correctTransaction: an atomic
+      // compare-and-set claim on the original prevents double-correction, and
+      // every failure path lands in a consistent ledger state. The description
+      // is read-only in the correction modal, so carry the original's
+      // (multilingual) description object forward unchanged.
       const reversalReason = `Correction: ${originalDescription}`;
-      
-      console.log('🔄 Creating reversal transaction for payment correction...');
-      const reversalTransaction = await accountBalanceService.createReversalTransaction(
-        editingPayment.id,
-        reversalReason,
-        userProfile.id
-      );
-
-      if (!reversalTransaction) {
-        showToast(t('payments.failedToCreateReversal') || 'Failed to create reversal transaction', 'error');
-        return;
-      }
-
-      // Step 2: Create new corrected transaction. The description is read-only in
-      // the correction modal, so carry the original's (multilingual) description
-      // object forward unchanged rather than flattening it to a single-language
-      // string. createTransaction accepts string | MultilingualString.
       const correctedDescription = originalTransaction.description ||
         `Corrected payment - Original: ${originalDescription}`;
 
-      console.log('✅ Creating corrected transaction...');
-      // Route the correction to the (possibly changed) entity. The reversal above
-      // already undid the original on its previous entity, so when the entity is
-      // changed the balance moves cleanly: old entity nets to zero, new entity
-      // receives the payment. Keyed off entity_id + the original category rather
-      // than the legacy customer_id/supplier_id/employee_id fields, which the app
-      // no longer populates. updateCashDrawer is left to createTransaction's
-      // category-based default so it mirrors the reversal's cash-drawer impact.
-      const correctedResult = await transactionService.createTransaction({
+      const correctionResult = await transactionService.correctTransaction({
+        originalTransactionId: editingPayment.id,
         category: correctedCategory as any,
         amount,
         currency: editForm.currency,
         description: correctedDescription,
         context,
         reference: editForm.reference || undefined,
+        // Route the correction to the (possibly changed) entity. The reversal
+        // undoes the original on its previous entity, so when the entity is
+        // changed the balance moves cleanly: old entity nets to zero, new
+        // entity receives the payment.
         entityId: editForm.entityId || originalTransaction.entity_id || undefined,
-        // Correction lineage: point back to the row being replaced and carry the
-        // chain root forward (inherited if the original was itself a correction)
-        // so the whole chain is reconstructable in O(1).
-        corrected_from_transaction_id: originalTransaction.id,
-        chain_root_id: originalTransaction.chain_root_id || originalTransaction.id
+        reversalReason,
       });
 
-      if (correctedResult.success && reversalTransaction) {
-        // Step 3: Supersede the original. The load-bearing state now lives in
-        // TYPED columns (status + superseded_by_transaction_id) which the list
-        // filter reads — not the mutable `metadata.corrected` flag. The metadata
-        // block is kept purely as a human-readable audit trail (who/when/why).
-        try {
-          const originalTransactionWithMetadata = originalTransaction as any;
-          const existingMetadata = originalTransactionWithMetadata.metadata || {};
-          await raw.updateTransaction(editingPayment.id, {
-            status: 'superseded',
-            superseded_by_transaction_id: correctedResult.transactionId || null,
-            metadata: {
-              ...existingMetadata,
-              corrected: true,
-              correctedAt: new Date().toISOString(),
-              correctedBy: userProfile.id,
-              reversalTransactionId: reversalTransaction.id,
-              correctedTransactionId: correctedResult.transactionId,
-              correctionReason: 'Payment amount/currency/description/entity/direction corrected'
-            }
-          });
-        } catch (metadataError) {
-          console.warn('Could not update transaction status/metadata:', metadataError);
-          // Non-critical, continue
-        }
-
+      if (correctionResult.success) {
         // Record the correction as a business-action audit row ('update'), mirroring
         // how payment creation is audited (auditService.record is best-effort and
         // never throws). The field deltas land in the audit `changes[]` array.
@@ -701,13 +656,16 @@ export default function RecentPayments({
           entityId: editingPayment.id,
           action: 'update',
           changes: auditChanges,
-          changeReason: `Payment corrected — reversal ${reversalTransaction.id}, correction ${correctedResult.transactionId}`,
+          changeReason: `Payment corrected — reversal ${correctionResult.reversalTransactionId}, correction ${correctionResult.correctedTransactionId}`,
           reference: editForm.reference || originalTransaction.reference || null,
         });
 
         console.log('✅ Payment correction completed successfully');
+        if (correctionResult.warning) {
+          console.warn('⚠️ Correction warning:', correctionResult.warning);
+        }
         showToast(
-          t('payments.paymentCorrectedSuccessfully') || 
+          t('payments.paymentCorrectedSuccessfully') ||
           'Payment corrected successfully. Original transaction preserved, reversal and correction created.',
           'success'
         );
@@ -715,11 +673,18 @@ export default function RecentPayments({
         await raw.refreshData();
       } else {
         showToast(
-          correctedResult.error || 
-          t('payments.failedToCorrectPayment') || 
+          correctionResult.error ||
+          t('payments.failedToCorrectPayment') ||
           'Failed to correct payment',
           'error'
         );
+        if (correctionResult.originalReversed) {
+          // The original was reversed but the replacement failed — the row's
+          // status changed, so close the modal and refresh the list to show
+          // the reversed state (the user must re-enter the payment).
+          setEditingPayment(null);
+          await raw.refreshData();
+        }
       }
     } catch (error: any) {
       console.error('❌ Error correcting payment:', error);

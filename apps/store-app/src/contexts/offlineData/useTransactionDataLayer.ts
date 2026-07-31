@@ -13,7 +13,6 @@ import { createId } from '../../lib/db';
 import { getDB } from '../../lib/db';
 import { transactionService } from '../../services/transactionService';
 import { TRANSACTION_CATEGORIES } from '../../constants/transactionCategories';
-import type { Transaction } from '../../types';
 import type { TransactionDataLayerAdapter, TransactionDataLayerResult, Tables } from './types';
 import { currencyService } from '../../services/currencyService';
 import { sameRowList } from '../../utils/rowListEquality';
@@ -101,72 +100,52 @@ export function useTransactionDataLayer(
       const mappedCategory = categoryMapping[transactionData.category as string] || (transactionData.category as string);
       const isValidCategory = Object.values(TRANSACTION_CATEGORIES).includes(mappedCategory as any);
 
+      // Enforce double-entry: every transaction MUST post through
+      // transactionService so it creates balanced journal entries. An unknown
+      // category previously fell back to a direct db.transactions.add with NO
+      // journal entries — a transaction with zero ledger impact that silently
+      // violated the accounting invariant. Reject instead of writing it.
       if (!isValidCategory) {
-        const entityId = (transactionData as any).entity_id || null;
-        let directCurrency: Tables['transactions']['Insert']['currency'];
-        try {
-          directCurrency = assertValidCurrency(
-            transactionData.currency,
-            currencyService.getAcceptedCurrencies(),
-            { storeId }
-          );
-        } catch (e) {
-          if (e instanceof InvalidCurrencyError && storeId) {
-            await notifyCurrencyError(storeId, e.payload.reason, e.payload.acceptedCurrencies);
-          }
-          throw e;
-        }
-        const transaction: Transaction = {
-          ...transactionData,
-          id: transactionId,
-          entity_id: entityId,
-          store_id: storeId,
-          branch_id: currentBranchId || '',
-          created_at: new Date().toISOString(),
-          _synced: false,
-          amount: transactionData.amount,
-          currency: directCurrency,
-          reference: transactionData.reference ?? null,
-          is_reversal: (transactionData as any).is_reversal ?? false,
-          reversal_of_transaction_id: (transactionData as any).reversal_of_transaction_id ?? null,
-        };
-        await getDB().transactions.add(transaction);
-      } else {
-        let txnCurrency: Tables['transactions']['Insert']['currency'];
-        try {
-          txnCurrency = assertValidCurrency(
-            transactionData.currency,
-            currencyService.getAcceptedCurrencies(),
-            { storeId }
-          );
-        } catch (e) {
-          if (e instanceof InvalidCurrencyError && storeId) {
-            await notifyCurrencyError(storeId, e.payload.reason, e.payload.acceptedCurrencies);
-          }
-          throw e;
-        }
-
-        const result = await transactionService.createTransaction({
-          category: mappedCategory as any,
-          amount: transactionData.amount,
-          currency: txnCurrency,
-          description: transactionData.description || '',
-          reference: transactionData.reference ?? undefined,
-          entityId: transactionData.entity_id ?? undefined,
-          context: {
-            userId: currentUserId,
-            storeId,
-            module: 'accounting',
-            branchId: currentBranchId || '',
-            source: 'offline',
-          },
-          updateBalances: false,
-          updateCashDrawer: false,
-          createAuditLog: true,
-          _synced: false,
-        });
-        if (result.transactionId) transactionId = result.transactionId;
+        throw new Error(
+          `Cannot record transaction: unknown category "${transactionData.category}". ` +
+          `All transactions must use a valid TRANSACTION_CATEGORIES value so double-entry journal entries are posted.`
+        );
       }
+
+      let txnCurrency: Tables['transactions']['Insert']['currency'];
+      try {
+        txnCurrency = assertValidCurrency(
+          transactionData.currency,
+          currencyService.getAcceptedCurrencies(),
+          { storeId }
+        );
+      } catch (e) {
+        if (e instanceof InvalidCurrencyError && storeId) {
+          await notifyCurrencyError(storeId, e.payload.reason, e.payload.acceptedCurrencies);
+        }
+        throw e;
+      }
+
+      const result = await transactionService.createTransaction({
+        category: mappedCategory as any,
+        amount: transactionData.amount,
+        currency: txnCurrency,
+        description: transactionData.description || '',
+        reference: transactionData.reference ?? undefined,
+        entityId: transactionData.entity_id ?? undefined,
+        context: {
+          userId: currentUserId,
+          storeId,
+          module: 'accounting',
+          branchId: currentBranchId || '',
+          source: 'offline',
+        },
+        updateBalances: false,
+        updateCashDrawer: false,
+        createAuditLog: true,
+        _synced: false,
+      });
+      if (result.transactionId) transactionId = result.transactionId;
 
       pushUndo({
         type: 'add_transaction',
@@ -199,33 +178,15 @@ export function useTransactionDataLayer(
     ]
   );
 
-  const updateTransaction = useCallback(
-    async (id: string, updates: any): Promise<void> => {
-      try {
-        await getDB().transactions.update(id, {
-          ...updates,
-          updated_at: new Date().toISOString(),
-          _synced: false,
-        });
-        // Surgically merge the edited row instead of reloading the whole table.
-        const updated = (await getDB().transactions.bulkGet([id])).filter(Boolean);
-        if (updated.length) upsertTransactions(updated as Tables['transactions']['Row'][]);
-        // The edit flips the row to _synced:false; tick the badge immediately
-        // (the original full-refresh path never updated it until the next sync).
-        void updateUnsyncedCount(1).catch(e => console.warn('Unsynced count update failed (non-critical):', e));
-        debouncedSync();
-      } catch (error) {
-        console.error('Error updating transaction:', error);
-        throw error;
-      }
-    },
-    [upsertTransactions, updateUnsyncedCount, debouncedSync]
-  );
+  // NOTE: a raw `updateTransaction` (unguarded db.transactions.update of any
+  // field on any row, including synced ones) used to live here. It was an
+  // immutability escape hatch and became dead once payment correction moved to
+  // transactionService.correctTransaction(). Removed — synced transactions are
+  // corrected via reversal+replacement, never edited in place.
 
   return {
     transactions,
     addTransaction,
-    updateTransaction,
     hydrate,
     upsertTransactions,
   };

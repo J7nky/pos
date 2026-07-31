@@ -2,7 +2,27 @@ import { getDB } from '../lib/db';
 import { Employee } from '../types';
 import { Entity } from '../types/accounting';
 import { v4 as uuidv4 } from 'uuid';
-import { supabase, supabaseAdmin } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
+
+/**
+ * Invoke the admin-users Edge Function (server-side holder of the service
+ * role key) and normalize its error shape. Non-2xx responses surface their
+ * JSON `error` message.
+ */
+async function invokeAdminUsers<T>(body: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase.functions.invoke('admin-users', { body });
+  if (error) {
+    let message = error.message;
+    try {
+      const ctx = await (error as { context?: Response }).context?.json();
+      if (ctx?.error) message = ctx.error;
+    } catch {
+      // keep the generic message
+    }
+    throw new Error(message);
+  }
+  return data as T;
+}
 
 /**
  * EmployeeService - Following offline-first architecture pattern
@@ -104,88 +124,55 @@ export class EmployeeService {
       throw new Error('An employee with this email already exists');
     }
 
-    // Check if email already exists in Supabase (same as admin-app)
-    const { data: existingUser } = await supabase
-      .from('users')
-      .select('id')
-      .eq('email', employeeData.email)
-      .maybeSingle();
-
-    if (existingUser) {
-      throw new Error('A user with this email already exists');
-    }
-
-    // Create user in Supabase Auth using admin client (same as admin-app)
-    // This doesn't auto-login the user, avoiding session switching issues
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-      email: employeeData.email,
-      password: password,
-      email_confirm: true,
-    });
-
-    if (authError) {
-      console.error('Error creating auth user:', authError);
-      throw new Error(`Failed to create user account: ${authError.message}`);
-    }
-
-    if (!authData.user) {
-      throw new Error('Failed to create auth user: No user returned');
-    }
-
-    // Create user in users table (same as admin-app)
+    // Create everything server-side via the admin-users Edge Function:
+    // auth user (email confirmed, no auto-login), users row (with rollback
+    // of the auth user on failure), global email-uniqueness check, and the
+    // matching employee entity. The service role key never ships to clients.
     const now = new Date().toISOString();
-    const userData = {
-      id: authData.user.id,
-      store_id: storeId,
-      branch_id: employeeData.branch_id || null,
+    const result = await invokeAdminUsers<{
+      user: { id: string };
+      entity_created: boolean;
+    }>({
+      action: 'create_user',
       email: employeeData.email,
+      password,
       name: employeeData.name,
       role: employeeData.role,
+      store_id: storeId,
+      branch_id: employeeData.branch_id || null,
       phone: employeeData.phone || null,
       address: employeeData.address || null,
       monthly_salary: employeeData.monthly_salary || null,
       salary_currency: employeeData.salary_currency || null,
-      // Note: Balance fields removed - balances are calculated from journal entries (account 2200)
       working_hours_start: employeeData.working_hours_start || null,
       working_hours_end: employeeData.working_hours_end || null,
       working_days: employeeData.working_days || null,
-    };
+    });
 
-    const { data, error } = await supabase
-      .from('users')
-      .insert(userData)
-      .select()
-      .single();
-
-    if (error) {
-      // Rollback: delete auth user if users table insert fails (same as admin-app)
-      await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
-      console.error('Error creating user:', error);
-      throw new Error(`Failed to create user: ${error.message}`);
-    }
+    const userId = result.user.id;
 
     // Create employee record for IndexedDB
     const employee: Employee = {
-      id: authData.user.id,
+      id: userId,
       store_id: storeId,
       ...employeeData,
       created_at: now,
       updated_at: now,
-      _synced: true, // Will be synced immediately
+      _synced: true, // Server row already exists
       _deleted: false
     };
 
     // Store in IndexedDB (already synced)
     await getDB().users.add(employee);
 
-    // Create corresponding entity record for the employee (same as admin-app)
-    try {
-      const entityData = {
-        id: authData.user.id, // Use same ID as user for consistency
+    if (result.entity_created) {
+      // Mirror the server-created entity in IndexedDB (already synced)
+      const entity: Entity = {
+        id: userId,
         store_id: storeId,
         branch_id: employeeData.branch_id || null,
-        entity_type: 'employee' as const,
-        entity_code: `EMP-${authData.user.id.slice(0, 8).toUpperCase()}`,
+        entity_type: 'employee',
+        entity_code: `EMP-${userId.slice(0, 8).toUpperCase()}`,
         name: employeeData.name,
         phone: employeeData.phone || null,
         is_system_entity: false,
@@ -194,41 +181,12 @@ export class EmployeeService {
         supplier_data: null,
         created_at: now,
         updated_at: now,
+        _synced: true
       };
-
-      // Use supabaseAdmin to bypass RLS (same as admin-app)
-      const { error: entityError } = await supabaseAdmin
-        .from('entities')
-        .insert(entityData);
-
-      if (entityError) {
-        console.error('Failed to create employee entity in Supabase:', entityError);
-        // Don't fail the whole operation - entity can be created later if needed
-        console.warn('⚠️ User created but entity record creation failed. Entity can be created later.');
-      } else {
-        // Store entity in IndexedDB (already synced)
-        const entity: Entity = {
-          id: authData.user.id,
-          store_id: storeId,
-          branch_id: employeeData.branch_id || null,
-          entity_type: 'employee',
-          entity_code: `EMP-${authData.user.id.slice(0, 8).toUpperCase()}`,
-          name: employeeData.name,
-          phone: employeeData.phone || null,
-          is_system_entity: false,
-          is_active: true,
-          customer_data: null,
-          supplier_data: null,
-          created_at: now,
-          updated_at: now,
-          _synced: true
-        };
-        await getDB().entities.add(entity);
-        console.log(`✅ Created entity record for employee: ${employeeData.name}`);
-      }
-    } catch (error) {
-      console.error('Error creating employee entity:', error);
-      // Don't fail the whole operation - entity can be created later if needed
+      await getDB().entities.add(entity);
+      console.log(`✅ Created entity record for employee: ${employeeData.name}`);
+    } else {
+      console.warn('⚠️ User created but entity record creation failed. Entity can be created later.');
     }
 
     return employee;

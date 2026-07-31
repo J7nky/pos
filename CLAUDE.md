@@ -113,8 +113,9 @@ Thin SPA — reads/writes Supabase directly (no IndexedDB). Access restricted to
 ```
 VITE_SUPABASE_URL
 VITE_SUPABASE_ANON_KEY
-VITE_SUPABASE_SERVICE_ROLE_KEY  # optional, admin tasks only
 ```
+
+**Never** add `VITE_SUPABASE_SERVICE_ROLE_KEY` (or any secret) as a `VITE_*` var — Vite inlines those into the served bundle, and the service role bypasses all RLS. Privileged operations (user creation/deletion, password reset) go through the `admin-users` Edge Function, which reads the service role key from Supabase function secrets.
 
 ---
 

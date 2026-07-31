@@ -912,10 +912,20 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     setError(null);
   };
 
+  /**
+   * Store list for the pre-auth sign-up picker.
+   *
+   * Goes through the `list_stores_for_signup` RPC (SECURITY DEFINER, returns
+   * id + name only) rather than SELECT-ing the stores table. The table's public
+   * read policy was dropped in 20260731120000 — it exposed every column of
+   * every store (exchange rates, contact details, status) to anyone holding the
+   * anon key, which ships inside the web bundle.
+   */
   const getStores = async (): Promise<any[]> => {
     try {
-      const stores = await SupabaseService.getStores();
-      return stores || [];
+      const { data, error } = await supabase.rpc('list_stores_for_signup');
+      if (error) throw error;
+      return data || [];
     } catch (error) {
       console.error('Get stores error:', error);
       return [];

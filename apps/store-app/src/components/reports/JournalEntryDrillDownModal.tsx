@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { X, Loader2, FileText } from 'lucide-react';
 import type { CurrencyCode } from '@pos-platform/shared';
-import { getDB } from '../../lib/db';
 import type { JournalEntry } from '../../types/accounting';
 import { amountsFromLegacyEntry, getCredit, getDebit } from '../../services/accountingCurrencyHelpers';
+import { getAccountJournalEntries } from '../../services/financialStatementService';
 import { useI18n } from '../../i18n';
 import { useCurrency } from '../../hooks/useCurrency';
 import { formatDateTime } from '../../utils/numberFormat';
@@ -20,13 +20,6 @@ export interface JournalEntryDrillDownModalProps {
   /** Currencies to render columns for. If absent, every currency present is rendered. */
   currencies?: CurrencyCode[];
   postedOnly?: boolean;
-}
-
-function startOfDayIso(d: string): string {
-  return d.length <= 10 ? `${d}T00:00:00.000Z` : d;
-}
-function endOfDayIso(d: string): string {
-  return d.length <= 10 ? `${d}T23:59:59.999Z` : d;
 }
 
 export default function JournalEntryDrillDownModal({
@@ -55,20 +48,14 @@ export default function JournalEntryDrillDownModal({
       setIsLoading(true);
       setError(null);
       try {
-        const start = startOfDayIso(startDate);
-        const end = endOfDayIso(endDate);
-        const all = await getDB()
-          .journal_entries.where('[store_id+account_code]')
-          .equals([storeId, accountCode])
-          .toArray();
-        const filtered = all.filter((e) => {
-          if (e._deleted) return false;
-          if (branchId && e.branch_id && e.branch_id !== branchId) return false;
-          if (postedOnly && !e.is_posted) return false;
-          if (!e.posted_date) return false;
-          return e.posted_date >= start && e.posted_date <= end;
+        const filtered = await getAccountJournalEntries({
+          storeId,
+          accountCode,
+          branchId,
+          startDate,
+          endDate,
+          postedOnly,
         });
-        filtered.sort((a, b) => (a.posted_date < b.posted_date ? -1 : a.posted_date > b.posted_date ? 1 : 0));
         if (!cancelled) setEntries(filtered);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load journal entries');

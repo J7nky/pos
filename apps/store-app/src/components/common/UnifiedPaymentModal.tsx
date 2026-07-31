@@ -137,7 +137,7 @@ export const UnifiedPaymentModal: React.FC<UnifiedPaymentModalProps> = ({
                             </div>
                             {isEditing && originalDirection && paymentDirection !== originalDirection && (
                                 <p className="text-xs text-amber-600 mt-3">
-                                    {t('payments.changingDirectionNote') || 'Changing the direction reverses the original payment and re-posts the correction as the opposite type (payment ⇆ refund).'}
+                                    {t('payments.changingDirectionNote') || '(payment ⇆ refund)'}
                                 </p>
                             )}
                         </div>

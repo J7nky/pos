@@ -10,6 +10,7 @@ import { createId } from '../lib/db';
 import { getLocalDateString } from '../utils/dateUtils';
 import { getFiscalPeriodForDate } from '../utils/fiscalPeriod';
 import { reverseAmounts, amountsFromLegacyEntry } from './accountingCurrencyHelpers';
+import type { CurrencyCode } from '@pos-platform/shared';
 
 export class ReceivedItemsJournalService {
   /**
@@ -223,7 +224,7 @@ export class ReceivedItemsJournalService {
     batchId: string,
     supplierId: string,
     items: any[],
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     storeId: string,
     branchId: string,
     createdBy: string,
@@ -285,8 +286,11 @@ export class ReceivedItemsJournalService {
       transactionId,
       debitAccount,
       creditAccount,
-      amountUSD: currency === 'USD' ? totalAmount : 0,
-      amountLBP: currency === 'LBP' ? totalAmount : 0,
+      // Generic per-currency path — works for any accepted currency, not just
+      // USD/LBP (the old amountUSD/amountLBP mapping produced 0/0 for AED/EUR/…
+      // and threw "At least one currency amount must be provided").
+      amount: totalAmount,
+      currency,
       entityId,
       description,
       postedDate: getLocalDateString(new Date().toISOString()),
@@ -319,7 +323,7 @@ export class ReceivedItemsJournalService {
     itemId: string,
     supplierId: string,
     amount: number,
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     batchId: string | null,
     batchType: 'cash' | 'credit' | 'commission',
     storeId: string,
@@ -362,8 +366,10 @@ export class ReceivedItemsJournalService {
       transactionId,
       debitAccount,
       creditAccount,
-      amountUSD: currency === 'USD' ? amount : 0,
-      amountLBP: currency === 'LBP' ? amount : 0,
+      // Generic per-currency path — works for any accepted currency (see note
+      // in createJournalEntriesForBatch).
+      amount,
+      currency,
       entityId,
       description,
       postedDate: getLocalDateString(new Date().toISOString()),
@@ -395,7 +401,7 @@ export class ReceivedItemsJournalService {
     oldSupplierId: string,
     newSupplierId: string,
     items: any[],
-    currency: 'USD' | 'LBP',
+    currency: CurrencyCode,
     batchType: 'cash' | 'credit' | 'commission',
     storeId: string,
     branchId: string,
