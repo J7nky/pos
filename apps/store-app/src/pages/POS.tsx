@@ -91,7 +91,7 @@ export default function POS() {
   const inventoryBills = (raw.inventoryBills || []) as Array<any>;
 
   const { userProfile } = useSupabaseAuth();
-  const { formatCurrency, formatCurrencyWithSymbol, acceptedCurrencies, preferredCurrency, convertCurrency, canConvertCurrency } = useCurrency();
+  const { formatCurrency, formatCurrencyWithSymbol, acceptedCurrencies, preferredCurrency } = useCurrency();
   const { t } = useI18n();
   const { handleError } = useErrorHandler();
   const { generateQRCodeForReceipt } = useQRCodeGeneration();
@@ -833,12 +833,6 @@ ${dashSeparator}`;
   const total = activeTab?.cart?.reduce((sum, item) => sum + (item.lineTotal ?? 0), 0) ?? 0;
   const billCurrency = (activeTab?.settlementCurrency ?? raw.preferredCurrency) as CurrencyCode;
 
-  // The other accepted currency, shown under the bill total for reference only.
-  const secondaryCurrency = acceptedCurrencies.find(c => c !== billCurrency) as CurrencyCode | undefined;
-  const secondaryTotal = secondaryCurrency && canConvertCurrency(billCurrency, secondaryCurrency)
-    ? convertCurrency(total, billCurrency, secondaryCurrency)
-    : null;
-
   const change = activeTab?.amountReceived ? Math.round((parseFloat(activeTab.amountReceived) - total) * 100) / 100 : 0;
 
   // Validation helpers
@@ -1452,16 +1446,9 @@ ${dashSeparator}`;
               <div className="space-y-2">
 
                 <div className="flex justify-between font-semibold border-t pt-2">
-                  <span>{t('common.labels.')}:</span>
+                  <span>{t('common.labels.total')}:</span>
                   <span>{formatCurrencyWithSymbol(total, billCurrency)}</span>
                 </div>
-                {secondaryTotal !== null && secondaryCurrency && (
-                  <div className="flex justify-end">
-                    <span className="text-xs font-bold text-gray-500">
-                      {formatCurrencyWithSymbol(secondaryTotal, secondaryCurrency)}
-                    </span>
-                  </div>
-                )}
               </div>
 
               {/* Customer Selection (moved here) */}
