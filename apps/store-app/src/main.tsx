@@ -4,6 +4,10 @@ import './index.css';
 import './styles/print.css';
 import { RouterProvider } from 'react-router-dom';
 import { router } from './router.tsx';
+import { installSelectAllOnFocus } from './lib/selectAllOnFocus';
+
+// Focusing any text-like field selects its whole value (fast re-entry on the POS).
+installSelectAllOnFocus();
 
 // Wait for DOM to be ready
 function initApp() {

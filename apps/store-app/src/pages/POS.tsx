@@ -91,7 +91,7 @@ export default function POS() {
   const inventoryBills = (raw.inventoryBills || []) as Array<any>;
 
   const { userProfile } = useSupabaseAuth();
-  const { formatCurrency, formatCurrencyWithSymbol, acceptedCurrencies, preferredCurrency } = useCurrency();
+  const { formatCurrency, formatCurrencyWithSymbol, acceptedCurrencies, preferredCurrency, convertCurrency, canConvertCurrency } = useCurrency();
   const { t } = useI18n();
   const { handleError } = useErrorHandler();
   const { generateQRCodeForReceipt } = useQRCodeGeneration();
@@ -833,6 +833,12 @@ ${dashSeparator}`;
   const total = activeTab?.cart?.reduce((sum, item) => sum + (item.lineTotal ?? 0), 0) ?? 0;
   const billCurrency = (activeTab?.settlementCurrency ?? raw.preferredCurrency) as CurrencyCode;
 
+  // The other accepted currency, shown under the bill total for reference only.
+  const secondaryCurrency = acceptedCurrencies.find(c => c !== billCurrency) as CurrencyCode | undefined;
+  const secondaryTotal = secondaryCurrency && canConvertCurrency(billCurrency, secondaryCurrency)
+    ? convertCurrency(total, billCurrency, secondaryCurrency)
+    : null;
+
   const change = activeTab?.amountReceived ? Math.round((parseFloat(activeTab.amountReceived) - total) * 100) / 100 : 0;
 
   // Validation helpers
@@ -1446,9 +1452,16 @@ ${dashSeparator}`;
               <div className="space-y-2">
 
                 <div className="flex justify-between font-semibold border-t pt-2">
-                  <span>{t('common.labels.total')}:</span>
+                  <span>{t('common.labels.')}:</span>
                   <span>{formatCurrencyWithSymbol(total, billCurrency)}</span>
                 </div>
+                {secondaryTotal !== null && secondaryCurrency && (
+                  <div className="flex justify-end">
+                    <span className="text-xs font-bold text-gray-500">
+                      {formatCurrencyWithSymbol(secondaryTotal, secondaryCurrency)}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Customer Selection (moved here) */}
@@ -1861,7 +1874,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrencyWithSym
             const availableStock = inventoryItem ? inventoryItem.quantity : 0;
             // Spec 019 FR-002: weight-tracked lots require a weight > 0 per sale line
             const isWeightTracked = inventoryItem?.weight_tracked === true;
-            const weightMissing = isWeightTracked && !(typeof item.weight === 'number' && item.weight > 0);
+            // const weightMissing = isWeightTracked && !(typeof item.weight === 'number' && item.weight > 0);
             const product = products.find((p: any) => p.id === item.productId);
             const supplier = suppliers?.find((s: any) => s.id === item.supplierId);
             
@@ -1949,9 +1962,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrencyWithSym
                         value={item.weight ?? ''}
                         onChange={(e) => updateCartItem(item.id, 'weight', e.target.value ? parseFloat(e.target.value) : undefined)}
                         className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 min-h-[44px] ${
-                          weightMissing
-                            ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
-                            : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'
+                          'border-gray-300 focus:ring-blue-500 focus:border-blue-500'
                         } ${
                           productName.toLowerCase().includes('plastic')
                             ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
@@ -1966,11 +1977,7 @@ const Cart = ({ activeTab, updateCartItem, removeFromCart, formatCurrencyWithSym
                         {item.weight===''? t('common.labels.kg') : ''}
                       </div>
                     </div>
-                    {isWeightTracked && (
-                      <p className={`text-xs ${weightMissing ? 'text-red-500' : 'text-gray-500'}`}>
-                        {t('losses.remainingWeight')}: {Math.max(0, (inventoryItem?.weight_remaining ?? 0) - (typeof item.weight === 'number' ? item.weight : 0))} {t('common.labels.kg')}
-                      </p>
-                    )}
+                   
                   </div>
 
                   {/* Unit Price */}

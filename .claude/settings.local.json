@@ -111,7 +111,21 @@
       "Bash(env)",
       "Bash(awk -F/ '{if \\(NF>1\\) print $1\"/\"$2; else print $1}')",
       "Bash(git diff *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(git ls-tree *)",
+      "Bash(echo \"--- exit $? ---\")",
+      "Bash(git reset *)",
+      "Bash(git restore *)",
+      "Bash(git add *)",
+      "Bash(python3 -c ' *)",
+      "Bash(awk '/^  inventory: \\\\{/,/^  \\\\},/' en.ts)",
+      "Bash(awk '/^  inventory: \\\\{/{f=1} f&&c<8{print;c++}' fr.ts)",
+      "Bash(timeout 540 pnpm build:store)",
+      "Bash(python3 *)",
+      "Bash(node -e \"const r=require\\('react-router-dom'\\);console.log\\('useBlocker:', typeof r.useBlocker\\)\")",
+      "Bash(pnpm build:store)",
+      "Bash(npx vite *)",
+      "Bash(grep -n \"<table\\\\|<thead\\\\|<th \\\\|<th$\\\\|<th className\\\\|</table>\" ReceiveFormModal.tsx)"
     ]
   },
   "enableAllProjectMcpServers": true,

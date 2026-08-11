@@ -5,7 +5,7 @@ import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useInventoryForms } from '../hooks/useInventoryForms';
 import { useInventoryModals } from '../hooks/useInventoryModals';
 import { Plus, Search, Package, Truck, Archive, PackageX } from 'lucide-react';
-import ReceiveFormModal from '../components/inventory/ReceiveFormModal';
+import ReceiveProductsView from '../components/inventory/ReceiveProductsView';
 import AddProductModal from '../components/inventory/AddProductModal';
 import EditProductModal from '../components/inventory/EditProductModal';
 import DeleteProductConfirm from '../components/inventory/DeleteProductConfirm';
@@ -277,7 +277,30 @@ const Inventory: React.FC = () => {
     console.log('📦 Inventory page: Filtered products:', filtered.length);
     return filtered;
   }, [products, searchTerm, language]);
-return (
+  // Receiving takes over the whole page — the manifest and its running tally need
+  // the room, and the batch is committed from the page's own command bar.
+  if (showReceiveForm) {
+    return (
+      <ReceiveProductsView
+        onClose={() => setShowReceiveForm(false)}
+        onSuccess={handleReceiveSuccess}
+        products={products}
+        suppliers={suppliers}
+        defaultCommissionRate={defaultCommissionRate}
+        preferredCurrency={raw.preferredCurrency}
+        acceptedCurrencies={raw.acceptedCurrencies}
+        recentSuppliers={recentSuppliers}
+        setRecentSuppliers={setRecentSuppliers}
+        form={receiveForm}
+        setForm={setReceiveForm}
+        errors={receiveErrors}
+        setErrors={setReceiveErrors}
+        addSupplier={addSupplier}
+      />
+    );
+  }
+
+  return (
     <div className="p-6 stagger">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
@@ -418,24 +441,6 @@ return (
       )}
 
       {/* Modals */}
-      <ReceiveFormModal
-        open={showReceiveForm}
-        onClose={() => setShowReceiveForm(false)}
-        onSuccess={handleReceiveSuccess}
-        products={products}
-        suppliers={suppliers}
-        defaultCommissionRate={defaultCommissionRate}
-        preferredCurrency={raw.preferredCurrency}
-        acceptedCurrencies={raw.acceptedCurrencies}
-        recentSuppliers={recentSuppliers}
-        setRecentSuppliers={setRecentSuppliers}
-        form={receiveForm}
-        setForm={setReceiveForm}
-        errors={receiveErrors}
-        setErrors={setReceiveErrors}
-        addSupplier={addSupplier}
-      />
-
       <AddProductModal
         open={showAddProductForm}
         onClose={() => setShowAddProductForm(false)}

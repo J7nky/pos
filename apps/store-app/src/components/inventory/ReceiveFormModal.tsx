@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Plus, X, Package, Eye, Upload, Truck } from 'lucide-react';
 import SearchableSelect from '../common/SearchableSelect';
 import SupplierFormModal from '../common/SupplierFormModal';
+import AddProductModal from './AddProductModal';
 import AcceptedCurrencySelect from '../common/AcceptedCurrencySelect';
 import MoneyInput from '../common/MoneyInput';
 import type { CurrencyCode } from '@pos-platform/shared';
@@ -15,6 +16,7 @@ import { useCategoryLookup } from '../../hooks/useCategoryLookup';
 import { useSupabaseAuth } from '../../contexts/SupabaseAuthContext';
 import { inventoryPurchaseService } from '../../services/inventoryPurchaseService';
 import { getTodayLocalDate } from '../../utils/dateUtils';
+import { normalizeNameForComparison } from '../../utils/nameNormalization';
 
 function normalizeToAccepted(value: unknown, accepted: CurrencyCode[], fallback: CurrencyCode): CurrencyCode {
   if (typeof value === 'string' && (accepted as string[]).includes(value)) return value as CurrencyCode;
@@ -26,6 +28,11 @@ function currencyLabel(t: (k: string) => string, code: CurrencyCode): string {
   const tr = t(key);
   return tr !== key ? tr : CURRENCY_META[code]?.code ?? code;
 }
+
+// Same column rhythm as ReceiveProductsView: one width for every data-entry
+// column, with the product picker and the action buttons outside it.
+const colFieldClass = 'w-36';
+const headCellClass = 'text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2';
 
 interface ReceiveFormModalProps {
   open: boolean;
@@ -85,6 +92,9 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
   }>>({});
   const selectRef = useRef<HTMLDivElement | null>(null);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
+  // Which line asked for a brand-new product, and the name it is waiting on.
+  const [addProductForRow, setAddProductForRow] = useState<string | null>(null);
+  const [pendingProduct, setPendingProduct] = useState<{ row: string; name: string } | null>(null);
   const [originalFormValues, setOriginalFormValues] = useState<any>(null);
   const modalInstanceRef = useRef<number>(0);
   const [showAsTag, setShowAsTag] = useState(true);
@@ -94,7 +104,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
   const suggestionsRef = useRef<HTMLDivElement>(null);
 
   const { t, language } = useI18n();
-  const { units, categories } = useOfflineData();
+  const { units, categories, addProduct, refreshData } = useOfflineData();
   const categoryLookup = useCategoryLookup();
   const activeCategoryLabels = useMemo(
     () => categories
@@ -119,6 +129,9 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
     () => (acceptedCurrencies.length > 0 ? acceptedCurrencies : [preferredCurrency]),
     [acceptedCurrencies, preferredCurrency]
   );
+  // Base currency for the batch fees — porterage carries it, transfer and
+  // plastic follow unless they were set to something else.
+  const feeCurrency = normalizeToAccepted(form.porterage_currency, acList, preferredCurrency);
 
   // // Auto-focus first field when modal opens
   // useEffect(() => {
@@ -389,6 +402,22 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
   const { getProductName } = useProductMultilingual();
   const raw = useOfflineData();
   const { userProfile } = useSupabaseAuth();
+
+  // addProduct writes to Dexie but doesn't push into context state — the new
+  // product only reaches `products` on the next rehydration. Watch for it by
+  // name and drop it into the line that asked for it.
+  useEffect(() => {
+    if (!pendingProduct) return;
+    const wanted = normalizeNameForComparison(pendingProduct.name);
+    const match = products.find((p: any) => normalizeNameForComparison(getProductName(p)) === wanted);
+    if (!match) return;
+    setBulkItems((prev) => (
+      prev[pendingProduct.row]
+        ? { ...prev, [pendingProduct.row]: { ...prev[pendingProduct.row], product_id: match.id } }
+        : prev
+    ));
+    setPendingProduct(null);
+  }, [products, pendingProduct, getProductName]);
 
   // Get selected supplier for context display
   const selectedSupplier = form.type === 'cash' 
@@ -928,6 +957,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                         value={form.porterage_fee}
                         onChange={(value) => setForm({ ...form, porterage_fee: value })}
                         label={t('inventory.porterageFee')}
+                        prefix={CURRENCY_META[feeCurrency]?.symbol}
                         placeholder="0"
                         className={errors.porterage_fee ? 'border-red-500 ring-red-500' : ''}
                       />
@@ -939,6 +969,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                         value={form.transfer_fee}
                         onChange={(value) => setForm({ ...form, transfer_fee: value })}
                         label={t('inventory.transferFee')}
+                        prefix={CURRENCY_META[normalizeToAccepted(form.transfer_currency, acList, feeCurrency)]?.symbol}
                         placeholder="0"
                         className={errors.transfer_fee ? 'border-red-500 ring-red-500' : ''}
                       />
@@ -989,11 +1020,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                           <MoneyInput
                             value={form.plastic_price}
                             onChange={(value) => setForm({ ...form, plastic_price: value })}
-                            prefix={
-                              CURRENCY_META[
-                                normalizeToAccepted(form.plastic_currency, acList, normalizeToAccepted(form.porterage_currency, acList, preferredCurrency))
-                              ]?.symbol
-                            }
+                            prefix={CURRENCY_META[normalizeToAccepted(form.plastic_currency, acList, feeCurrency)]?.symbol}
                             label={`${t('inventory.plasticPrice')} *`}
                             placeholder="0"
                             required
@@ -1104,16 +1131,17 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                   <table key={`table-instance-${modalInstanceRef.current}-${bulkProducts.length}`} className="w-full">
                     <thead className="sticky top-0 bg-gray-50 dark:bg-slate-800 z-10 shadow-sm">
                       <tr className="border-b border-gray-200">
-                        <th className="text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2 min-w-[200px]">{t('inventory.product')}</th>
-                        <th className="text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2 w-24">{t('inventory.qty')}</th>
-                        <th className="text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2 w-28">{t('inventory.unit')}</th>
-                        <th className="text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2 w-24">{t('inventory.weight')}</th>
+                        <th className={`w-[260px] ${headCellClass}`}>{t('inventory.product')}</th>
+                        <th className={`${colFieldClass} ${headCellClass}`}>{t('inventory.qty')}</th>
+                        <th className={`${colFieldClass} ${headCellClass}`}>{t('inventory.unit')}</th>
+                        <th className={`${colFieldClass} ${headCellClass}`}>{t('inventory.weight')}</th>
                         {form.type !== 'commission' && (
-                          <th className="text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2 w-32">{t('inventory.price')}</th>
+                          <th className={`${colFieldClass} ${headCellClass}`}>{t('inventory.price')}</th>
                         )}
-                        <th className="text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2 min-w-[200px]">{t('inventory.sellingPrice')}</th>
-                        <th className="text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2 w-36">{t('inventory.skuBarcode')}</th>
-                        <th className="text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2 w-20">{t('inventory.actions')}</th>
+                        <th className={`${colFieldClass} ${headCellClass}`}>{t('inventory.sellingPrice')}</th>
+                        <th className={`${colFieldClass} ${headCellClass}`}>{t('inventory.sellingPriceCurrency')}</th>
+                        <th className={`${colFieldClass} ${headCellClass}`}>{t('inventory.skuBarcode')}</th>
+                        <th className={`w-20 ${headCellClass}`}>{t('inventory.actions')}</th>
                       </tr>
                     </thead>
                     <tbody key={`tbody-instance-${modalInstanceRef.current}`} className="divide-y divide-gray-200">
@@ -1133,7 +1161,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                         const weightTracked = item.weight_tracked ?? isMassUnitCode(item.unit);
                         return (
                           <tr key={productId} className={`hover:bg-gray-50 transition-colors duration-150 ${isEditingExisting ? 'bg-orange-50' : ''}`}>
-                            <td className="py-3 px-2 min-w-[200px]">
+                            <td className="py-3 px-2 w-[260px]">
                               <div ref={selectRef}>
                                 <div className="flex items-center gap-2">
                                   <SearchableSelect
@@ -1155,8 +1183,9 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                     searchPlaceholder={t('inventory.searchProducts')}
                                     categories={activeCategoryLabels}
                                     showAddOption={true}
-                                    addOptionText={t('inventory.addNewProduct')}  
-                                    className="w-full min-w-[200px]"
+                                    addOptionText={t('inventory.addNewProduct')}
+                                    onAddNew={() => setAddProductForRow(productId)}
+                                    className="w-full"
                                     portal={false}
                                     onOpenChange={(open: boolean) => {
                                       if (open && selectRef.current) {
@@ -1173,7 +1202,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                 <p className="text-xs text-red-600 mt-1">{errors[`product_${productId}`]}</p>
                               )}
                             </td>
-                            <td className="py-3 px-2 w-24">
+                            <td className={`py-3 px-2 ${colFieldClass}`}>
                               <input
                                 type="number"
                                 value={item.quantity}
@@ -1181,7 +1210,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                   ...prev,
                                   [productId]: { ...prev[productId], quantity: e.target.value }
                                 }))}
-                                className={`w-20 border ${errors[`quantity_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
+                                className={`w-full border ${errors[`quantity_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
                                 min="1"
                                 step="0.01"
                                 placeholder={t('inventory.qty')}
@@ -1190,14 +1219,14 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                 <p className="text-xs text-red-600 mt-1">{errors[`quantity_${productId}`]}</p>
                               )}
                             </td>
-                            <td className="py-3 px-2 w-28">
+                            <td className={`py-3 px-2 ${colFieldClass}`}>
                               <select
                                 value={item.unit}
                                 onChange={(e) => setBulkItems(prev => ({
                                   ...prev,
                                   [productId]: { ...prev[productId], unit: e.target.value }
                                 }))}
-                                className="w-24 border border-gray-300 dark:border-slate-700 rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
+                                className="w-full border border-gray-300 dark:border-slate-700 rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
                               >
                                 {activeUnits.length === 0 && (
                                   <option value="" disabled>{t('app.loading')}</option>
@@ -1213,7 +1242,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                 ))}
                               </select>
                             </td>
-                            <td className="py-3 px-2 w-24">
+                            <td className={`py-3 px-2 ${colFieldClass}`}>
                               <input
                                 type="number"
                                 step="0.01"
@@ -1224,7 +1253,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                   ...prev,
                                   [productId]: { ...prev[productId], weight: e.target.value }
                                 }))}
-                                className={`w-20 border ${errors[`weight_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
+                                className={`w-full border ${errors[`weight_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
                                 placeholder={t('inventory.kg')}
                               />
                               {!isEditingExisting && (
@@ -1249,7 +1278,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                               )}
                             </td>
                             {form.type !== 'commission' && (
-                              <td className="py-3 px-2 w-32">
+                              <td className={`py-3 px-2 ${colFieldClass}`}>
                                 <MoneyInput
                                   value={item.price || ''}
                                   onChange={(value) => setBulkItems(prev => ({
@@ -1265,46 +1294,44 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                 )}
                               </td>
                             )}
-                            <td className="py-3 px-2 min-w-[200px]">
-                              <div className="flex items-center gap-2">
-                                <div className="flex-1">
-                                  <MoneyInput
-                                    value={item.selling_price || ''}
-                                    onChange={(value) => setBulkItems(prev => ({
-                                      ...prev,
-                                      [productId]: { ...prev[productId], selling_price: value }
-                                    }))}
-                                    prefix={lineSym}
-                                    placeholder="0"
-                                    className={`text-sm ${errors[`selling_price_${productId}`] ? 'border-red-500 ring-red-500' : ''}`}
-                                  />
-                                </div>
-                                <AcceptedCurrencySelect
-                                  acceptedCurrencies={acList}
-                                  value={normalizeToAccepted(
-                                    item.price_currency || item.selling_price_currency,
-                                    acList,
-                                    batchFee
-                                  )}
-                                  onChange={(currency) =>
-                                    setBulkItems((prev) => ({
-                                      ...prev,
-                                      [productId]: {
-                                        ...prev[productId],
-                                        price_currency: currency,
-                                        selling_price_currency: currency,
-                                      },
-                                    }))
-                                  }
-                                  size="sm"
-                                  aria-label={t('inventory.lineItemCurrency')}
-                                />
-                              </div>
+                            <td className={`py-3 px-2 ${colFieldClass}`}>
+                              <MoneyInput
+                                value={item.selling_price || ''}
+                                onChange={(value) => setBulkItems(prev => ({
+                                  ...prev,
+                                  [productId]: { ...prev[productId], selling_price: value }
+                                }))}
+                                prefix={lineSym}
+                                placeholder="0"
+                                className={`text-sm ${errors[`selling_price_${productId}`] ? 'border-red-500 ring-red-500' : ''}`}
+                              />
                               {errors[`selling_price_${productId}`] && (
                                 <p className="text-xs text-red-600 mt-1">{errors[`selling_price_${productId}`]}</p>
                               )}
                             </td>
-                            <td className="py-3 px-2 w-36">
+                            <td className={`py-3 px-2 ${colFieldClass}`}>
+                              <AcceptedCurrencySelect
+                                acceptedCurrencies={acList}
+                                value={normalizeToAccepted(
+                                  item.price_currency || item.selling_price_currency,
+                                  acList,
+                                  batchFee
+                                )}
+                                onChange={(currency) =>
+                                  setBulkItems((prev) => ({
+                                    ...prev,
+                                    [productId]: {
+                                      ...prev[productId],
+                                      price_currency: currency,
+                                      selling_price_currency: currency,
+                                    },
+                                  }))
+                                }
+                                className="w-full"
+                                aria-label={t('inventory.lineItemCurrency')}
+                              />
+                            </td>
+                            <td className={`py-3 px-2 ${colFieldClass}`}>
                               <input
                                 type="text"
                                 value={item.sku || ''}
@@ -1312,7 +1339,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                   ...prev,
                                   [productId]: { ...prev[productId], sku: e.target.value }
                                 }))}
-                                className={`w-32 border ${errors[`sku_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
+                                className={`w-full border ${errors[`sku_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
                                 placeholder={t('inventory.skuBarcode')}
                                 title="Optional: Enter SKU or barcode for this item"
                               />
@@ -1321,7 +1348,10 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                               )}
                             </td>
                           
-                            <td className="py-3 px-2 w-20 flex items-center gap-2 mt-2">
+                            {/* Flex lives on the inner div — a display:flex <td>
+                                drops out of the row and takes its column width with it. */}
+                            <td className="py-3 px-2 w-20">
+                              <div className="flex items-center gap-2">
                               {(bulkProducts.length > 1 || !bulkProducts[0]) && !isEditingExisting ? (
                                 <button
                                   type="button"
@@ -1343,6 +1373,7 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                               >
                                 <Plus className="w-5 h-5" />
                               </button>
+                              </div>
                             </td>
                           </tr>
                         );
@@ -1393,6 +1424,18 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
           existingSuppliers={suppliers}
         />
       )}
+
+      {/* Add Product Modal — opened from a line's product picker */}
+      <AddProductModal
+        open={!!addProductForRow}
+        onClose={() => setAddProductForRow(null)}
+        onSuccess={async (data: any) => {
+          const row = addProductForRow;
+          await addProduct(data);
+          await refreshData();
+          if (row && typeof data?.name === 'string') setPendingProduct({ row, name: data.name });
+        }}
+      />
     </div>
   );
 };

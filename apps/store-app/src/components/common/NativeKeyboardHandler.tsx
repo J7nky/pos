@@ -4,6 +4,7 @@ import { Languages } from 'lucide-react';
 import arLocale from '../../i18n/locales/ar';
 import enLocale from '../../i18n/locales/en';
 import { usePOSTouchScreen } from '../../hooks/usePOSTouchScreen';
+import { SELECT_ALL_ATTR } from '../../lib/selectAllOnFocus';
 
 // Helper function to get translation by path (same as i18n's getByPath)
 function getByPath(obj: any, path: string): any {
@@ -156,12 +157,15 @@ export default function NativeKeyboardHandler() {
 
     // Check if input type is 'number' - these don't support selectionStart/selectionEnd
     const isNumberInput = input instanceof HTMLInputElement && input.type === 'number';
-    
+    // Number inputs expose no selection API, so select-on-focus flags them instead.
+    const isFullySelected = input.getAttribute(SELECT_ALL_ATTR) === 'true';
+
     if (key === 'backspace') {
       if (isNumberInput) {
         // For number inputs, just remove last character
+        // (or the whole value, if select-on-focus has it fully selected)
         const currentValue = input.value;
-        const newValue = currentValue.slice(0, -1);
+        const newValue = isFullySelected ? '' : currentValue.slice(0, -1);
         updateInputValue(newValue, newValue.length);
       } else {
         const start = input.selectionStart ?? input.value.length;
@@ -184,8 +188,9 @@ export default function NativeKeyboardHandler() {
       updateInputValue(newValue, start + 1);
     } else {
       if (isNumberInput) {
-        // For number inputs, just append to the end
-        const currentValue = input.value;
+        // For number inputs, just append to the end — unless select-on-focus
+        // has the whole value selected, in which case typing replaces it.
+        const currentValue = isFullySelected ? '' : input.value;
         const newValue = currentValue + key;
         updateInputValue(newValue, newValue.length);
       } else {

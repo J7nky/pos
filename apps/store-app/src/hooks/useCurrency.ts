@@ -21,6 +21,9 @@ export function useCurrency() {
   const convertCurrency = (amount: number, from: CurrencyCode, to: CurrencyCode): number =>
     currencyService.safeConvert(amount, from, to);
 
+  const canConvertCurrency = (from: CurrencyCode, to: CurrencyCode): boolean =>
+    currencyService.canConvert(from, to);
+
   const getConvertedAmount = (amount: number, originalCurrency: CurrencyCode): number =>
     currencyService.safeConvert(amount, originalCurrency, preferredCurrency);
 
@@ -34,6 +37,7 @@ export function useCurrency() {
     formatCurrencyWithSymbol,
     formatAmount,
     convertCurrency,
+    canConvertCurrency,
     getConvertedAmount,
     getCurrencySymbol,
     exchangeRate,

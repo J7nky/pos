@@ -138,64 +138,68 @@ export default function MoneyInput({
   }, []);
 
   return (
-    <div className="relative">
+    <div className="mb-2">
       {label && (
-        <label className="block text-sm font-medium text-gray-700 mb-2">
+        <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
           {label} {required && <span className="text-red-500">*</span>}
         </label>
       )}
-      
-      {prefix != null && prefix !== false && (
-        <span className="pointer-events-none absolute left-3 top-[11px] z-[1] text-sm text-gray-500 dark:text-slate-400 select-none">
-          {prefix}
-        </span>
-      )}
-      <input
-        ref={inputRef}
-        id={id}
-        type="text"
-        inputMode="decimal"
-        pattern="[0-9]*[.,]?[0-9]*"
-        step={step}
-        max="9999999999"
-        min={min}
-        value={stringValue}
-        onChange={handleInputChange}
-        onFocus={handleInputFocus}
-        onBlur={handleInputBlur}
-        className={`w-full border border-gray-300 rounded py-1.5 mb-2 text-left text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] ${
-          prefix != null && prefix !== false ? 'pl-9' : 'px-3'
-        } ${showRecommendation && recommendedValue ? 'pr-20' : 'pr-3'} ${className}`}
-        placeholder={placeholder}
-        disabled={disabled}
-        required={required}
-        tabIndex={tabIndex}
-        autoFocus={autoFocus}
-        aria-label={ariaLabel || label}
-        style={{ boxSizing: 'border-box' }}
-      />
 
-      {/* Inline recommendation pill */}
-      {showRecommendation && recommendedValue && (
-        <div className="absolute inset-y-0 right-1 flex items-center pointer-events-auto">
-          <button
-            type="button"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              handleRecommendationClick();
-            }}
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}
-            title="Use recommended value"
-            className="px-3 py-2 text-[10px] leading-none bg-blue-50 text-blue-600 border border-blue-200 rounded-md hover:bg-blue-100 focus:outline-none cursor-pointer"
-          >
-            {recommendedValue}
-          </button>
-        </div>
-      )}
+      {/* Overlays anchor to the field itself, not to the label — otherwise a
+          labelled field pushes the prefix and the pill up out of the input. */}
+      <div className="relative">
+        {prefix != null && prefix !== false && (
+          <span className="pointer-events-none absolute left-3 inset-y-0 z-[1] flex items-center text-sm text-gray-500 dark:text-slate-400 select-none">
+            {prefix}
+          </span>
+        )}
+        <input
+          ref={inputRef}
+          id={id}
+          type="text"
+          inputMode="decimal"
+          pattern="[0-9]*[.,]?[0-9]*"
+          step={step}
+          max="9999999999"
+          min={min}
+          value={stringValue}
+          onChange={handleInputChange}
+          onFocus={handleInputFocus}
+          onBlur={handleInputBlur}
+          className={`block w-full border border-gray-300 rounded py-1.5 text-left text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px] ${
+            prefix != null && prefix !== false ? 'pl-9' : 'px-3'
+          } ${showRecommendation && recommendedValue ? 'pr-20' : 'pr-3'} ${className}`}
+          placeholder={placeholder}
+          disabled={disabled}
+          required={required}
+          tabIndex={tabIndex}
+          autoFocus={autoFocus}
+          aria-label={ariaLabel || label}
+          style={{ boxSizing: 'border-box' }}
+        />
+
+        {/* Inline recommendation pill */}
+        {showRecommendation && recommendedValue && (
+          <div className="absolute inset-y-0 right-1 flex items-center pointer-events-auto">
+            <button
+              type="button"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleRecommendationClick();
+              }}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              title="Use recommended value"
+              className="px-3 py-2 text-[10px] leading-none bg-blue-50 text-blue-600 border border-blue-200 rounded-md hover:bg-blue-100 focus:outline-none cursor-pointer"
+            >
+              {recommendedValue}
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
