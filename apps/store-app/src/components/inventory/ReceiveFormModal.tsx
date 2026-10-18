@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Plus, X, Package, Eye, Upload, Truck } from 'lucide-react';
+import { Plus, X, Package, Coins, FileText, Truck, AlertTriangle, Lock } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import SearchableSelect from '../common/SearchableSelect';
 import SupplierFormModal from '../common/SupplierFormModal';
 import AddProductModal from './AddProductModal';
@@ -29,10 +30,90 @@ function currencyLabel(t: (k: string) => string, code: CurrencyCode): string {
   return tr !== key ? tr : CURRENCY_META[code]?.code ?? code;
 }
 
+/** Money for read-only display. Symbol leads, matching the MoneyInput prefixes. */
+function formatMoney(amount: number, code: CurrencyCode): string {
+  const meta = CURRENCY_META[code];
+  const decimals = meta?.decimals ?? 2;
+  const formatted = new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+    numberingSystem: 'latn',
+  }).format(Number.isFinite(amount) ? amount : 0);
+  return `${meta?.symbol ?? code}${formatted}`;
+}
+
+function formatNumber(value: number, decimals = 0): string {
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+    numberingSystem: 'latn',
+  }).format(Number.isFinite(value) ? value : 0);
+}
+
 // Same column rhythm as ReceiveProductsView: one width for every data-entry
 // column, with the product picker and the action buttons outside it.
 const colFieldClass = 'w-36';
-const headCellClass = 'text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-slate-300 uppercase py-3 px-2';
+const headCellClass = 'px-2 py-2.5 text-start text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400';
+
+// Heights match MoneyInput's 44px so money and plain fields line up across a
+// row — the same field tokens the full-page receive view uses.
+const fieldClass =
+  'w-full h-11 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-900 placeholder:text-slate-400 ' +
+  'focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 ' +
+  'dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500';
+
+const cellFieldClass =
+  'w-full h-11 rounded-md border border-slate-300 bg-white px-2 text-sm tabular-nums text-slate-900 placeholder:text-slate-400 ' +
+  'focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 ' +
+  'dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500';
+
+const errorFieldClass = 'border-red-500 focus:border-red-500 focus:ring-red-500/25';
+
+// MoneyInput ships light-only field colours; these ride in through its
+// className so money and plain fields match in dark mode too.
+const moneyFieldClass =
+  'text-sm tabular-nums dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500';
+
+/** Column heading register, reused for the footer tally labels. */
+const microHeadingClass = 'text-[11px] font-semibold uppercase tracking-[0.16em]';
+
+// Supply type is the fact that changes how every other number on this form is
+// read, so it carries a colour — the context dot and its chip agree.
+const TYPE_STYLES: Record<string, { dot: string; chip: string }> = {
+  cash: { dot: 'bg-blue-500', chip: 'bg-blue-100 text-blue-800 dark:bg-blue-500/15 dark:text-blue-300' },
+  credit: { dot: 'bg-amber-500', chip: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300' },
+  commission: { dot: 'bg-emerald-500', chip: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300' },
+};
+
+const contextChipClass =
+  'rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300';
+
+const SectionHeading: React.FC<{ icon: LucideIcon; tint: string; children: React.ReactNode }> = ({
+  icon: Icon,
+  tint,
+  children,
+}) => (
+  <h3 className="flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100">
+    <Icon className={`h-4 w-4 shrink-0 ${tint}`} aria-hidden="true" />
+    {children}
+  </h3>
+);
+
+const FieldLabel: React.FC<{ children: React.ReactNode; htmlFor?: string }> = ({ children, htmlFor }) => (
+  <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
+    {children}
+  </label>
+);
+
+/** One reading in the footer tally. */
+const Stat: React.FC<{ label: string; value: string; strong?: boolean }> = ({ label, value, strong }) => (
+  <div className="flex items-baseline gap-1.5">
+    <dt className={`${microHeadingClass} text-slate-400 dark:text-slate-500`}>{label}</dt>
+    <dd className={`tabular-nums tracking-tight text-slate-900 dark:text-slate-100 ${strong ? 'text-base font-semibold' : 'text-sm font-semibold'}`}>
+      {value}
+    </dd>
+  </div>
+);
 
 interface ReceiveFormModalProps {
   open: boolean;
@@ -90,7 +171,6 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
     sku?: string;
     weight_tracked?: boolean;
   }>>({});
-  const selectRef = useRef<HTMLDivElement | null>(null);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
   // Which line asked for a brand-new product, and the name it is waiting on.
   const [addProductForRow, setAddProductForRow] = useState<string | null>(null);
@@ -102,6 +182,10 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const notesTextareaRef = useRef<HTMLTextAreaElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
+  // The body scrolls independently of the pinned header/footer, so a failed
+  // submit has to bring the summary back into view itself.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
 
   const { t, language } = useI18n();
   const { units, categories, addProduct, refreshData } = useOfflineData();
@@ -235,20 +319,34 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
     }
   }, [open, isEditMode, existingBatchItems, acceptedCurrencies, preferredCurrency, acList]);
 
-  // Keyboard support - Escape to close
+  // Keyboard support — Escape closes, Ctrl/Cmd+Enter commits from any field
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && open) {
+    const handleKey = (e: KeyboardEvent) => {
+      if (!open) return;
+      if (e.key === 'Escape') {
         if (showSuggestions) {
           setShowSuggestions(false);
         } else {
           onClose();
         }
+        return;
+      }
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        formRef.current?.requestSubmit();
       }
     };
-    window.addEventListener('keydown', handleEsc);
-    return () => window.removeEventListener('keydown', handleEsc);
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
   }, [open, onClose, showSuggestions]);
+
+  // The page behind a modal should not scroll under the pointer.
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previous; };
+  }, [open]);
 
   // Handle notes field focus - show suggestions
   const handleNotesFocus = () => {
@@ -420,10 +518,76 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
   }, [products, pendingProduct, getProductName]);
 
   // Get selected supplier for context display
-  const selectedSupplier = form.type === 'cash' 
+  const selectedSupplier = form.type === 'cash'
     ? suppliers.find((s: any) => s.name === 'Trade') || { name: t('inventory.trade'), id: 'trade' }
     : suppliers.find((s: any) => s.id === form.supplier_id) || null;
-  
+
+  /**
+   * Running tally, so the batch can be checked against the driver's paper
+   * without leaving the modal. Line value mirrors
+   * inventoryPurchaseService.calculatePurchaseAmounts: weight × price when a
+   * weight is present, otherwise quantity × price.
+   */
+  const tally = useMemo(() => {
+    let units = 0;
+    let weight = 0;
+    let unpriced = 0;
+    const goods = new Map<CurrencyCode, number>();
+    const lineValues = new Map<string, { value: number; currency: CurrencyCode }>();
+
+    for (const pid of bulkProducts) {
+      const item = bulkItems[pid];
+      if (!item) continue;
+      const qty = Number(item.quantity) || 0;
+      const wt = Number(item.weight) || 0;
+      units += qty;
+      weight += wt;
+
+      if (form.type === 'commission') continue;
+
+      const price = Number(item.price) || 0;
+      if (!price) {
+        if (item.product_id) unpriced += 1;
+        continue;
+      }
+      const value = wt > 0 ? wt * price : qty * price;
+      const currency = normalizeToAccepted(
+        item.price_currency || item.selling_price_currency,
+        acList,
+        feeCurrency
+      );
+      goods.set(currency, (goods.get(currency) ?? 0) + value);
+      lineValues.set(pid, { value, currency });
+    }
+
+    const porterage = Number(form.porterage_fee) || 0;
+    const transfer = Number(form.transfer_fee) || 0;
+    const plastic = form.empty_plastic
+      ? (Number(form.plastic_count) || 0) * (Number(form.plastic_price) || 0)
+      : 0;
+    const feeTotal = porterage + transfer + plastic;
+
+    const totals = new Map<CurrencyCode, number>(goods);
+    if (feeTotal > 0) totals.set(feeCurrency, (totals.get(feeCurrency) ?? 0) + feeTotal);
+
+    return { lines: bulkProducts.length, units, weight, unpriced, lineValues, totals };
+  }, [
+    bulkProducts,
+    bulkItems,
+    form.type,
+    form.porterage_fee,
+    form.transfer_fee,
+    form.empty_plastic,
+    form.plastic_count,
+    form.plastic_price,
+    acList,
+    feeCurrency,
+  ]);
+
+  // The translator does simple interpolation with no plural rules — pick the form here.
+  const plural = (key: string, count: number) =>
+    t(`inventory.receivePage.${key}${count === 1 ? 'One' : 'Many'}`, { count });
+
   // Enhanced validation with comprehensive field checking
   const validate = () => {
     const errors: any = {};
@@ -524,7 +688,12 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
     e.preventDefault();
     const errs = validate();
     setErrors(errs);
-    if (Object.keys(errs).length > 0) return;
+    if (Object.keys(errs).length > 0) {
+      // Row errors can sit below the fold in a long manifest — send the user
+      // back to the summary rather than leaving the button looking inert.
+      bodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
 
     setLoading(true);
     try {
@@ -755,117 +924,148 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
 
     return false; // No changes detected
   };
+
+  const handleTypeChange = (newType: string) => {
+    const tradeSupplier = suppliers.find((s: any) => s.name === 'Trade');
+    const currentSupplierId = form.supplier_id;
+    const isTradeSupplier = tradeSupplier && (currentSupplierId === tradeSupplier.id || currentSupplierId === 'trade');
+    setForm({
+      ...form,
+      type: newType,
+      // cash always books against Trade; the other two never can.
+      supplier_id: newType === 'cash'
+        ? (tradeSupplier?.id || 'trade')
+        : (isTradeSupplier ? '' : currentSupplierId),
+    });
+  };
+
+  const supplyTypes: Array<{ value: 'commission' | 'cash' | 'credit'; label: string }> = [
+    { value: 'commission', label: t('inventory.commission') },
+    { value: 'cash', label: t('inventory.cashPurchase') },
+    { value: 'credit', label: t('inventory.creditPurchase') },
+  ];
+
   if (!open) return null;
 
+  const showCostColumn = form.type !== 'commission';
+  const totalsList = Array.from(tally.totals.entries()).filter(([, amount]) => amount !== 0);
+  const fieldErrorCount = Object.keys(errors || {}).filter((key) => key !== 'form').length;
+  const changesPending = hasChanges();
+  const typeStyle = TYPE_STYLES[form.type] ?? TYPE_STYLES.commission;
+  const typeLabel = form.type === 'cash'
+    ? t('inventory.cashPurchase')
+    : form.type === 'credit'
+      ? t('inventory.creditPurchase')
+      : `${t('inventory.commission')}${form.commission_rate ? `: ${form.commission_rate}%` : ''}`;
+
   return (
-    <div className="animate-modal-fade fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="animate-modal-pop bg-white dark:bg-slate-900 rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto shadow-2xl ring-1 ring-black/5 dark:ring-white/10">
-        {/* Enhanced Header with Visual Context */}
-        <div className="p-6 border-b border-gray-200 dark:border-slate-800 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-slate-800 dark:to-slate-800">
-          <div className="flex items-center justify-between">
-            <div className="flex-1">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-900 dark:text-slate-100">
-                    {isEditMode ? `${t('inventory.editBatch')}` : `${t('inventory.receiveProducts')}`}
-                  </h2>
-                  <p className="text-sm text-gray-600 dark:text-slate-300 mt-1">
-                    {isEditMode ? `${t('inventory.updateBatchInformationAndInventoryItems')}` : `${t('inventory.addNewInventoryItemsToYourStock')}`}
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="text-right">
-                    <AcceptedCurrencySelect
-                      acceptedCurrencies={acList}
-                      value={normalizeToAccepted(form.porterage_currency, acList, preferredCurrency)}
-                      onChange={(currency) =>
-                        setForm({
-                          ...form,
-                          porterage_currency: currency,
-                          transfer_currency: currency,
-                          plastic_currency: currency,
-                        })
-                      }
-                      size="md"
-                      aria-label={t('inventory.batchFeeCurrency')}
-                    />
-                  </div>
-                  <button
-                    onClick={onClose}
-                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
-                  >
-                    <X className="w-6 h-6" />
-                  </button>
-                </div>
-              </div>
+    <div className="animate-modal-fade fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="receive-batch-title"
+        className="animate-modal-pop flex max-h-[92vh] w-full max-w-[1560px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl ring-1 ring-black/5 dark:bg-slate-900 dark:ring-white/10"
+      >
+        {/* Batch identity and terms stay pinned while the manifest scrolls */}
+        <div className="shrink-0 border-b border-slate-200 bg-gradient-to-r from-blue-50 to-indigo-50 px-6 py-5 dark:border-slate-800 dark:from-slate-800 dark:to-slate-800">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h2 id="receive-batch-title" className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+                {isEditMode ? t('inventory.editBatch') : t('inventory.receiveProducts')}
+              </h2>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                {isEditMode
+                  ? t('inventory.updateBatchInformationAndInventoryItems')
+                  : t('inventory.addNewInventoryItemsToYourStock')}
+              </p>
               {isEditMode && editingBatchId && (
-                <div className="mt-2">
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
-                    Editing Batch: {editingBatchId}
-                  </span>
-                </div>
+                <span
+                  title={editingBatchId}
+                  className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-500/15 dark:text-amber-300"
+                >
+                  {t('inventory.editBatch')}
+                  <span className="font-mono tabular-nums opacity-75">{editingBatchId.slice(0, 8)}</span>
+                </span>
               )}
+            </div>
+
+            <div className="flex shrink-0 items-center gap-3">
+              <label className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                <span className="hidden sm:inline">{t('inventory.receivePage.billCurrency')}</span>
+                <AcceptedCurrencySelect
+                  acceptedCurrencies={acList}
+                  value={feeCurrency}
+                  onChange={(currency) =>
+                    setForm({
+                      ...form,
+                      porterage_currency: currency,
+                      transfer_currency: currency,
+                      plastic_currency: currency,
+                    })
+                  }
+                  size="sm"
+                  aria-label={t('inventory.batchFeeCurrency')}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label={t('inventory.cancel')}
+                className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-white/70 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+              >
+                <X className="h-5 w-5" />
+              </button>
             </div>
           </div>
 
-          {/* Item Context Header */}
+          {/* Terms recap — how this batch will be booked */}
           {selectedSupplier && (
-            <div className="mt-4 p-4 bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-800">
-              <div className="flex items-center space-x-4">
-                <div className="flex items-center space-x-3">
-                  <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
-                  <div>
-                    <p className="font-semibold text-gray-900 dark:text-slate-100">{selectedSupplier.name}</p>
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      <span className={`px-2 py-1 text-xs rounded-full ${
-                        form.type === 'cash' ? 'bg-blue-100 text-blue-800' : 
-                        form.type === 'credit' ? 'bg-orange-100 text-orange-800' :
-                        'bg-green-100 text-green-800'
-                      }`}>
-                        {form.type === 'cash' ? `${t('inventory.cashPurchase')}` : 
-                         form.type === 'credit' ? `${t('inventory.creditPurchase')}` : 
-                         `${t('inventory.commission')}: ${form.commission_rate}%`}
-                      </span>
-                      {form.porterage_fee && (
-                        <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800">
-                          {t('receivedBills.porterage')}: {form.porterage_fee}{' '}
-                          {currencyLabel(t, normalizeToAccepted(form.porterage_currency, acList, preferredCurrency))}
-                        </span>
-                      )}
-                      {form.transfer_fee && (
-                        <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800">
-                          {t('receivedBills.transferFee')}: {form.transfer_fee}{' '}
-                          {currencyLabel(t, normalizeToAccepted(form.transfer_currency, acList, preferredCurrency))}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
+            <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+              <span className={`h-2 w-2 shrink-0 rounded-full ${typeStyle.dot}`} aria-hidden="true" />
+              <p className="font-semibold text-slate-900 dark:text-slate-100">{selectedSupplier.name}</p>
+              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${typeStyle.chip}`}>{typeLabel}</span>
+              {form.porterage_fee && (
+                <span className={contextChipClass}>
+                  {t('receivedBills.porterage')}: {form.porterage_fee} {currencyLabel(t, feeCurrency)}
+                </span>
+              )}
+              {form.transfer_fee && (
+                <span className={contextChipClass}>
+                  {t('receivedBills.transferFee')}: {form.transfer_fee}{' '}
+                  {currencyLabel(t, normalizeToAccepted(form.transfer_currency, acList, feeCurrency))}
+                </span>
+              )}
             </div>
           )}
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6">
-          {/* Hidden input for auto-focus */}
-        
+        <form ref={formRef} onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          <div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+            {/* One place to look after a rejected submit */}
+            {(errors.form || fieldErrorCount > 0) && (
+              <div
+                role="alert"
+                className="mb-6 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300"
+              >
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>{errors.form || plural('fixFields', fieldErrorCount)}</span>
+              </div>
+            )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Left Column - Basic Information */}
-            <div className="space-y-6">
+            <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
+              {/* Supplier */}
               <div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-slate-100 mb-4 flex items-center">
-                  <Package className="w-5 h-5 mr-2 text-blue-600" />
-                  {t('inventory.supplierInformation')}
-                </h3>
+                <div className="mb-4">
+                  <SectionHeading icon={Package} tint="text-blue-600 dark:text-blue-400">
+                    {t('inventory.supplierInformation')}
+                  </SectionHeading>
+                </div>
 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
-                      {form.type === t('inventory.typeCash') ? t('inventory.supplierName') : t('inventory.supplierName')} *
-                    </label>
+                    <FieldLabel>{t('inventory.supplierName')} *</FieldLabel>
                     {form.type === 'cash' ? (
-                      <div className="w-full border border-gray-300 dark:border-slate-700 rounded-lg px-3 py-2 bg-gray-50 dark:bg-slate-800 text-gray-600 dark:text-slate-400">
+                      <div className="flex h-11 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
                         {t('inventory.trade')} ({t('inventory.cashPurchase')})
                       </div>
                     ) : (
@@ -886,72 +1086,70 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                         showAddOption={true}
                         addOptionText={t('customers.addNewSupplier')}
                         onAddNew={() => setShowSupplierModal(true)}
-                        className={`w-full ${errors.supplier_id ? 'border-red-500 ring-red-500' : 'border-gray-300'}`}
+                        className={`w-full ${errors.supplier_id ? 'border-red-500 ring-red-500' : ''}`}
                         portal={true}
                       />
                     )}
-                    {errors.supplier_id && <p className="text-xs text-red-600 mt-1">{errors.supplier_id}</p>}
+                    {errors.supplier_id && <p className="mt-1 text-xs text-red-600">{errors.supplier_id}</p>}
                   </div>
 
+                  {/* All three terms visible at once — the choice rewrites the
+                      rest of the form, so it should not hide in a dropdown. */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">{t('inventory.supplyType')} *</label>
-                    <select
-                      value={form.type}
-                      onChange={(e) => {
-                        const newType = e.target.value;
-                        const tradeSupplier = suppliers.find((s: any) => s.name === 'Trade');
-                        const currentSupplierId = form.supplier_id;
-                        const isTradeSupplier = tradeSupplier && (currentSupplierId === tradeSupplier.id || currentSupplierId === 'trade');
-                        
-                        setForm({ 
-                          ...form, 
-                          type: newType,
-                          // Set supplier_id based on type
-                          // For cash: set to Trade
-                          // For commission/credit: clear if it's Trade, otherwise keep current
-                          supplier_id: newType === 'cash' 
-                            ? (tradeSupplier?.id || 'trade')
-                            : (isTradeSupplier ? '' : currentSupplierId)
-                        });
-                      }}
-                      className="w-full border border-gray-300 dark:border-slate-700 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
-                    >
-                      <option value="commission">{t('inventory.commission')}</option>
-                      <option value="cash">{t('inventory.cashPurchase')}</option>
-                      <option value="credit">{t('inventory.creditPurchase')}</option>
-                    </select>
+                    <span className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
+                      {t('inventory.supplyType')} *
+                    </span>
+                    <div className="grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
+                      {supplyTypes.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => handleTypeChange(option.value)}
+                          aria-pressed={form.type === option.value}
+                          className={`rounded-md px-2 py-2 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                            form.type === option.value
+                              ? 'bg-white text-blue-700 shadow-sm dark:bg-slate-900 dark:text-blue-300'
+                              : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
 
-            {/* Middle Column - Financial Information */}
-            <div className="space-y-6">
+              {/* Money */}
               <div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-slate-100 mb-4 flex items-center">
-                  <Eye className="w-5 h-5 mr-2 text-purple-600" />
-                  {t('inventory.financialInformation')}
-                </h3>
+                <div className="mb-4">
+                  <SectionHeading icon={Coins} tint="text-purple-600 dark:text-purple-400">
+                    {t('inventory.financialInformation')}
+                  </SectionHeading>
+                </div>
 
                 <div className="space-y-4">
                   {form.type === 'commission' && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">{t('inventory.commissionRate')} (%) *</label>
+                      <FieldLabel htmlFor="receive-commission-rate">
+                        {t('inventory.commissionRate')} (%) *
+                      </FieldLabel>
                       <input
+                        id="receive-commission-rate"
                         type="number"
                         step="0.1"
                         min="0"
                         max="100"
                         value={form.commission_rate}
                         onChange={(e) => setForm({ ...form, commission_rate: e.target.value.toString() })}
-                        className={`w-full border ${errors.commission_rate ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
+                        className={`${cellFieldClass} ${errors.commission_rate ? errorFieldClass : ''}`}
                         placeholder={`${t('inventory.default')}: ${defaultCommissionRate}%`}
                       />
-                      {errors.commission_rate && <p className="text-xs text-red-600 mt-1">{errors.commission_rate}</p>}
+                      {errors.commission_rate && <p className="mt-1 text-xs text-red-600">{errors.commission_rate}</p>}
                     </div>
                   )}
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     <div>
                       <MoneyInput
                         value={form.porterage_fee}
@@ -959,9 +1157,9 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                         label={t('inventory.porterageFee')}
                         prefix={CURRENCY_META[feeCurrency]?.symbol}
                         placeholder="0"
-                        className={errors.porterage_fee ? 'border-red-500 ring-red-500' : ''}
+                        className={`${moneyFieldClass} ${errors.porterage_fee ? errorFieldClass : ''}`}
                       />
-                      {errors.porterage_fee && <p className="text-xs text-red-600 mt-1">{errors.porterage_fee}</p>}
+                      {errors.porterage_fee && <p className="mt-1 text-xs text-red-600">{errors.porterage_fee}</p>}
                     </div>
 
                     <div>
@@ -971,115 +1169,117 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                         label={t('inventory.transferFee')}
                         prefix={CURRENCY_META[normalizeToAccepted(form.transfer_currency, acList, feeCurrency)]?.symbol}
                         placeholder="0"
-                        className={errors.transfer_fee ? 'border-red-500 ring-red-500' : ''}
+                        className={`${moneyFieldClass} ${errors.transfer_fee ? errorFieldClass : ''}`}
                       />
-                      {errors.transfer_fee && <p className="text-xs text-red-600 mt-1">{errors.transfer_fee}</p>}
+                      {errors.transfer_fee && <p className="mt-1 text-xs text-red-600">{errors.transfer_fee}</p>}
                     </div>
                   </div>
-                  {form.type === 'commission' && (
-                  <div className="space-y-3 mt-10">
-                    {/* Checkbox + label */}
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={!!form.empty_plastic}
-                        onChange={(e) => {
-                          const isChecked = e.target.checked;
-                          setForm({
-                            ...form,
-                            empty_plastic: isChecked,
-                            plastic_count: isChecked ? form.plastic_count : '',
-                            plastic_price: isChecked ? form.plastic_price : ''
-                          });
-                        }}
-                        className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
-                      />
-                      <span className="text-sm font-medium text-gray-700 pr-1">{t('inventory.plasticMortgage')} {!form.empty_plastic ? `(${t('common.placeholders.optional')})` : ''}</span>
-                    </label>
 
-                    {/* Inputs appear when checked */}
-                    {form.empty_plastic && (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">{t('inventory.plasticNumber')} *</label>
-                          <input
-                            type="number"
-                            min="0"
-                            value={form.plastic_count}
-                            onChange={(e) => {
-                              setForm({ ...form, plastic_count: e.target.value });
-                            }}
-                            placeholder={t('inventory.numberOfPlastics')} 
-                            className={`w-full border ${errors.plastic_count ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
-                          />
-                          {errors.plastic_count && (
-                            <p className="text-xs text-red-600 mt-1">{errors.plastic_count}</p>
+                  {form.type === 'commission' && (
+                    <div className="space-y-3 border-t border-slate-100 pt-4 dark:border-slate-800">
+                      <label className="flex cursor-pointer items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={!!form.empty_plastic}
+                          onChange={(e) => {
+                            const isChecked = e.target.checked;
+                            setForm({
+                              ...form,
+                              empty_plastic: isChecked,
+                              plastic_count: isChecked ? form.plastic_count : '',
+                              plastic_price: isChecked ? form.plastic_price : '',
+                            });
+                          }}
+                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 dark:border-slate-600"
+                        />
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                          {t('inventory.plasticMortgage')}
+                          {!form.empty_plastic && (
+                            <span className="ms-1 font-normal text-slate-400 dark:text-slate-500">
+                              ({t('common.placeholders.optional')})
+                            </span>
                           )}
+                        </span>
+                      </label>
+
+                      {form.empty_plastic && (
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                          <div>
+                            <FieldLabel htmlFor="receive-plastic-count">{t('inventory.plasticNumber')} *</FieldLabel>
+                            <input
+                              id="receive-plastic-count"
+                              type="number"
+                              min="0"
+                              value={form.plastic_count}
+                              onChange={(e) => setForm({ ...form, plastic_count: e.target.value })}
+                              placeholder={t('inventory.numberOfPlastics')}
+                              className={`${cellFieldClass} ${errors.plastic_count ? errorFieldClass : ''}`}
+                            />
+                            {errors.plastic_count && <p className="mt-1 text-xs text-red-600">{errors.plastic_count}</p>}
+                          </div>
+                          <div>
+                            <MoneyInput
+                              value={form.plastic_price}
+                              onChange={(value) => setForm({ ...form, plastic_price: value })}
+                              prefix={CURRENCY_META[normalizeToAccepted(form.plastic_currency, acList, feeCurrency)]?.symbol}
+                              label={`${t('inventory.plasticPrice')} *`}
+                              placeholder="0"
+                              required
+                              className={`${moneyFieldClass} ${errors.plastic_price ? errorFieldClass : ''}`}
+                            />
+                            {errors.plastic_price && <p className="mt-1 text-xs text-red-600">{errors.plastic_price}</p>}
+                          </div>
                         </div>
-                        <div>
-                          <MoneyInput
-                            value={form.plastic_price}
-                            onChange={(value) => setForm({ ...form, plastic_price: value })}
-                            prefix={CURRENCY_META[normalizeToAccepted(form.plastic_currency, acList, feeCurrency)]?.symbol}
-                            label={`${t('inventory.plasticPrice')} *`}
-                            placeholder="0"
-                            required
-                            className={errors.plastic_price ? 'border-red-500 ring-red-500' : ''}
-                          />
-                          {errors.plastic_price && (
-                            <p className="text-xs text-red-600 mt-1">{errors.plastic_price}</p>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
-            </div>
 
-            {/* Right Column - Additional Information */}
-            <div className="space-y-6">
+              {/* Date & notes */}
               <div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-slate-100 mb-4 flex items-center">
-                  <Upload className="w-5 h-5 mr-2 text-orange-600" />
-                  {t('inventory.additionalInformation')}
-                </h3>
+                <div className="mb-4">
+                  <SectionHeading icon={FileText} tint="text-orange-600 dark:text-orange-400">
+                    {t('inventory.additionalInformation')}
+                  </SectionHeading>
+                </div>
 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">{t('inventory.receivedDate')} *</label>
+                    <FieldLabel htmlFor="receive-date">{t('inventory.receivedDate')} *</FieldLabel>
                     <input
+                      id="receive-date"
                       type="date"
                       value={form.received_at}
                       onChange={(e) => setForm({ ...form, received_at: e.target.value })}
-                      className={`w-full border ${errors.received_at ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
+                      className={`${cellFieldClass} ${errors.received_at ? errorFieldClass : ''}`}
                     />
-                    {errors.received_at && <p className="text-xs text-red-600 mt-1">{errors.received_at}</p>}
+                    {errors.received_at && <p className="mt-1 text-xs text-red-600">{errors.received_at}</p>}
                   </div>
-                  
+
                   <div className="relative">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">{t('inventory.notes')} </label>
+                    <FieldLabel htmlFor="receive-notes">{t('inventory.notes')}</FieldLabel>
                     <textarea
+                      id="receive-notes"
                       ref={notesTextareaRef}
                       value={form.status}
                       onChange={handleNotesChange}
                       onFocus={handleNotesFocus}
-                      className="w-full border border-gray-300 dark:border-slate-700 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
                       rows={4}
+                      className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500"
                       placeholder={t('inventory.addAnyAdditionalStatusOrComments')}
                     />
                     {showSuggestions && notesSuggestions.length > 0 && (
                       <div
                         ref={suggestionsRef}
-                        className="absolute z-50 mt-1 w-full bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-lg shadow-lg max-h-48 overflow-y-auto"
+                        className="absolute z-50 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"
                       >
                         {notesSuggestions.map((suggestion, index) => (
                           <button
                             key={index}
                             type="button"
                             onClick={() => handleSuggestionClick(suggestion)}
-                            className="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-slate-700 text-sm text-gray-700 dark:text-slate-300 border-b border-gray-200 dark:border-slate-700 last:border-b-0"
+                            className="w-full border-b border-slate-100 px-3 py-2 text-start text-sm text-slate-700 last:border-b-0 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
                           >
                             {suggestion}
                           </button>
@@ -1087,14 +1287,14 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                       </div>
                     )}
                     {form.status && form.status.trim() && (
-                      <label className="flex items-center space-x-2 mt-2 cursor-pointer">
+                      <label className="mt-2 flex cursor-pointer items-center gap-2">
                         <input
                           type="checkbox"
                           checked={showAsTag}
                           onChange={(e) => setShowAsTag(e.target.checked)}
-                          className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 dark:border-slate-600"
                         />
-                        <span className="text-sm text-gray-700 dark:text-slate-300">
+                        <span className="text-sm text-slate-700 dark:text-slate-300">
                           {t('inventory.showAsTagInPOSPage')}
                         </span>
                       </label>
@@ -1103,73 +1303,102 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                 </div>
               </div>
             </div>
-          </div>
 
-          {/* Error Display */}
-          {errors.form && (
-            <div className="mt-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-              <p className="text-sm text-red-600">{errors.form}</p>
-            </div>
-          )}
-
-          <div className="space-y-6">
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-4 mt-4 flex items-center justify-between">
-                <div className="flex items-center">
-                  <Truck className="w-5 h-5 mr-2 text-green-600" />
+            {/* Manifest */}
+            <div className="mt-8">
+              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+                <SectionHeading icon={Truck} tint="text-emerald-600 dark:text-emerald-400">
                   {t('inventory.products')}
                   {isEditMode && (
-                    <span className="ml-2 text-sm text-orange-600 font-normal">
+                    <span className="ms-1 text-sm font-normal text-amber-600 dark:text-amber-400">
                       {t('inventory.editExistingItemsOrAddNewOnes')}
                     </span>
                   )}
-                </div>
-              </h3>
+                </SectionHeading>
+                <span className="text-xs tabular-nums text-slate-500 dark:text-slate-400">
+                  {plural('lineCount', tally.lines)}
+                </span>
+              </div>
 
-              <div className="bg-gray-50 dark:bg-slate-800 rounded-lg p-4 border border-gray-200 dark:border-slate-700">
-                <div className="border border-gray-200 dark:border-slate-700 rounded-lg scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 dark:scrollbar-thumb-slate-700 dark:scrollbar-track-slate-800">
-                  <table key={`table-instance-${modalInstanceRef.current}-${bulkProducts.length}`} className="w-full">
-                    <thead className="sticky top-0 bg-gray-50 dark:bg-slate-800 z-10 shadow-sm">
-                      <tr className="border-b border-gray-200">
-                        <th className={`w-[260px] ${headCellClass}`}>{t('inventory.product')}</th>
-                        <th className={`${colFieldClass} ${headCellClass}`}>{t('inventory.qty')}</th>
-                        <th className={`${colFieldClass} ${headCellClass}`}>{t('inventory.unit')}</th>
-                        <th className={`${colFieldClass} ${headCellClass}`}>{t('inventory.weight')}</th>
-                        {form.type !== 'commission' && (
-                          <th className={`${colFieldClass} ${headCellClass}`}>{t('inventory.price')}</th>
-                        )}
-                        <th className={`${colFieldClass} ${headCellClass}`}>{t('inventory.sellingPrice')}</th>
-                        <th className={`${colFieldClass} ${headCellClass}`}>{t('inventory.sellingPriceCurrency')}</th>
-                        <th className={`${colFieldClass} ${headCellClass}`}>{t('inventory.skuBarcode')}</th>
-                        <th className={`w-20 ${headCellClass}`}>{t('inventory.actions')}</th>
-                      </tr>
-                    </thead>
-                    <tbody key={`tbody-instance-${modalInstanceRef.current}`} className="divide-y divide-gray-200">
-                      {bulkProducts.map((productId) => {
-                        const item = bulkItems[productId] || { product_id: '', quantity: '', unit: defaultUnitCode, price: '', selling_price: '', weight: '', sku: '' };
-                        const batchFee = normalizeToAccepted(form.porterage_currency, acList, preferredCurrency);
-                        const lineCur = normalizeToAccepted(
-                          item.price_currency || item.selling_price_currency,
-                          acList,
-                          batchFee
-                        );
-                        const lineSym = CURRENCY_META[lineCur]?.symbol ?? lineCur;
-                        const product = products.find((p: any) => p.id === item.product_id);
-                        const productName = product?.name || '';
-                        
-                        const isEditingExisting = isEditMode && productId.startsWith('edit_');
-                        const weightTracked = item.weight_tracked ?? isMassUnitCode(item.unit);
-                        return (
-                          <tr key={productId} className={`hover:bg-gray-50 transition-colors duration-150 ${isEditingExisting ? 'bg-orange-50' : ''}`}>
-                            <td className="py-3 px-2 w-[260px]">
-                              <div ref={selectRef}>
-                                <div className="flex items-center gap-2">
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+                {bulkProducts.length === 0 ? (
+                  <div className="px-6 py-14 text-center">
+                    <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                      {t('inventory.receivePage.emptyTitle')}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                      {t('inventory.receivePage.emptyHint')}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    {/* Min-width tracks the declared column widths, so the fields
+                        scroll rather than getting crushed out of alignment. */}
+                    <table
+                      key={`table-instance-${modalInstanceRef.current}-${bulkProducts.length}`}
+                      className={`w-full ${showCostColumn ? 'min-w-[1480px]' : 'min-w-[1220px]'}`}
+                    >
+                      <thead className="bg-slate-50 dark:bg-slate-800/80">
+                        <tr className="border-b border-slate-200 dark:border-slate-700">
+                          <th className={`w-10 text-slate-400 dark:text-slate-500 ${headCellClass}`}>
+                            <span className="sr-only">{t('inventory.receivePage.line')}</span>#
+                          </th>
+                          <th className={`w-[260px] ${headCellClass}`}>{t('inventory.product')}</th>
+                          <th className={`${colFieldClass} ${headCellClass}`}>{t('inventory.qty')}</th>
+                          <th className={`${colFieldClass} ${headCellClass}`}>{t('inventory.unit')}</th>
+                          <th className={`${colFieldClass} ${headCellClass}`}>{t('inventory.weight')}</th>
+                          {showCostColumn && (
+                            <th className={`${colFieldClass} ${headCellClass}`}>{t('inventory.price')}</th>
+                          )}
+                          <th className={`${colFieldClass} ${headCellClass}`}>{t('inventory.sellingPrice')}</th>
+                          <th className={`${colFieldClass} ${headCellClass}`}>{t('inventory.sellingPriceCurrency')}</th>
+                          <th className={`${colFieldClass} ${headCellClass}`}>{t('inventory.skuBarcode')}</th>
+                          {showCostColumn && (
+                            <th className={`w-28 text-end ${headCellClass}`}>{t('inventory.receivePage.lineValue')}</th>
+                          )}
+                          <th className="w-12 px-2 py-2.5">
+                            <span className="sr-only">{t('inventory.actions')}</span>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody
+                        key={`tbody-instance-${modalInstanceRef.current}`}
+                        className="divide-y divide-slate-100 dark:divide-slate-800"
+                      >
+                        {bulkProducts.map((productId, index) => {
+                          const item = bulkItems[productId] || { product_id: '', quantity: '', unit: defaultUnitCode, price: '', selling_price: '', weight: '', sku: '' };
+                          const lineCur = normalizeToAccepted(
+                            item.price_currency || item.selling_price_currency,
+                            acList,
+                            feeCurrency
+                          );
+                          const lineSym = CURRENCY_META[lineCur]?.symbol ?? lineCur;
+                          const product = products.find((p: any) => p.id === item.product_id);
+                          const productName = product?.name || '';
+                          const isEditingExisting = isEditMode && productId.startsWith('edit_');
+                          const weightTracked = item.weight_tracked ?? isMassUnitCode(item.unit);
+                          const lineValue = tally.lineValues.get(productId);
+                          const lineLabel = `${t('inventory.receivePage.line')} ${index + 1}`;
+
+                          return (
+                            <tr
+                              key={productId}
+                              className={`align-top transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-800/40 ${
+                                isEditingExisting ? 'bg-amber-50/60 dark:bg-amber-500/[0.06]' : ''
+                              }`}
+                            >
+                              <td className="px-2 py-3 text-sm tabular-nums text-slate-400 dark:text-slate-500">
+                                {index + 1}
+                              </td>
+
+                              <td className="px-2 py-3 w-[260px]">
+                                <div>
                                   <SearchableSelect
-                                    options={products.map((product: any) => ({
-                                      id: product.id,
-                                      label: getProductName(product),
-                                      value: product.id,
-                                      category: categoryLookup.label(product),
+                                    options={products.map((p: any) => ({
+                                      id: p.id,
+                                      label: getProductName(p),
+                                      value: p.id,
+                                      category: categoryLookup.label(p),
                                     }))}
                                     value={item.product_id || ''}
                                     onChange={(value: any) => {
@@ -1186,231 +1415,311 @@ const ReceiveFormModal: React.FC<ReceiveFormModalProps> = ({
                                     addOptionText={t('inventory.addNewProduct')}
                                     onAddNew={() => setAddProductForRow(productId)}
                                     className="w-full"
-                                    portal={false}
-                                    onOpenChange={(open: boolean) => {
-                                      if (open && selectRef.current) {
-                                        selectRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
-                                      }
-                                    }}
+                                    /* The body scrolls in both axes now — an inline
+                                       dropdown would be clipped by it. */
+                                    portal={true}
                                   />
-                                  {isEditingExisting && (
-                                    <span className="text-xs text-orange-600 font-medium">(Existing)</span>
-                                  )}
                                 </div>
-                              </div>
-                              {errors[`product_${productId}`] && (
-                                <p className="text-xs text-red-600 mt-1">{errors[`product_${productId}`]}</p>
-                              )}
-                            </td>
-                            <td className={`py-3 px-2 ${colFieldClass}`}>
-                              <input
-                                type="number"
-                                value={item.quantity}
-                                onChange={(e) => setBulkItems(prev => ({
-                                  ...prev,
-                                  [productId]: { ...prev[productId], quantity: e.target.value }
-                                }))}
-                                className={`w-full border ${errors[`quantity_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
-                                min="1"
-                                step="0.01"
-                                placeholder={t('inventory.qty')}
-                              />
-                              {errors[`quantity_${productId}`] && (
-                                <p className="text-xs text-red-600 mt-1">{errors[`quantity_${productId}`]}</p>
-                              )}
-                            </td>
-                            <td className={`py-3 px-2 ${colFieldClass}`}>
-                              <select
-                                value={item.unit}
-                                onChange={(e) => setBulkItems(prev => ({
-                                  ...prev,
-                                  [productId]: { ...prev[productId], unit: e.target.value }
-                                }))}
-                                className="w-full border border-gray-300 dark:border-slate-700 rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100"
-                              >
-                                {activeUnits.length === 0 && (
-                                  <option value="" disabled>{t('app.loading')}</option>
+                                {isEditingExisting && (
+                                  <span className="mt-1.5 inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
+                                    {t('inventory.receivePage.existingLine')}
+                                  </span>
                                 )}
-                                {activeUnits.length > 0 && !activeUnits.some((u) => u.code === item.unit) && item.unit && (
-                                  <option value={item.unit}>{item.unit}</option>
+                                {errors[`product_${productId}`] && (
+                                  <p className="mt-1 text-xs text-red-600">{errors[`product_${productId}`]}</p>
                                 )}
-                                {activeUnits.map((u) => (
-                                  <option key={u.id} value={u.code}>
-                                    {getTranslatedString(u.name, language as 'en' | 'ar' | 'fr')}
-                                    {u.symbol ? ` (${u.symbol})` : ''}
-                                  </option>
-                                ))}
-                              </select>
-                            </td>
-                            <td className={`py-3 px-2 ${colFieldClass}`}>
-                              <input
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                disabled={productName.toLowerCase() === 'plastic'}
-                                value={item.weight || ''}
-                                onChange={(e) => setBulkItems(prev => ({
-                                  ...prev,
-                                  [productId]: { ...prev[productId], weight: e.target.value }
-                                }))}
-                                className={`w-full border ${errors[`weight_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
-                                placeholder={t('inventory.kg')}
-                              />
-                              {!isEditingExisting && (
-                                <label className="flex items-center gap-1 mt-1 cursor-pointer" title={t('losses.weightTrackedHint')}>
-                                  <input
-                                    type="checkbox"
-                                    checked={weightTracked}
-                                    onChange={(e) => setBulkItems(prev => ({
+                              </td>
+
+                              <td className={`px-2 py-3 ${colFieldClass}`}>
+                                <input
+                                  type="number"
+                                  value={item.quantity}
+                                  onChange={(e) => setBulkItems(prev => ({
+                                    ...prev,
+                                    [productId]: { ...prev[productId], quantity: e.target.value }
+                                  }))}
+                                  className={`${cellFieldClass} ${errors[`quantity_${productId}`] ? errorFieldClass : ''}`}
+                                  min="1"
+                                  step="0.01"
+                                  placeholder="0"
+                                  aria-label={`${t('inventory.qty')} — ${lineLabel}`}
+                                />
+                                {errors[`quantity_${productId}`] && (
+                                  <p className="mt-1 text-xs text-red-600">{errors[`quantity_${productId}`]}</p>
+                                )}
+                              </td>
+
+                              <td className={`px-2 py-3 ${colFieldClass}`}>
+                                <select
+                                  value={item.unit}
+                                  onChange={(e) => setBulkItems(prev => ({
+                                    ...prev,
+                                    [productId]: { ...prev[productId], unit: e.target.value }
+                                  }))}
+                                  className={fieldClass}
+                                  aria-label={`${t('inventory.unit')} — ${lineLabel}`}
+                                >
+                                  {activeUnits.length === 0 && (
+                                    <option value="" disabled>{t('app.loading')}</option>
+                                  )}
+                                  {activeUnits.length > 0 && !activeUnits.some((u) => u.code === item.unit) && item.unit && (
+                                    <option value={item.unit}>{item.unit}</option>
+                                  )}
+                                  {activeUnits.map((u) => (
+                                    <option key={u.id} value={u.code}>
+                                      {getTranslatedString(u.name, language as 'en' | 'ar' | 'fr')}
+                                      {u.symbol ? ` (${u.symbol})` : ''}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+
+                              <td className={`px-2 py-3 ${colFieldClass}`}>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  disabled={productName.toLowerCase() === 'plastic'}
+                                  value={item.weight || ''}
+                                  onChange={(e) => setBulkItems(prev => ({
+                                    ...prev,
+                                    [productId]: { ...prev[productId], weight: e.target.value }
+                                  }))}
+                                  className={`${cellFieldClass} disabled:bg-slate-100 disabled:text-slate-400 dark:disabled:bg-slate-800/60 ${errors[`weight_${productId}`] ? errorFieldClass : ''}`}
+                                  placeholder={t('inventory.kg')}
+                                  aria-label={`${t('inventory.weight')} — ${lineLabel}`}
+                                />
+                                {!isEditingExisting && (
+                                  <label className="mt-1.5 flex cursor-pointer items-center gap-1.5" title={t('losses.weightTrackedHint')}>
+                                    <input
+                                      type="checkbox"
+                                      checked={weightTracked}
+                                      onChange={(e) => setBulkItems(prev => ({
+                                        ...prev,
+                                        [productId]: { ...prev[productId], weight_tracked: e.target.checked }
+                                      }))}
+                                      className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 dark:border-slate-600"
+                                    />
+                                    <span className="whitespace-nowrap text-[11px] text-slate-500 dark:text-slate-400">
+                                      {t('losses.weightTracked')}
+                                    </span>
+                                  </label>
+                                )}
+                                {errors[`weight_${productId}`] && (
+                                  <p className="mt-1 text-xs text-red-600">{errors[`weight_${productId}`]}</p>
+                                )}
+                              </td>
+
+                              {showCostColumn && (
+                                <td className={`px-2 py-3 ${colFieldClass}`}>
+                                  <MoneyInput
+                                    value={item.price || ''}
+                                    onChange={(value) => setBulkItems(prev => ({
                                       ...prev,
-                                      [productId]: { ...prev[productId], weight_tracked: e.target.checked }
+                                      [productId]: { ...prev[productId], price: value }
                                     }))}
-                                    className="w-3.5 h-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                    prefix={lineSym}
+                                    placeholder="0"
+                                    ariaLabel={`${t('inventory.price')} — ${lineLabel}`}
+                                    className={`${moneyFieldClass} ${errors[`price_${productId}`] ? errorFieldClass : ''}`}
                                   />
-                                  <span className="text-xs text-gray-600 dark:text-slate-400 whitespace-nowrap">{t('losses.weightTracked')}</span>
-                                </label>
+                                  {errors[`price_${productId}`] && (
+                                    <p className="mt-1 text-xs text-red-600">{errors[`price_${productId}`]}</p>
+                                  )}
+                                </td>
                               )}
-                              {!isEditingExisting && weightTracked && (
-                                <p className="text-[10px] text-gray-500 dark:text-slate-500 mt-0.5">{t('losses.weightTrackedHint')}</p>
-                              )}
-                              {errors[`weight_${productId}`] && (
-                                <p className="text-xs text-red-600 mt-1">{errors[`weight_${productId}`]}</p>
-                              )}
-                            </td>
-                            {form.type !== 'commission' && (
-                              <td className={`py-3 px-2 ${colFieldClass}`}>
+
+                              <td className={`px-2 py-3 ${colFieldClass}`}>
                                 <MoneyInput
-                                  value={item.price || ''}
+                                  value={item.selling_price || ''}
                                   onChange={(value) => setBulkItems(prev => ({
                                     ...prev,
-                                    [productId]: { ...prev[productId], price: value }
+                                    [productId]: { ...prev[productId], selling_price: value }
                                   }))}
                                   prefix={lineSym}
                                   placeholder="0"
-                                  className={`text-sm ${errors[`price_${productId}`] ? 'border-red-500 ring-red-500' : ''}`}
+                                  ariaLabel={`${t('inventory.sellingPrice')} — ${lineLabel}`}
+                                  className={`${moneyFieldClass} ${errors[`selling_price_${productId}`] ? errorFieldClass : ''}`}
                                 />
-                                {errors[`price_${productId}`] && (
-                                  <p className="text-xs text-red-600 mt-1">{errors[`price_${productId}`]}</p>
+                                {errors[`selling_price_${productId}`] && (
+                                  <p className="mt-1 text-xs text-red-600">{errors[`selling_price_${productId}`]}</p>
                                 )}
                               </td>
-                            )}
-                            <td className={`py-3 px-2 ${colFieldClass}`}>
-                              <MoneyInput
-                                value={item.selling_price || ''}
-                                onChange={(value) => setBulkItems(prev => ({
-                                  ...prev,
-                                  [productId]: { ...prev[productId], selling_price: value }
-                                }))}
-                                prefix={lineSym}
-                                placeholder="0"
-                                className={`text-sm ${errors[`selling_price_${productId}`] ? 'border-red-500 ring-red-500' : ''}`}
-                              />
-                              {errors[`selling_price_${productId}`] && (
-                                <p className="text-xs text-red-600 mt-1">{errors[`selling_price_${productId}`]}</p>
-                              )}
-                            </td>
-                            <td className={`py-3 px-2 ${colFieldClass}`}>
-                              <AcceptedCurrencySelect
-                                acceptedCurrencies={acList}
-                                value={normalizeToAccepted(
-                                  item.price_currency || item.selling_price_currency,
-                                  acList,
-                                  batchFee
-                                )}
-                                onChange={(currency) =>
-                                  setBulkItems((prev) => ({
+
+                              <td className={`px-2 py-3 ${colFieldClass}`}>
+                                <AcceptedCurrencySelect
+                                  acceptedCurrencies={acList}
+                                  value={lineCur}
+                                  onChange={(currency) =>
+                                    setBulkItems((prev) => ({
+                                      ...prev,
+                                      [productId]: {
+                                        ...prev[productId],
+                                        price_currency: currency,
+                                        selling_price_currency: currency,
+                                      },
+                                    }))
+                                  }
+                                  className="h-11 w-full"
+                                  aria-label={t('inventory.lineItemCurrency')}
+                                />
+                              </td>
+
+                              <td className={`px-2 py-3 ${colFieldClass}`}>
+                                <input
+                                  type="text"
+                                  value={item.sku || ''}
+                                  onChange={(e) => setBulkItems(prev => ({
                                     ...prev,
-                                    [productId]: {
-                                      ...prev[productId],
-                                      price_currency: currency,
-                                      selling_price_currency: currency,
-                                    },
-                                  }))
-                                }
-                                className="w-full"
-                                aria-label={t('inventory.lineItemCurrency')}
-                              />
-                            </td>
-                            <td className={`py-3 px-2 ${colFieldClass}`}>
-                              <input
-                                type="text"
-                                value={item.sku || ''}
-                                onChange={(e) => setBulkItems(prev => ({
-                                  ...prev,
-                                  [productId]: { ...prev[productId], sku: e.target.value }
-                                }))}
-                                className={`w-full border ${errors[`sku_${productId}`] ? 'border-red-500 ring-red-500' : 'border-gray-300 dark:border-slate-700'} rounded px-2 py-1 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:text-slate-100`}
-                                placeholder={t('inventory.skuBarcode')}
-                                title="Optional: Enter SKU or barcode for this item"
-                              />
-                              {errors[`sku_${productId}`] && (
-                                <p className="text-xs text-red-600 mt-1">{errors[`sku_${productId}`]}</p>
+                                    [productId]: { ...prev[productId], sku: e.target.value }
+                                  }))}
+                                  className={`${fieldClass} ${errors[`sku_${productId}`] ? errorFieldClass : ''}`}
+                                  placeholder={t('inventory.skuBarcode')}
+                                  aria-label={`${t('inventory.skuBarcode')} — ${lineLabel}`}
+                                />
+                                {errors[`sku_${productId}`] && (
+                                  <p className="mt-1 text-xs text-red-600">{errors[`sku_${productId}`]}</p>
+                                )}
+                              </td>
+
+                              {showCostColumn && (
+                                <td className="px-2 py-3 text-end">
+                                  {lineValue ? (
+                                    <>
+                                      <span className="text-sm font-medium tabular-nums tracking-tight text-slate-900 dark:text-slate-100">
+                                        {formatMoney(lineValue.value, lineValue.currency)}
+                                      </span>
+                                      {/* Worth saying only when both are filled — the
+                                          service prices by weight and ignores the count. */}
+                                      {Number(item.weight) > 0 && Number(item.quantity) > 0 && (
+                                        <span className="mt-0.5 block text-[11px] text-slate-400 dark:text-slate-500">
+                                          {t('inventory.receivePage.pricedByWeight')}
+                                        </span>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <span className="text-sm text-slate-300 dark:text-slate-600">—</span>
+                                  )}
+                                </td>
                               )}
-                            </td>
-                          
-                            {/* Flex lives on the inner div — a display:flex <td>
-                                drops out of the row and takes its column width with it. */}
-                            <td className="py-3 px-2 w-20">
-                              <div className="flex items-center gap-2">
-                              {(bulkProducts.length > 1 || !bulkProducts[0]) && !isEditingExisting ? (
-                                <button
-                                  type="button"
-                                  onClick={() => removeProductRow(productId)}
-                                  className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50 transition-colors"
-                                  title={t('inventory.removeProduct')}
-                                >
-                                  <X className="w-4 h-4" />
-                                </button>
-                              ) : isEditingExisting ? (
-                                <span className="text-xs text-gray-500 italic">{t('inventory.cannotRemoveExistingItem')}</span>
-                              ) : (
-                                <div></div>
-                              )}
-                              <button
-                                type="button"
-                                onClick={addProductRow}
-                                className="border-green-600 text-black text-sm rounded-lg transition-colors flex items-center"
-                              >
-                                <Plus className="w-5 h-5" />
-                              </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+
+                              <td className="px-2 py-3">
+                                {isEditingExisting ? (
+                                  <span
+                                    className="inline-flex rounded p-1.5 text-slate-300 dark:text-slate-600"
+                                    title={t('inventory.cannotRemoveExistingItem')}
+                                  >
+                                    <Lock className="h-4 w-4" aria-hidden="true" />
+                                    <span className="sr-only">{t('inventory.cannotRemoveExistingItem')}</span>
+                                  </span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => removeProductRow(productId)}
+                                    className="rounded p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 dark:hover:bg-red-950/40"
+                                    title={t('inventory.removeProduct')}
+                                    aria-label={`${t('inventory.removeProduct')} — ${lineLabel}`}
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* One way in, at the end of the list — not a button per row */}
+                <button
+                  type="button"
+                  onClick={addProductRow}
+                  className="flex w-full items-center justify-center gap-2 border-t border-dashed border-slate-300 py-3.5 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:border-slate-700 dark:text-blue-400 dark:hover:bg-blue-950/30"
+                >
+                  <Plus className="h-4 w-4" />
+                  {t('inventory.receivePage.addLine')}
+                </button>
               </div>
+
+              {errors.product_id && <p className="mt-2 text-xs text-red-600">{errors.product_id}</p>}
             </div>
           </div>
 
-          {/* Action Buttons */}
-          <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200 dark:border-slate-800">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-6 py-2 text-gray-700 dark:text-slate-200 border border-gray-300 dark:border-slate-700 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors"
-            >
-              {t('inventory.cancel')}
-            </button>
-            <button
-              type="submit"
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={loading || (isEditMode && !hasChanges())}
-            >
-              {loading ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
-                  {isEditMode ? 'Updating...' : 'Receiving...'}
-                </>
-              ) : (
-                <>
-                  <Truck className="w-4 h-4 mr-2" />
-                  {isEditMode ? `${t('inventory.updateBatch')}` : `${t('inventory.receiveProducts')}`}
-                </>
-              )}
-            </button>
+          {/* Commit bar — the tally travels with the buttons, so a long
+              manifest can be checked and committed without scrolling. */}
+          <div className="shrink-0 border-t border-slate-200 bg-white px-6 py-4 dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+              <dl className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
+                <Stat label={t('inventory.receivePage.statLines')} value={formatNumber(tally.lines)} />
+                <Stat label={t('inventory.receivePage.statUnits')} value={formatNumber(tally.units)} />
+                <Stat
+                  label={t('inventory.kg')}
+                  value={formatNumber(tally.weight, tally.weight % 1 === 0 ? 0 : 1)}
+                />
+                {totalsList.map(([currency, amount]) => (
+                  <Stat
+                    key={currency}
+                    label={totalsList.length > 1
+                      ? `${t('inventory.receivePage.total')} ${currency}`
+                      : t('inventory.receivePage.total')}
+                    value={formatMoney(amount, currency)}
+                    strong
+                  />
+                ))}
+              </dl>
+
+              <div className="flex items-center gap-3">
+                {isEditMode && !changesPending && (
+                  <span className="text-xs text-slate-400 dark:text-slate-500">
+                    {t('inventory.receivePage.noChanges')}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="h-10 rounded-lg border border-slate-300 px-5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  {t('inventory.cancel')}
+                </button>
+                <button
+                  type="submit"
+                  className="inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus-visible:ring-offset-slate-900"
+                  disabled={loading || tally.lines === 0 || (isEditMode && !changesPending)}
+                >
+                  {loading ? (
+                    <>
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                      {isEditMode
+                        ? t('inventory.receivePage.updating')
+                        : t('inventory.receivePage.receiving')}
+                    </>
+                  ) : (
+                    <>
+                      <Truck className="h-4 w-4" />
+                      {isEditMode
+                        ? t('inventory.updateBatch')
+                        : tally.lines === 1
+                          ? t('inventory.receivePage.receiveLine')
+                          : t('inventory.receivePage.receiveLines', { count: tally.lines })}
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {tally.unpriced > 0 && (
+              <p className="mt-3 flex items-start gap-2 text-xs text-amber-700 dark:text-amber-400">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                {plural('unpriced', tally.unpriced)}
+              </p>
+            )}
+            {form.type === 'commission' && tally.lines > 0 && (
+              <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+                {t('inventory.receivePage.commissionPricedOnSale')}
+              </p>
+            )}
           </div>
         </form>
       </div>

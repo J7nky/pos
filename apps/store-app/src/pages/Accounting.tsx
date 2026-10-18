@@ -718,7 +718,7 @@ export default function Accounting() {
             itemType: 'inventory' as const,
             product_id: item.product_id,
             productName: product?.name || 'Unknown Product',
-            supplierName: supplier?.name || 'Unknown Supplier',
+            supplierName: supplier?.name || t('payments.unknownSupplier'),
             customerName: '', // Inventory items don't have customers
             quantity: item.quantity,
             weight: item.weight || 0,
@@ -989,27 +989,35 @@ export default function Accounting() {
       const bill = billMap.get(item.bill_id);
       const customer = bill?.entity_id ? customerMap.get(bill.entity_id) : null;
       
-      // Supplier lookup: inventory_item_id → inventory → batch_id → inventory_bills → supplier_id
-      let supplier = null;
-      if (item.inventory_item_id) {
+      // Supplier lookup. Inventory-sourced rows already carry the bill (batch_id) they
+      // came from; sale rows resolve it via inventory_item_id → inventory → batch_id.
+      let batchId: string | undefined = item.batch_id || undefined;
+      if (!batchId && item.inventory_item_id) {
         const inventoryItem = inventoryItemMap.get(item.inventory_item_id);
-        if (inventoryItem?.batch_id) {
-          const batch = batchMap.get(inventoryItem.batch_id);
-          if (batch?.supplier_id) {
-            supplier = supplierMap.get(batch.supplier_id);
-            if (!supplier) {
-              console.warn(`[Accounting] Supplier not found for supplier_id: ${batch.supplier_id} (from batch: ${inventoryItem.batch_id})`);
-            }
-          } else {
-            console.warn(`[Accounting] Batch not found or missing supplier_id: ${inventoryItem.batch_id}`);
-          }
-        } else if (inventoryItem) {
+        if (!inventoryItem) {
+          console.warn(`[Accounting] Inventory item not found: ${item.inventory_item_id}`);
+        } else if (!inventoryItem.batch_id) {
           console.warn(`[Accounting] Inventory item missing batch_id: ${item.inventory_item_id}`);
         } else {
-          console.warn(`[Accounting] Inventory item not found: ${item.inventory_item_id}`);
+          batchId = inventoryItem.batch_id;
         }
       }
-      // Fallback: If no inventory_item_id, supplier remains null (will show "Unknown Supplier")
+
+      let supplier = null;
+      if (batchId) {
+        const batch = batchMap.get(batchId);
+        if (!batch) {
+          console.warn(`[Accounting] Batch not found: ${batchId}`);
+        } else if (!batch.supplier_id) {
+          console.warn(`[Accounting] Batch missing supplier_id: ${batchId}`);
+        } else {
+          supplier = supplierMap.get(batch.supplier_id);
+          if (!supplier) {
+            console.warn(`[Accounting] Supplier not found for supplier_id: ${batch.supplier_id} (from batch: ${batchId})`);
+          }
+        }
+      }
+      // Fallback: a name already resolved when the row was loaded, then "Unknown Supplier"
 
       // Get staged changes for this item
       const stagedChanges = stagedNonPricedChanges[item.id] || {};
@@ -1036,7 +1044,7 @@ export default function Accounting() {
         ...item,
         customerName: customer?.name || 'Walk-in Customer',
         productName: getProductName(product) || 'Unknown Product',
-        supplierName: supplier?.name || 'Unknown Supplier',
+        supplierName: supplier?.name || item.supplierName || t('payments.unknownSupplier'),
         date: item.created_at || '',
         totalValue,
         status

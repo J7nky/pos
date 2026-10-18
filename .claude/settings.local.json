@@ -125,7 +125,14 @@
       "Bash(node -e \"const r=require\\('react-router-dom'\\);console.log\\('useBlocker:', typeof r.useBlocker\\)\")",
       "Bash(pnpm build:store)",
       "Bash(npx vite *)",
-      "Bash(grep -n \"<table\\\\|<thead\\\\|<th \\\\|<th$\\\\|<th className\\\\|</table>\" ReceiveFormModal.tsx)"
+      "Bash(grep -n \"<table\\\\|<thead\\\\|<th \\\\|<th$\\\\|<th className\\\\|</table>\" ReceiveFormModal.tsx)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(echo \"LINT_EXIT:$?\")",
+      "Bash(npx tailwindcss *)",
+      "Bash(pkill -f \"http.server 8899\")",
+      "Bash(node -e \"const i=require\\('./node_modules/lucide-react/package.json'\\);console.log\\(i.version\\)\")",
+      "Bash(grep -E \"^\\(coins|lock|file-text|alert-triangle|calendar-days|receipt\\)\\\\.js$\")",
+      "Bash(node node_modules/.pnpm/tailwindcss@3.4.18/node_modules/tailwindcss/lib/cli.js -c /tmp/claude-1000/-home-janky-Desktop-pos-1/63fb896c-555a-4676-95ab-74a5a79cc9e5/scratchpad/tw.config.js -i /tmp/claude-1000/-home-janky-Desktop-pos-1/63fb896c-555a-4676-95ab-74a5a79cc9e5/scratchpad/in.css -o /tmp/claude-1000/-home-janky-Desktop-pos-1/63fb896c-555a-4676-95ab-74a5a79cc9e5/scratchpad/out.css --minify)"
     ]
   },
   "enableAllProjectMcpServers": true,

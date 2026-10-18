@@ -1,11 +1,14 @@
 /**
  * Audit Log page — branch activity timeline.
  *
- * Filters mirror the TrialBalance report (collapsible panel, quick date presets
- * + start/end date) and add a user filter. Row visibility is role-scoped at the
- * data layer (getAuditLogs): admin → whole store, manager → own branch, cashier
- * → own actions; the user filter is hidden for cashiers since their view is
- * already pinned to themselves.
+ * Filtering is one instrument: the always-on date window reads out in the bar
+ * (preset name over the resolved start → end), every other active constraint
+ * shows as a chip that drops on its own, and the expandable panel holds the
+ * full controls — a segmented preset track, an action selector built from the
+ * same AUDIT_ACTION_BADGE palette the rows wear, and the who/what selects.
+ * Row visibility is role-scoped at the data layer (getAuditLogs): admin → whole
+ * store, manager → own branch, cashier → own actions; the user filter is hidden
+ * for cashiers since their view is already pinned to themselves.
  *
  * The loaded window is presented as a table above a summary stat strip and a
  * client-side search, with per-entity iconography and the field-level diff shown
@@ -14,12 +17,13 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
-  Activity, Banknote, Boxes, Building2, Calendar, ChevronDown,
+  Activity, ArrowLeft, ArrowRight, Banknote, Boxes, Building2, Calendar, ChevronDown,
   ChevronUp, Eye, FileText, Filter, Hash, KeyRound, Layers, LogIn, Package,
   Pencil, ReceiptText, RotateCcw, Scale, ScrollText, Search, Settings2, Tags,
-  Trash2, UserCog, Users, Wallet,
+  Trash2, UserCog, Users, Wallet, X,
 } from 'lucide-react';
 import { useI18n } from '../i18n';
 import { useOfflineData } from '../contexts/OfflineDataContext';
@@ -51,6 +55,38 @@ const ENTITY_ICON: Record<string, LucideIcon> = {
   unit_of_measure: Scale, store_settings: Settings2, user_permission: KeyRound,
   auth: LogIn,
 };
+
+/**
+ * Dot colors for the unselected action chips — the solid counterpart of each
+ * pastel row badge in AUDIT_ACTION_BADGE. Unselected chips stay neutral so the
+ * filter never becomes a wall of color; the dot is the only hint of the badge
+ * the chip will produce in the table.
+ */
+const ACTION_DOT: Record<string, string> = {
+  create: 'bg-green-500', update: 'bg-blue-500', delete: 'bg-red-500', void: 'bg-red-500',
+  reactivate: 'bg-green-500', archive: 'bg-gray-400', unarchive: 'bg-gray-400',
+  open: 'bg-emerald-500', close: 'bg-amber-500', login: 'bg-indigo-500', logout: 'bg-slate-400',
+};
+
+const DATE_PRESETS = ['today', 'week', 'mtd', 'month', 'year'] as const;
+type DatePreset = (typeof DATE_PRESETS)[number];
+
+/** Resolve a preset to a concrete window. Shared by the buttons and the active-preset readout. */
+function presetRange(preset: DatePreset): { startDate: string; endDate: string } {
+  const today = new Date();
+  const start = new Date(today);
+  switch (preset) {
+    case 'today': break;
+    case 'week': start.setDate(today.getDate() - 6); break;
+    case 'mtd': start.setDate(1); break;
+    case 'month': start.setDate(today.getDate() - 29); break;
+    case 'year': start.setMonth(0, 1); break;
+  }
+  return {
+    startDate: getLocalDateString(start.toISOString()),
+    endDate: getLocalDateString(today.toISOString()),
+  };
+}
 
 export default function AuditLog() {
   const { t, language } = useI18n();
@@ -114,19 +150,20 @@ export default function AuditLog() {
     };
   }, [getAuditLogs, dateRange.startDate, dateRange.endDate, entityType, action, changedBy, limit]);
 
-  const applyDatePreset = (preset: 'today' | 'week' | 'month' | 'year' | 'mtd') => {
-    const today = new Date();
-    const start = new Date(today);
-    switch (preset) {
-      case 'today': break;
-      case 'week': start.setDate(today.getDate() - 6); break;
-      case 'mtd': start.setDate(1); break;
-      case 'month': start.setDate(today.getDate() - 29); break;
-      case 'year': start.setMonth(0, 1); break;
-    }
+  const applyDatePreset = (preset: DatePreset) => {
     setLimit(PAGE_SIZE);
-    setDateRange({ startDate: getLocalDateString(start.toISOString()), endDate: getLocalDateString(today.toISOString()) });
+    setDateRange(presetRange(preset));
   };
+
+  /** Which preset (if any) the current window matches — drives the segmented control. */
+  const activePreset = useMemo(
+    () =>
+      DATE_PRESETS.find((p) => {
+        const r = presetRange(p);
+        return r.startDate === dateRange.startDate && r.endDate === dateRange.endDate;
+      }) ?? null,
+    [dateRange.startDate, dateRange.endDate],
+  );
 
   const resetFilters = () => {
     const start = new Date();
@@ -139,8 +176,60 @@ export default function AuditLog() {
     setLimit(PAGE_SIZE);
   };
 
-  const hasActiveFilters =
-    entityType !== 'all' || action !== 'all' || changedBy !== 'all' || search.trim() !== '';
+  /** Every filter change re-opens the window at page one. */
+  const setFilter = (apply: () => void) => {
+    setLimit(PAGE_SIZE);
+    apply();
+  };
+
+  // The date window is always on, so it is read out in the bar rather than hidden
+  // in the panel: preset name (or "custom") over the resolved start → end dates.
+  const formatWindowDate = (date: string, withYear: boolean) => {
+    const parsed = new Date(`${date}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return '—'; // a native date input can be cleared
+    return parsed.toLocaleDateString(locale, {
+      month: 'short', day: 'numeric', ...(withYear ? { year: 'numeric' } : {}),
+    });
+  };
+
+  const WindowArrow = isRTL ? ArrowLeft : ArrowRight;
+
+  // Active constraints, each removable on its own — no all-or-nothing reset.
+  const chips: { key: string; label: string; value: string; clear: () => void }[] = [];
+  if (changedBy !== 'all') {
+    chips.push({
+      key: 'user',
+      label: t('auditLog.user'),
+      value: userOptions.find((u) => u.id === changedBy)?.name ?? changedBy,
+      clear: () => setFilter(() => setChangedBy('all')),
+    });
+  }
+  if (action !== 'all') {
+    chips.push({
+      key: 'action',
+      label: t('auditLog.action'),
+      value: t(`auditLog.actions.${action}`),
+      clear: () => setFilter(() => setAction('all')),
+    });
+  }
+  if (entityType !== 'all') {
+    chips.push({
+      key: 'entity',
+      label: t('auditLog.entityType'),
+      value: t(`auditLog.entityTypes.${entityType}`),
+      clear: () => setFilter(() => setEntityType('all')),
+    });
+  }
+  if (search.trim()) {
+    chips.push({
+      key: 'search',
+      label: t('auditLog.view.searchLabel'),
+      value: search.trim(),
+      clear: () => setSearch(''),
+    });
+  }
+
+  const SelectedEntityIcon = ENTITY_ICON[entityType] ?? Layers;
 
   // Client-side search over the loaded window (actor, record type, action, changes).
   const filteredLogs = useMemo(() => {
@@ -223,130 +312,228 @@ export default function AuditLog() {
         ))}
       </div>
 
-      {/* ── Search + filter toggle ──────────────────────────────────── */}
-      <div className="flex items-center gap-3 flex-wrap mb-4">
-        <div className="relative flex-1 min-w-[14rem]">
-          <Search className="absolute top-1/2 -translate-y-1/2 start-3 w-4 h-4 text-gray-400 pointer-events-none" />
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t('auditLog.view.search')}
-            className="w-full rounded-lg border border-gray-200 bg-white ps-9 pe-3 py-2.5 text-sm shadow-sm placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          />
+      {/* ── Filter bar ──────────────────────────────────────────────────
+          One instrument, three stacked registers: the always-on date window and
+          search; the removable chips for whatever else is narrowing the view;
+          and the expandable panel holding the full controls. */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm mb-5">
+        <div className="flex items-center gap-3 flex-wrap p-3">
+          {/* Date window — reads out the one filter that is never off, and opens the panel. */}
+          <button
+            type="button"
+            onClick={() => setShowFilters((s) => !s)}
+            aria-expanded={showFilters}
+            aria-controls="audit-filter-panel"
+            className="inline-flex items-center gap-2.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-start transition-colors hover:border-blue-300 hover:bg-blue-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          >
+            <Calendar className="w-4 h-4 shrink-0 text-blue-600" />
+            <span className="flex flex-col leading-tight">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                {activePreset ? t(`auditLog.preset.${activePreset}`) : t('auditLog.preset.custom')}
+              </span>
+              <span className="flex items-center gap-1.5 text-sm font-semibold text-gray-900 tabular-nums">
+                {formatWindowDate(dateRange.startDate, false)}
+                <WindowArrow className="w-3 h-3 text-gray-300" />
+                {formatWindowDate(dateRange.endDate, true)}
+              </span>
+            </span>
+          </button>
+
+          <div className="relative flex-1 min-w-[14rem]">
+            <Search className="absolute top-1/2 -translate-y-1/2 start-3 w-4 h-4 text-gray-400 pointer-events-none" />
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t('auditLog.view.search')}
+              aria-label={t('auditLog.view.searchLabel')}
+              className="w-full rounded-lg border border-gray-200 bg-white ps-9 pe-3 py-2.5 text-sm placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowFilters((s) => !s)}
+            aria-expanded={showFilters}
+            aria-controls="audit-filter-panel"
+            className={`inline-flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors ${
+              showFilters
+                ? 'border-blue-300 bg-blue-50 text-blue-700'
+                : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            <Filter className="w-4 h-4" />
+            {t('auditLog.filters')}
+            {showFilters ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
         </div>
-        <button
-          onClick={() => setShowFilters((s) => !s)}
-          className={`inline-flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium shadow-sm transition-colors ${
-            showFilters || hasActiveFilters
-              ? 'border-blue-300 bg-blue-50 text-blue-700'
-              : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+
+        {/* Applied constraints — each one drops on its own. */}
+        {chips.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap border-t border-gray-100 bg-gray-50/70 px-3 py-2.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+              {t('auditLog.view.filteredBy')}
+            </span>
+            {chips.map((chip) => (
+              <span
+                key={chip.key}
+                className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white py-1 ps-2.5 pe-1 text-xs text-gray-700 shadow-sm"
+              >
+                <span className="text-gray-400">{chip.label}</span>
+                <span className="font-medium max-w-[12rem] truncate">{chip.value}</span>
+                <button
+                  type="button"
+                  onClick={chip.clear}
+                  aria-label={t('auditLog.view.removeFilter', { label: chip.label })}
+                  className="rounded-full p-0.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            ))}
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-200/60 hover:text-gray-700"
+            >
+              <RotateCcw className="w-3 h-3" />
+              {t('auditLog.clearFilters')}
+            </button>
+          </div>
+        )}
+
+        {/* Panel — collapses by height so the open/close reads as one motion. */}
+        <div
+          id="audit-filter-panel"
+          className={`grid transition-all duration-200 ease-out ${
+            showFilters ? 'grid-rows-[1fr]' : 'grid-rows-[0fr] invisible'
           }`}
         >
-          <Filter className="w-4 h-4" />
-          {t('auditLog.filters')}
-          {hasActiveFilters && (
-            <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
-              {t('auditLog.view.activeFilters')}
-            </span>
-          )}
-          {showFilters ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-        </button>
-        {hasActiveFilters && (
-          <button
-            onClick={resetFilters}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm font-medium text-gray-600 shadow-sm hover:bg-gray-50"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            {t('auditLog.clearFilters')}
-          </button>
-        )}
-      </div>
+          <div className="min-h-0 overflow-hidden">
+            <div className="divide-y divide-gray-100 border-t border-gray-100">
+              {/* When */}
+              <section className="p-4">
+                <FieldLabel>{t('auditLog.columns.time')}</FieldLabel>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="max-w-full overflow-x-auto">
+                    <div className="inline-flex rounded-lg bg-gray-100 p-1">
+                      {DATE_PRESETS.map((key) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => applyDatePreset(key)}
+                          aria-pressed={activePreset === key}
+                          className={`whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                            activePreset === key
+                              ? 'bg-white text-blue-700 shadow-sm'
+                              : 'text-gray-600 hover:text-gray-900'
+                          }`}
+                        >
+                          {t(`auditLog.preset.${key}`)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
-      {/* ── Filter panel ────────────────────────────────────────────── */}
-      {showFilters && (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-5 mb-4">
-          <div>
-            <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2.5">
-              <Calendar className="w-3.5 h-3.5 text-blue-600" />
-              {t('auditLog.quickDateRange')}
-            </label>
-            <div className="flex gap-2 flex-wrap">
-              {(['today', 'week', 'mtd', 'month', 'year'] as const).map((key) => (
-                <button
-                  key={key}
-                  onClick={() => applyDatePreset(key)}
-                  className="px-3 py-1.5 text-sm bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-all font-medium border border-blue-200"
-                >
-                  {t(`auditLog.preset.${key}`)}
-                </button>
-              ))}
-            </div>
-          </div>
+                  <div className="inline-flex items-center rounded-lg border border-gray-200 bg-white focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500">
+                    <input
+                      type="date"
+                      value={dateRange.startDate}
+                      aria-label={t('auditLog.startDate')}
+                      onChange={(e) => setFilter(() => setDateRange((p) => ({ ...p, startDate: e.target.value })))}
+                      className="bg-transparent px-3 py-2 text-sm tabular-nums focus:outline-none"
+                    />
+                    <WindowArrow className="w-3.5 h-3.5 shrink-0 text-gray-300" />
+                    <input
+                      type="date"
+                      value={dateRange.endDate}
+                      aria-label={t('auditLog.endDate')}
+                      onChange={(e) => setFilter(() => setDateRange((p) => ({ ...p, endDate: e.target.value })))}
+                      className="bg-transparent px-3 py-2 text-sm tabular-nums focus:outline-none"
+                    />
+                  </div>
+                </div>
+              </section>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">{t('auditLog.startDate')}</label>
-              <input
-                type="date"
-                value={dateRange.startDate}
-                onChange={(e) => { setLimit(PAGE_SIZE); setDateRange((p) => ({ ...p, startDate: e.target.value })); }}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">{t('auditLog.endDate')}</label>
-              <input
-                type="date"
-                value={dateRange.endDate}
-                onChange={(e) => { setLimit(PAGE_SIZE); setDateRange((p) => ({ ...p, endDate: e.target.value })); }}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-            {!isCashier && (
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">{t('auditLog.user')}</label>
-                <select
-                  value={changedBy}
-                  onChange={(e) => { setLimit(PAGE_SIZE); setChangedBy(e.target.value); }}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="all">{t('auditLog.allUsers')}</option>
-                  {userOptions.map((u) => (
-                    <option key={u.id} value={u.id}>{u.name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">{t('auditLog.action')}</label>
-              <select
-                value={action}
-                onChange={(e) => { setLimit(PAGE_SIZE); setAction(e.target.value); }}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              >
-                <option value="all">{t('auditLog.all')}</option>
-                {ACTIONS.map((a) => (
-                  <option key={a} value={a}>{t(`auditLog.actions.${a}`)}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">{t('auditLog.entityType')}</label>
-              <select
-                value={entityType}
-                onChange={(e) => { setLimit(PAGE_SIZE); setEntityType(e.target.value); }}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              >
-                <option value="all">{t('auditLog.all')}</option>
-                {ENTITY_TYPES.map((et) => (
-                  <option key={et} value={et}>{t(`auditLog.entityTypes.${et}`)}</option>
-                ))}
-              </select>
+              {/* Action — the same badges the rows wear, so the filter previews its own result. */}
+              <section className="p-4">
+                <FieldLabel>{t('auditLog.action')}</FieldLabel>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setFilter(() => setAction('all'))}
+                    aria-pressed={action === 'all'}
+                    className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                      action === 'all'
+                        ? 'border-gray-300 bg-gray-100 text-gray-900'
+                        : 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50'
+                    }`}
+                  >
+                    {t('auditLog.all')}
+                  </button>
+                  {ACTIONS.map((a) => {
+                    const selected = action === a;
+                    return (
+                      <button
+                        key={a}
+                        type="button"
+                        onClick={() => setFilter(() => setAction(selected ? 'all' : a))}
+                        aria-pressed={selected}
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                          selected
+                            ? `${AUDIT_ACTION_BADGE[a] ?? 'bg-gray-100 text-gray-700'} border-transparent shadow-sm ring-1 ring-inset ring-black/5`
+                            : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        <span
+                          className={`h-1.5 w-1.5 rounded-full ${
+                            selected ? 'bg-current opacity-50' : ACTION_DOT[a] ?? 'bg-gray-300'
+                          }`}
+                        />
+                        {t(`auditLog.actions.${a}`)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              {/* Who and what */}
+              <section className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4">
+                {!isCashier && (
+                  <div>
+                    <FieldLabel>{t('auditLog.user')}</FieldLabel>
+                    <AdornedSelect
+                      icon={Users}
+                      value={changedBy}
+                      onChange={(v) => setFilter(() => setChangedBy(v))}
+                      label={t('auditLog.user')}
+                    >
+                      <option value="all">{t('auditLog.allUsers')}</option>
+                      {userOptions.map((u) => (
+                        <option key={u.id} value={u.id}>{u.name}</option>
+                      ))}
+                    </AdornedSelect>
+                  </div>
+                )}
+                <div>
+                  <FieldLabel>{t('auditLog.entityType')}</FieldLabel>
+                  <AdornedSelect
+                    icon={SelectedEntityIcon}
+                    value={entityType}
+                    onChange={(v) => setFilter(() => setEntityType(v))}
+                    label={t('auditLog.entityType')}
+                  >
+                    <option value="all">{t('auditLog.all')}</option>
+                    {ENTITY_TYPES.map((et) => (
+                      <option key={et} value={et}>{t(`auditLog.entityTypes.${et}`)}</option>
+                    ))}
+                  </AdornedSelect>
+                </div>
+              </section>
             </div>
           </div>
         </div>
-      )}
+      </div>
 
       {/* ── Results table ───────────────────────────────────────────── */}
       {loading ? (
@@ -428,6 +615,41 @@ export default function AuditLog() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Section eyebrow inside the filter panel. The controls below carry the glyphs. */
+function FieldLabel({ children }: { children: ReactNode }) {
+  return (
+    <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+      {children}
+    </div>
+  );
+}
+
+/** Native select carrying the same glyph vocabulary as the table rows. */
+function AdornedSelect({
+  icon: Icon, value, onChange, label, children,
+}: {
+  icon: LucideIcon;
+  value: string;
+  onChange: (value: string) => void;
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="relative">
+      <Icon className="absolute top-1/2 -translate-y-1/2 start-3 w-4 h-4 text-gray-400 pointer-events-none" />
+      <select
+        value={value}
+        aria-label={label}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full appearance-none rounded-lg border border-gray-200 bg-white ps-9 pe-9 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+      >
+        {children}
+      </select>
+      <ChevronDown className="absolute top-1/2 -translate-y-1/2 end-3 w-4 h-4 text-gray-400 pointer-events-none" />
     </div>
   );
 }
